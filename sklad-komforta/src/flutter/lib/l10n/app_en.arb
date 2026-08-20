@@ -1,0 +1,7 @@
+{
+  "@@locale": "en",
+  "appTitle": "Sklad Komforta",
+  "bootstrapReady": "The technical client shell is ready. Business screens will be implemented after design approval.",
+  "environment": "Environment",
+  "apiAddress": "API"
+}

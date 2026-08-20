@@ -1,0 +1,13 @@
+.git
+.gitignore
+.dotnet-home
+.env
+**/bin
+**/obj
+**/.dart_tool
+**/build
+docs
+scripts
+tests
+src/flutter
+

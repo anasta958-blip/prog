@@ -1,0 +1,14 @@
+.dotnet-home/
+.env
+**/bin/
+**/obj/
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/build/
+src/flutter/android/local.properties
+src/flutter/ios/Flutter/ephemeral/
+src/flutter/windows/flutter/ephemeral/
+.idea/
+.vscode/
+TestResults/
