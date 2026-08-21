@@ -6,6 +6,7 @@ using Microsoft.IdentityModel.Tokens;
 using SkladKomforta.Api.Middleware;
 using SkladKomforta.Api.Identity;
 using SkladKomforta.Api.Authorization;
+using SkladKomforta.Api.Onboarding;
 using SkladKomforta.Application.Contracts;
 using SkladKomforta.Application.Identity;
 using SkladKomforta.Infrastructure;
@@ -103,6 +104,7 @@ app.MapGet("/api/v1", () => ApiResponse.Success<object>(new
     version = "v1",
 }));
 app.MapIdentityEndpoints();
+app.MapOnboardingEndpoints();
 app.MapRoleEndpoints();
 app.MapHealthChecks("/health/live", new HealthCheckOptions
 {

@@ -17,6 +17,7 @@ using SkladKomforta.Infrastructure.Files;
 using SkladKomforta.Infrastructure.Health;
 using SkladKomforta.Infrastructure.Identity;
 using SkladKomforta.Infrastructure.Persistence;
+using SkladKomforta.Infrastructure.Onboarding;
 using SkladKomforta.Infrastructure.Tenancy;
 
 namespace SkladKomforta.Infrastructure;
@@ -128,6 +129,7 @@ public static class DependencyInjection
         services.AddScoped<SkladKomforta.Application.Identity.ITenantAccessValidator, PostgresTenantAccessValidator>();
         services.AddScoped<SkladKomforta.Application.Authorization.ITenantPermissionEvaluator, PostgresTenantPermissionEvaluator>();
         services.AddScoped<SkladKomforta.Application.Authorization.IRoleAdministrationService, PostgresRoleAdministrationService>();
+        services.AddScoped<SkladKomforta.Application.Onboarding.IOrganizationOnboardingService, PostgresOrganizationOnboardingService>();
 
         return services;
     }

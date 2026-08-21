@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
+import 'package:sklad_komforta_app/features/onboarding/organization_onboarding_page.dart';
 
 /// Владеет auth controller и запускает восстановление сессии один раз.
 final class AuthFlowPage extends StatefulWidget {
@@ -51,6 +52,9 @@ final class _AuthShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (controller.stage == AuthStage.organization) {
+      return OrganizationOnboardingPage(controller: controller);
+    }
     final content = _StageContent(controller: controller);
     return Scaffold(
       body: DecoratedBox(
@@ -186,7 +190,9 @@ final class _StageContent extends StatelessWidget {
         AuthStage.setupTotp ||
         AuthStage.verifyTotp => _TotpForm(controller: controller),
         AuthStage.recoveryCodes => _RecoveryCodes(controller: controller),
-        AuthStage.organization => _OrganizationForm(controller: controller),
+        AuthStage.organization => OrganizationOnboardingPage(
+          controller: controller,
+        ),
         AuthStage.ready => _SessionsView(controller: controller),
       },
     ),
@@ -522,50 +528,6 @@ final class _RecoveryCodes extends StatelessWidget {
         ],
       ),
     ),
-  );
-}
-
-final class _OrganizationForm extends StatefulWidget {
-  const _OrganizationForm({required this.controller});
-  final AuthController controller;
-  @override
-  State<_OrganizationForm> createState() => _OrganizationFormState();
-}
-
-final class _OrganizationFormState extends _FormState<_OrganizationForm> {
-  final name = TextEditingController();
-
-  void submit() {
-    if (!widget.controller.busy) {
-      widget.controller.createOrganization(name.text);
-    }
-  }
-
-  @override
-  void dispose() {
-    name.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => card(
-    title: 'Новая организация',
-    subtitle:
-        'Создаётся отдельная изолированная область данных. Название можно будет изменить в настройках.',
-    error: widget.controller.error,
-    children: [
-      field(
-        name,
-        'Название организации',
-        textInputAction: TextInputAction.done,
-        onSubmitted: (_) => submit(),
-      ),
-      const SizedBox(height: 24),
-      FilledButton(
-        onPressed: widget.controller.busy ? null : submit,
-        child: const Text('Создать организацию'),
-      ),
-    ],
   );
 }
 

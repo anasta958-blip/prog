@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
@@ -128,9 +129,7 @@ internal sealed partial class PostgresIdentityService : IIdentityService
         }
         else
         {
-            secret = IdentitySecurity.UnprotectSecret(
-                Convert.FromBase64String(challenge.ProtectedTotpSecret),
-                _totpEncryptionKey);
+            secret = UnprotectTotpSecret(Convert.FromBase64String(challenge.ProtectedTotpSecret));
         }
 
         var base32 = IdentitySecurity.ToBase32(secret);
@@ -152,7 +151,7 @@ internal sealed partial class PostgresIdentityService : IIdentityService
         }
 
         var protectedSecret = Convert.FromBase64String(challenge.ProtectedTotpSecret);
-        var secret = IdentitySecurity.UnprotectSecret(protectedSecret, _totpEncryptionKey);
+        var secret = UnprotectTotpSecret(protectedSecret);
         if (!TotpCode.Verify(secret, request.Code, DateTimeOffset.UtcNow))
         {
             throw Failure(401, "totp_invalid", "Неверный или устаревший код подтверждения.");
@@ -176,7 +175,7 @@ internal sealed partial class PostgresIdentityService : IIdentityService
         var protectedSecret = await ReadTotpSecretAsync(challenge.UserId, cancellationToken);
         if (protectedSecret is null ||
             !TotpCode.Verify(
-                IdentitySecurity.UnprotectSecret(protectedSecret, _totpEncryptionKey),
+                UnprotectTotpSecret(protectedSecret),
                 request.Code,
                 DateTimeOffset.UtcNow))
         {
@@ -238,6 +237,26 @@ internal sealed partial class PostgresIdentityService : IIdentityService
 
     /// <summary>Возвращает прикладную ошибку без утечки внутренних исключений.</summary>
     private static IdentityException Failure(int status, string code, string message) => new(status, code, message);
+
+    /// <summary>
+    /// Расшифровывает TOTP-секрет и не позволяет ошибке ключа превращаться в HTTP 500.
+    /// Восстановить секрет без исходного ключа невозможно, поэтому требуется
+    /// контролируемый сброс 2FA администратором и повторная привязка приложения.
+    /// </summary>
+    private byte[] UnprotectTotpSecret(ReadOnlySpan<byte> protectedSecret)
+    {
+        try
+        {
+            return IdentitySecurity.UnprotectSecret(protectedSecret, _totpEncryptionKey);
+        }
+        catch (CryptographicException)
+        {
+            throw Failure(
+                409,
+                "totp_secret_unavailable",
+                "Двухфакторную защиту необходимо настроить заново. Обратитесь к администратору.");
+        }
+    }
 
     /// <summary>Обрезает необязательное клиентское значение до безопасной длины.</summary>
     private static string? NormalizeOptional(string? value, int maximumLength)

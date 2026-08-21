@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/core/security/token_store.dart';
 import 'package:sklad_komforta_app/features/auth/auth_api.dart';
+import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
 
 /// Экраны последовательного auth/onboarding сценария.
 enum AuthStage {
@@ -33,6 +34,8 @@ final class AuthController extends ChangeNotifier {
   List<String> recoveryCodes = const [];
   List<Map<String, dynamic>> sessions = const [];
   bool busy = false;
+  bool organizationProvisioned = false;
+  OrganizationOnboardingDraft? onboardingDraft;
 
   /// Восстанавливает нативную сессию из secure storage или Web-сессию из cookie.
   Future<void> initialize() async {
@@ -42,10 +45,13 @@ final class AuthController extends ChangeNotifier {
           await _api.post('/auth/refresh', {'refreshToken': refresh ?? ''})
               as Map<String, dynamic>;
       await _acceptTokens(data);
-      stage = data['organizationId'] == null
-          ? AuthStage.organization
-          : AuthStage.ready;
-      if (stage == AuthStage.ready) await loadSessions();
+      organizationProvisioned = data['organizationId'] != null;
+      if (organizationProvisioned) {
+        await loadOnboarding();
+      } else {
+        onboardingDraft = OrganizationOnboardingDraft.initial();
+        stage = AuthStage.organization;
+      }
     } catch (_) {
       await _tokens.clear();
       stage = AuthStage.login;
@@ -101,6 +107,7 @@ final class AuthController extends ChangeNotifier {
             as Map<String, dynamic>;
     final tokens = data['tokens'] as Map<String, dynamic>;
     await _acceptTokens(tokens);
+    organizationProvisioned = tokens['organizationId'] != null;
     recoveryCodes =
         (data['recoveryCodes'] as List<dynamic>?)?.cast<String>() ?? const [];
     if (recoveryCodes.isNotEmpty) {
@@ -123,6 +130,7 @@ final class AuthController extends ChangeNotifier {
             as Map<String, dynamic>;
     final tokens = data['tokens'] as Map<String, dynamic>;
     await _acceptTokens(tokens);
+    organizationProvisioned = tokens['organizationId'] != null;
     stage = data['onboardingRequired'] == true
         ? AuthStage.organization
         : AuthStage.ready;
@@ -130,20 +138,82 @@ final class AuthController extends ChangeNotifier {
   });
 
   /// Продолжает после однократного показа recovery-кодов.
-  void continueAfterRecoveryCodes() {
-    recoveryCodes = const [];
-    stage = accessToken == null ? AuthStage.login : AuthStage.organization;
-    notifyListeners();
+  Future<void> continueAfterRecoveryCodes() async {
+    if (accessToken == null) {
+      recoveryCodes = const [];
+      stage = AuthStage.login;
+      notifyListeners();
+      return;
+    }
+    if (organizationProvisioned) {
+      await _run(loadOnboarding);
+      if (error == null) {
+        recoveryCodes = const [];
+        notifyListeners();
+      }
+    } else {
+      recoveryCodes = const [];
+      onboardingDraft = OrganizationOnboardingDraft.initial();
+      stage = AuthStage.organization;
+      notifyListeners();
+    }
   }
 
-  /// Создаёт первую организацию и заменяет access token на tenant-aware JWT.
-  Future<void> createOrganization(String name) => _run(() async {
+  /// Сохраняет текущий шаг; при первом вызове предварительно создаёт tenant.
+  Future<void> saveOnboardingStep(OrganizationOnboardingDraft draft) =>
+      _run(() async {
+        var draftToSave = draft;
+        if (!organizationProvisioned) {
+          final company = draft.company;
+          final data =
+              await _api.post('/identity/organization', {
+                    'name': draft.company.organizationName,
+                  }, accessToken: accessToken)
+                  as Map<String, dynamic>;
+          accessToken = data['accessToken'] as String;
+          organizationProvisioned = true;
+          final initialState =
+              await _api.get('/onboarding/', accessToken!)
+                  as Map<String, dynamic>;
+          draftToSave =
+              OrganizationOnboardingDraft.fromJson(
+                  initialState['draft'] as Map<String, dynamic>,
+                )
+                ..company = company
+                ..currentStep = draft.currentStep;
+        }
+        final data =
+            await _api.post(
+                  '/onboarding/draft',
+                  draftToSave.toJson(),
+                  accessToken: accessToken,
+                )
+                as Map<String, dynamic>;
+        onboardingDraft = OrganizationOnboardingDraft.fromJson(
+          data['draft'] as Map<String, dynamic>,
+        );
+        stage = AuthStage.organization;
+      });
+
+  /// Загружает серверный прогресс и открывает рабочее приложение после активации.
+  Future<void> loadOnboarding() async {
+    if (accessToken == null) return;
     final data =
-        await _api.post('/identity/organization', {
-              'name': name,
-            }, accessToken: accessToken)
-            as Map<String, dynamic>;
-    accessToken = data['accessToken'] as String;
+        await _api.get('/onboarding/', accessToken!) as Map<String, dynamic>;
+    onboardingDraft = OrganizationOnboardingDraft.fromJson(
+      data['draft'] as Map<String, dynamic>,
+    );
+    if (data['isCompleted'] == true) {
+      stage = AuthStage.ready;
+      await loadSessions();
+    } else {
+      stage = AuthStage.organization;
+    }
+  }
+
+  /// Материализует проверенный черновик и завершает первичную настройку.
+  Future<void> activateOrganization() => _run(() async {
+    await _api.post('/onboarding/activate', const {}, accessToken: accessToken);
     stage = AuthStage.ready;
     await loadSessions();
   });

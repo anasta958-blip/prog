@@ -51,6 +51,14 @@ public sealed class ApiBootstrapTests : IClassFixture<ApiFactory>
     }
 
     [Fact]
+    public async Task OnboardingEndpointRequiresAccessToken()
+    {
+        var response = await _client.GetAsync("/api/v1/onboarding/");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
     public async Task LogoutEndpointRequiresAccessToken()
     {
         var response = await _client.PostAsJsonAsync("/api/v1/identity/logout", new { });

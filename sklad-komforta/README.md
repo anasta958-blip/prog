@@ -38,6 +38,7 @@
 - [Сценарий авторизации и API](docs/iteration-03/authentication.md)
 - [Tenant-роли и разрешения](docs/iteration-03/authorization.md)
 - [Flutter-клиент](docs/iteration-03/flutter-client.md)
+- [Первичная настройка организации](docs/iteration-03/organization-onboarding.md)
 - [Проверки итерации](docs/iteration-03/verification.md)
 - [Согласованные варианты авторизации](docs/iteration-03/authentication-design-options.png)
 - [Правила документирования](docs/documentation-rules.md)

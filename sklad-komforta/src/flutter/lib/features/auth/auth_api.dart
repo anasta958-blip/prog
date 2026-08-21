@@ -77,8 +77,21 @@ final class AuthApi implements AuthGateway {
   }
 
   dynamic _unwrap(http.Response response) {
-    final envelope =
-        jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+    final decodedBody = utf8.decode(response.bodyBytes);
+    final Map<String, dynamic> envelope;
+    try {
+      envelope = jsonDecode(decodedBody) as Map<String, dynamic>;
+    } on FormatException {
+      throw AuthApiException(
+        'invalid_server_response',
+        'Сервер вернул некорректный ответ (HTTP ${response.statusCode}).',
+      );
+    } on TypeError {
+      throw AuthApiException(
+        'invalid_server_response',
+        'Сервер вернул ответ неизвестного формата (HTTP ${response.statusCode}).',
+      );
+    }
     if (envelope['ok'] != true) {
       final error = envelope['error'] as Map<String, dynamic>?;
       throw AuthApiException(

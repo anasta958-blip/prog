@@ -127,6 +127,36 @@ void main() {
 
     controller.dispose();
   });
+
+  testWidgets('onboarding использует выбранный семишаговый вариант 2', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    final controller = AuthController(
+      config,
+      api: _OfflineAuthGateway(),
+      tokens: _MemoryTokenRepository(),
+    );
+    controller.stage = AuthStage.organization;
+
+    await tester.pumpWidget(
+      SkladKomfortaApp(
+        config: config,
+        authController: controller,
+        initializeAuthController: false,
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Создание организации'), findsOneWidget);
+    expect(find.text('1. Компания'), findsWidgets);
+    expect(find.text('Предварительный просмотр'), findsOneWidget);
+    expect(find.text('Сохранить и продолжить'), findsOneWidget);
+
+    controller.dispose();
+  });
 }
 
 /// Тестовый transport без сети: восстановление сессии всегда завершается отказом.
