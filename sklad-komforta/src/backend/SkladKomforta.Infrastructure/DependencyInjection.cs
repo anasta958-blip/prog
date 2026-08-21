@@ -11,9 +11,11 @@ using SkladKomforta.Application.Abstractions.Files;
 using SkladKomforta.Application.Abstractions.Persistence;
 using SkladKomforta.Application.Abstractions.Tenancy;
 using SkladKomforta.Infrastructure.Caching;
+using SkladKomforta.Infrastructure.Authorization;
 using SkladKomforta.Infrastructure.Configuration;
 using SkladKomforta.Infrastructure.Files;
 using SkladKomforta.Infrastructure.Health;
+using SkladKomforta.Infrastructure.Identity;
 using SkladKomforta.Infrastructure.Persistence;
 using SkladKomforta.Infrastructure.Tenancy;
 
@@ -52,12 +54,6 @@ public static class DependencyInjection
             .Bind(configuration.GetSection(ObjectStorageOptions.SectionName))
             .Validate(options => !string.IsNullOrWhiteSpace(options.Bucket),
                 "ObjectStorage:Bucket is required.")
-            .ValidateOnStart();
-
-        services.AddOptions<JwtOptions>()
-            .Bind(configuration.GetSection(JwtOptions.SectionName))
-            .Validate(options => options.SigningKey.Length >= 32,
-                "Jwt:SigningKey must contain at least 32 characters.")
             .ValidateOnStart();
 
         services.AddSingleton(provider =>
@@ -100,5 +96,52 @@ public static class DependencyInjection
             .AddCheck<ObjectStorageHealthCheck>("object-storage", tags: ["ready"]);
 
         return services;
+    }
+
+    /// <summary>
+    /// Подключает Identity и tenant-авторизацию для HTTP API. Регистрация отделена
+    /// от общей инфраструктуры, потому что фоновые процессы не выпускают JWT и не
+    /// должны зависеть от API-реализации <c>IAccessTokenIssuer</c>.
+    /// </summary>
+    /// <param name="services">Коллекция DI API.</param>
+    /// <param name="configuration">Конфигурация JWT, TOTP и bootstrap-доступа.</param>
+    /// <returns>Исходная коллекция для последовательной регистрации сервисов.</returns>
+    public static IServiceCollection AddIdentityInfrastructure(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        services.AddOptions<JwtOptions>()
+            .Bind(configuration.GetSection(JwtOptions.SectionName))
+            .Validate(options => options.SigningKey.Length >= 32,
+                "Jwt:SigningKey must contain at least 32 characters.")
+            .ValidateOnStart();
+
+        services.AddOptions<SecurityOptions>()
+            .Bind(configuration.GetSection(SecurityOptions.SectionName))
+            .Validate(options => TryDecode32ByteKey(options.TotpEncryptionKey),
+                "Security:TotpEncryptionKey must be a Base64-encoded 32-byte key.")
+            .Validate(options => options.BootstrapToken.Length >= 24,
+                "Security:BootstrapToken must contain at least 24 characters.")
+            .ValidateOnStart();
+
+        services.AddScoped<SkladKomforta.Application.Identity.IIdentityService, PostgresIdentityService>();
+        services.AddScoped<SkladKomforta.Application.Identity.ITenantAccessValidator, PostgresTenantAccessValidator>();
+        services.AddScoped<SkladKomforta.Application.Authorization.ITenantPermissionEvaluator, PostgresTenantPermissionEvaluator>();
+        services.AddScoped<SkladKomforta.Application.Authorization.IRoleAdministrationService, PostgresRoleAdministrationService>();
+
+        return services;
+    }
+
+    /// <summary>Проверяет AES-ключ без выброса FormatException во время options validation.</summary>
+    private static bool TryDecode32ByteKey(string value)
+    {
+        try
+        {
+            return Convert.FromBase64String(value).Length == 32;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
     }
 }

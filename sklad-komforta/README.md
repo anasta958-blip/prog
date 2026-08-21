@@ -8,6 +8,8 @@
 
 - Итерация 1: аудит действующей системы, базы и бизнес-правил.
 - Итерация 2: технический каркас ASP.NET Core 10, Flutter для Windows, macOS, Web, Android и iOS, PostgreSQL, Redis, MinIO и Mailpit.
+- Итерация 3: JWT/TOTP, refresh-сессии устройств, onboarding директора,
+  schema-per-tenant и настраиваемые роли организации.
 - Бизнес-модули ещё не переносятся. Их экраны будут реализованы только после подготовки и согласования трёх вариантов дизайна для каждого экрана.
 
 ## Документы первой итерации
@@ -29,6 +31,15 @@
 - [Запуск разработки](docs/iteration-02/development.md)
 - [Проверки](docs/iteration-02/verification.md)
 - [Состав компонентов](docs/iteration-02/components.md)
+
+## Документы третьей итерации
+
+- [Авторизация и multi-tenant](docs/iteration-03/README.md)
+- [Сценарий авторизации и API](docs/iteration-03/authentication.md)
+- [Tenant-роли и разрешения](docs/iteration-03/authorization.md)
+- [Flutter-клиент](docs/iteration-03/flutter-client.md)
+- [Проверки итерации](docs/iteration-03/verification.md)
+- [Согласованные варианты авторизации](docs/iteration-03/authentication-design-options.png)
 - [Правила документирования](docs/documentation-rules.md)
 
 ## Инструменты аудита

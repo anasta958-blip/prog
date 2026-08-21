@@ -7,7 +7,9 @@ plugins {
 
 android {
     namespace = "com.skladkomforta.sklad_komforta_app"
-    compileSdk = flutter.compileSdkVersion
+    // flutter_secure_storage 11 требует Android API 37 только для компиляции.
+    // minSdk не повышается, поэтому поддержка старых устройств сохраняется.
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

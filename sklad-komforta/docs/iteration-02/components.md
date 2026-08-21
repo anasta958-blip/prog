@@ -45,7 +45,11 @@
 - `PostgresConnectionFactory` использует общий Npgsql pool и задаёт `search_path` для tenant-соединения.
 - `RedisApplicationCache` использует потокобезопасный singleton multiplexer.
 - `S3ObjectStorage` выполняет операции внутренним S3 client, а ссылки подписывает отдельным client с публичным endpoint. `NormalizeObjectKey` запрещает пустой ключ и `..`.
-- `DependencyInjection.AddInfrastructure` проверяет конфигурацию при старте и регистрирует корректные lifetimes adapter-ов.
+- `DependencyInjection.AddInfrastructure` проверяет общую конфигурацию PostgreSQL,
+  Redis и S3 и регистрирует adapter-ы, необходимые API и Worker.
+- `DependencyInjection.AddIdentityInfrastructure` отдельно регистрирует JWT/TOTP,
+  Identity и tenant-авторизацию только для API. Worker не получает API-секреты и
+  не зависит от реализации `IAccessTokenIssuer`.
 
 ### Health
 
@@ -59,7 +63,7 @@
 
 ## Worker
 
-`Worker.ExecuteAsync` поддерживает корректный lifetime фонового процесса до добавления отдельных обработчиков. Логи старта и остановки созданы через source-generated `LoggerMessage`, чтобы не выделять массив параметров при каждом сообщении. Финальный Docker-образ использует ASP.NET Core runtime, поскольку общий Infrastructure-слой содержит health/options типы из `Microsoft.AspNetCore.App`.
+`Worker.ExecuteAsync` поддерживает корректный lifetime фонового процесса до добавления отдельных обработчиков. Логи старта и остановки созданы через source-generated `LoggerMessage`, чтобы не выделять массив параметров при каждом сообщении. Worker подключает только общую инфраструктуру и не регистрирует Identity-сервисы API. Финальный Docker-образ использует ASP.NET Core runtime, поскольку общий Infrastructure-слой содержит health/options типы из `Microsoft.AspNetCore.App`.
 
 ## PostgreSQL
 

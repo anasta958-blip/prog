@@ -1,5 +1,6 @@
 .dotnet-home/
 .env
+.env.production
 **/bin/
 **/obj/
 **/.dart_tool/

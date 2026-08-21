@@ -10,7 +10,9 @@ services:
     volumes:
       # PostgreSQL 18 хранит кластеры в version-specific подкаталоге этого пути.
       - postgres-data:/var/lib/postgresql
-      - ./migrations/public/0001_bootstrap.sql:/docker-entrypoint-initdb.d/0001_bootstrap.sql:ro
+      # Fresh development databases apply every numbered public migration in order.
+      # Existing volumes are never rewritten by the PostgreSQL entrypoint.
+      - ./migrations/public:/docker-entrypoint-initdb.d:ro
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:
@@ -91,6 +93,9 @@ services:
       Jwt__Issuer: sklad-komforta
       Jwt__Audience: sklad-komforta-clients
       Jwt__SigningKey: ${JWT_SIGNING_KEY}
+      Security__TotpEncryptionKey: ${TOTP_ENCRYPTION_KEY}
+      Security__BootstrapToken: ${BOOTSTRAP_TOKEN}
+      Cors__AllowedOrigins__0: ${FLUTTER_WEB_ORIGIN:-http://localhost:3000}
     ports:
       - "${API_PORT:-8080}:8080"
     depends_on:
@@ -117,9 +122,6 @@ services:
       ObjectStorage__AccessKey: ${MINIO_ROOT_USER}
       ObjectStorage__SecretKey: ${MINIO_ROOT_PASSWORD}
       ObjectStorage__ForcePathStyle: "true"
-      Jwt__Issuer: sklad-komforta
-      Jwt__Audience: sklad-komforta-clients
-      Jwt__SigningKey: ${JWT_SIGNING_KEY}
     depends_on:
       postgres:
         condition: service_healthy
