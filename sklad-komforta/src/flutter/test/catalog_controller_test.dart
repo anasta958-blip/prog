@@ -50,6 +50,56 @@ void main() {
     auth.dispose();
   });
 
+  test('повторная загрузка подхватывает назначенный справочник', () async {
+    final catalogApi = _MemoryCatalogGateway();
+    final auth = _authorizedController(config);
+    final controller = CatalogController(config, auth, api: catalogApi);
+    await controller.initialize();
+
+    catalogApi.configuration = CatalogConfiguration(
+      categories: [
+        CatalogCategory(
+          id: _category.id,
+          name: _category.name,
+          sortOrder: _category.sortOrder,
+          fields: [
+            ..._category.fields,
+            const CatalogField(
+              code: 'unit',
+              label: 'Единица измерения',
+              fieldType: 'dictionary',
+              isVisible: true,
+              isRequired: false,
+              sortOrder: 3,
+              dictionaryCode: 'units',
+            ),
+          ],
+          sections: const [],
+        ),
+      ],
+      dictionaries: const [
+        CatalogDictionary(
+          id: '33333333-3333-3333-3333-333333333333',
+          code: 'units',
+          name: 'Единицы измерения',
+          sortOrder: 0,
+          items: [],
+        ),
+      ],
+    );
+
+    await controller.reloadConfiguration();
+
+    expect(
+      controller.configuration!.categories.single.fields.last.dictionaryCode,
+      'units',
+    );
+    expect(catalogApi.configurationRequests, 2);
+
+    controller.dispose();
+    auth.dispose();
+  });
+
   test(
     'создание сохраняет карточку и обновляет только страницу данных',
     () async {
@@ -139,14 +189,21 @@ CatalogItem _item({
 
 final class _MemoryCatalogGateway implements CatalogGateway {
   final items = <CatalogItem>[_item()];
+  CatalogConfiguration configuration = CatalogConfiguration(
+    categories: [_category],
+    dictionaries: const [],
+  );
+  int configurationRequests = 0;
   int? lastPage;
   int? lastPageSize;
   String? lastSearch;
   CatalogItemDraft? createdDraft;
 
   @override
-  Future<CatalogConfiguration> getConfiguration(String accessToken) async =>
-      CatalogConfiguration(categories: [_category], dictionaries: const []);
+  Future<CatalogConfiguration> getConfiguration(String accessToken) async {
+    configurationRequests++;
+    return configuration;
+  }
 
   @override
   Future<CatalogItemPage> getItems({

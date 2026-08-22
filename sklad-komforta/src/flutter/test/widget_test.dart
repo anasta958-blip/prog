@@ -269,16 +269,16 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Название канбана'), findsOneWidget);
-    expect(find.text('Код'), findsNothing);
-
-    await tester.tap(find.bySemanticsLabel('Свернуть канбан'));
-    await tester.pumpAndSettle();
     expect(find.text('Название канбана'), findsNothing);
+    expect(find.text('Код'), findsNothing);
 
     await tester.tap(find.bySemanticsLabel('Развернуть канбан'));
     await tester.pumpAndSettle();
     expect(find.text('Название канбана'), findsOneWidget);
+
+    await tester.tap(find.bySemanticsLabel('Свернуть канбан'));
+    await tester.pumpAndSettle();
+    expect(find.text('Название канбана'), findsNothing);
 
     controller.dispose();
   });
@@ -319,9 +319,6 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Категория'), findsOneWidget);
-      await tester.tap(find.bySemanticsLabel('Свернуть категорию'));
-      await tester.pumpAndSettle();
       expect(find.text('Категория'), findsNothing);
       expect(
         category.sections.single.groups.single.name,
@@ -389,6 +386,13 @@ void main() {
 
     expect(find.text('Поля карточек категорий'), findsOneWidget);
     expect(find.text('Поля в канбанах'), findsOneWidget);
+    expect(find.bySemanticsLabel('Развернуть поля категории'), findsOneWidget);
+    expect(find.bySemanticsLabel('Развернуть поля канбана'), findsOneWidget);
+
+    await tester.tap(find.bySemanticsLabel('Развернуть поля категории'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.bySemanticsLabel('Развернуть поля канбана'));
+    await tester.pumpAndSettle();
     await tester.ensureVisible(
       find.text('Использовать категорию в этом канбане'),
     );
@@ -489,6 +493,8 @@ void main() {
 
     expect(find.text('Редактирование товара'), findsOneWidget);
     expect(find.byKey(const Key('catalog-save')), findsOneWidget);
+    expect(find.text('Справочник не назначен'), findsOneWidget);
+    expect(find.text('шт'), findsNothing);
 
     catalog.dispose();
     auth.dispose();
@@ -526,11 +532,33 @@ final _widgetCatalogConfiguration = CatalogConfiguration(
           isRequired: true,
           sortOrder: 2,
         ),
+        CatalogField(
+          code: 'unit',
+          label: 'Единица измерения',
+          fieldType: 'dictionary',
+          isVisible: true,
+          isRequired: false,
+          sortOrder: 3,
+        ),
       ],
       sections: const [],
     ),
   ],
-  dictionaries: const [],
+  dictionaries: const [
+    CatalogDictionary(
+      id: '33333333-3333-3333-3333-333333333333',
+      code: 'units',
+      name: 'Единицы измерения',
+      sortOrder: 0,
+      items: [
+        CatalogDictionaryItem(
+          id: '44444444-4444-4444-4444-444444444444',
+          value: 'шт',
+          sortOrder: 0,
+        ),
+      ],
+    ),
+  ],
 );
 
 final _widgetCatalogItem = CatalogItem(

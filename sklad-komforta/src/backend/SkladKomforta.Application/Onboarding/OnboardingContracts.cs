@@ -35,7 +35,11 @@ public sealed record WorkflowDraft(
 public sealed record CatalogGroupDraft(string Name);
 
 /// <summary>Выбранное системное поле карточки товаров конкретной категории.</summary>
-public sealed record CatalogFieldDraft(string FieldCode, bool IsVisible, bool IsRequired);
+public sealed record CatalogFieldDraft(
+    string FieldCode,
+    bool IsVisible,
+    bool IsRequired,
+    string? DictionaryCode = null);
 
 /// <summary>Раздел каталога и его группы.</summary>
 public sealed record CatalogSectionDraft(string Name, IReadOnlyList<CatalogGroupDraft> Groups);
@@ -64,7 +68,8 @@ public sealed record EntityFieldDraft(
     string Label,
     string FieldType,
     bool IsVisible,
-    bool IsRequired);
+    bool IsRequired,
+    string? DictionaryCode = null);
 
 /// <summary>Настраиваемая роль без системного полного доступа директора.</summary>
 public sealed record OnboardingRoleDraft(string Name, IReadOnlyList<string> PermissionCodes);

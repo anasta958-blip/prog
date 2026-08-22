@@ -60,6 +60,7 @@ public static class OnboardingValidator
 
         ValidateWorkflowCategories(draft.Workflows, draft.Categories);
         ValidateDependencies(draft.Categories, draft.Dependencies ?? []);
+        ValidateDictionaryBindings(draft);
 
         ValidateUnique(draft.Fields.Select(item => $"{item.ContextCode}:{item.FieldCode}"), "Коды полей");
         foreach (var field in draft.Fields)
@@ -91,6 +92,35 @@ public static class OnboardingValidator
                  item.Categories.Any(category => category.FieldCodes.Count == 0)) ||
              draft.Dictionaries.Count == 0))
             Fail("onboarding_incomplete", "Заполните канбаны, каталог, поля и справочники перед активацией.");
+    }
+
+    /// <summary>Разрешает назначать существующий справочник только полю типа dictionary.</summary>
+    private static void ValidateDictionaryBindings(OrganizationOnboardingDraft draft)
+    {
+        var dictionaryCodes = draft.Dictionaries
+            .Select(item => item.Code.Trim())
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var field in draft.Categories.SelectMany(item => item.Fields))
+            ValidateDictionaryBinding(field.FieldCode, field.DictionaryCode, dictionaryCodes);
+        foreach (var field in draft.Fields)
+            ValidateDictionaryBinding(field.FieldCode, field.DictionaryCode, dictionaryCodes);
+    }
+
+    private static void ValidateDictionaryBinding(
+        string fieldCode,
+        string? dictionaryCode,
+        HashSet<string> dictionaryCodes)
+    {
+        if (string.IsNullOrWhiteSpace(dictionaryCode)) return;
+        var definition = OnboardingFieldRegistry.Get(fieldCode);
+        if (fieldCode == "group")
+            Fail(
+                "onboarding_dictionary_binding_invalid",
+                "Поле «Группа» использует группы выбранного раздела и не требует справочника.");
+        if (definition.FieldType != "dictionary")
+            Fail("onboarding_dictionary_binding_invalid", $"Поле «{definition.Label}» не поддерживает справочник.");
+        if (!dictionaryCodes.Contains(dictionaryCode.Trim()))
+            Fail("onboarding_dictionary_binding_invalid", $"Для поля «{definition.Label}» выбран неизвестный справочник.");
     }
 
     /// <summary>Проверяет реквизиты одинаково при onboarding и последующем редактировании.</summary>

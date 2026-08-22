@@ -8,10 +8,30 @@ import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
 
 /// Полноэкранный восьмишаговый мастер создания изолированной организации.
 final class OrganizationOnboardingPage extends StatefulWidget {
-  const OrganizationOnboardingPage({required this.controller, super.key});
+  const OrganizationOnboardingPage({
+    required this.controller,
+    this.settingsDraft,
+    this.settingsBusy = false,
+    this.settingsError,
+    this.onSettingsSave,
+    super.key,
+  });
 
   /// Общий auth controller, владеющий tenant JWT и сетевым состоянием.
   final AuthController controller;
+
+  /// Полная актуальная конфигурация для повторного редактирования организации.
+  final OrganizationOnboardingDraft? settingsDraft;
+
+  /// Состояние сохранения рабочего раздела «Компания».
+  final bool settingsBusy;
+
+  /// Ошибка сохранения или загрузки полной конфигурации.
+  final String? settingsError;
+
+  /// Сохраняет изменённую конфигурацию без повторной активации организации.
+  final Future<bool> Function(OrganizationOnboardingDraft draft)?
+  onSettingsSave;
 
   @override
   State<OrganizationOnboardingPage> createState() =>
@@ -57,22 +77,84 @@ final class _OrganizationOnboardingPageState
   final Set<String> _collapsedCategoryIds = <String>{};
   final Set<String> _collapsedFieldCategoryIds = <String>{};
   final Set<String> _collapsedWorkflowFieldCodes = <String>{};
+  final Set<CategoryDependencyDraft> _collapsedDependencies =
+      <CategoryDependencyDraft>{};
+  final Set<OnboardingRoleDraft> _collapsedRoles = <OnboardingRoleDraft>{};
+  final Set<DictionaryDraft> _collapsedDictionaries = <DictionaryDraft>{};
   final Set<CatalogSectionDraft> _expandedCatalogSections =
       <CatalogSectionDraft>{};
+
+  bool get _settingsMode => widget.onSettingsSave != null;
+  bool get _busy =>
+      _settingsMode ? widget.settingsBusy : widget.controller.busy;
+  String? get _error =>
+      _settingsMode ? widget.settingsError : widget.controller.error;
 
   @override
   void initState() {
     super.initState();
     draft =
+        widget.settingsDraft ??
         widget.controller.onboardingDraft ??
         OrganizationOnboardingDraft.initial();
-    step = draft.currentStep.clamp(1, 8) - 1;
+    _collapseConfiguredBlocks();
+    step = _settingsMode ? 0 : draft.currentStep.clamp(1, 8) - 1;
+  }
+
+  @override
+  void didUpdateWidget(covariant OrganizationOnboardingPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_settingsMode &&
+        widget.settingsDraft != null &&
+        !identical(oldWidget.settingsDraft, widget.settingsDraft) &&
+        !widget.settingsBusy) {
+      draft = widget.settingsDraft!;
+      _collapseConfiguredBlocks();
+    }
+  }
+
+  /// Сворачивает уже настроенные составные блоки при первом показе конфигурации.
+  /// Только что добавленные пользователем блоки раскрываются своими обработчиками.
+  void _collapseConfiguredBlocks() {
+    _collapsedWorkflowCodes
+      ..clear()
+      ..addAll(draft.workflows.map((workflow) => workflow.code));
+    _collapsedCategoryIds
+      ..clear()
+      ..addAll(draft.categories.map((category) => category.clientId));
+    _collapsedFieldCategoryIds
+      ..clear()
+      ..addAll(draft.categories.map((category) => category.clientId));
+    _collapsedWorkflowFieldCodes
+      ..clear()
+      ..addAll(draft.workflows.map((workflow) => workflow.code));
+    _collapsedDependencies
+      ..clear()
+      ..addAll(draft.dependencies);
+    _collapsedRoles
+      ..clear()
+      ..addAll(draft.roles);
+    _collapsedDictionaries
+      ..clear()
+      ..addAll(draft.dictionaries);
+    _expandedCatalogSections.clear();
+  }
+
+  void _toggleCollapsed<T>(Set<T> collapsedItems, T item) {
+    if (!collapsedItems.add(item)) collapsedItems.remove(item);
   }
 
   /// Сохраняет агрегат целиком, чтобы сервер мог проверить межшаговые связи.
   Future<void> _saveAndContinue() async {
     if (step == 0 && !(_companyFormKey.currentState?.validate() ?? false)) {
       _showMessage('Проверьте заполнение реквизитов организации.');
+      return;
+    }
+    if (_settingsMode) {
+      draft.currentStep = 8;
+      final saved = await widget.onSettingsSave!(draft);
+      if (!mounted || !saved) return;
+      setState(() => step = (step + 1).clamp(0, 7));
       return;
     }
     draft.currentStep = (step + 2).clamp(1, 8);
@@ -82,6 +164,13 @@ final class _OrganizationOnboardingPageState
       draft = widget.controller.onboardingDraft ?? draft;
       step = (step + 1).clamp(0, 7);
     });
+  }
+
+  Future<void> _saveSettings() async {
+    draft.currentStep = 8;
+    final saved = await widget.onSettingsSave!(draft);
+    if (!mounted || !saved) return;
+    _showMessage('Настройки организации сохранены.');
   }
 
   void _showMessage(String message) {
@@ -106,7 +195,7 @@ final class _OrganizationOnboardingPageState
             final wide = constraints.maxWidth >= 1050;
             return Column(
               children: [
-                _Header(wide: wide),
+                _Header(wide: wide, settingsMode: _settingsMode),
                 _Progress(step: step, wide: wide, onSelect: _selectStep),
                 Expanded(
                   child: SingleChildScrollView(
@@ -147,7 +236,15 @@ final class _OrganizationOnboardingPageState
     ),
   );
 
-  void _selectStep(int value) {
+  Future<void> _selectStep(int value) async {
+    if (_settingsMode) {
+      if (value == step || widget.settingsBusy) return;
+      draft.currentStep = 8;
+      final saved = await widget.onSettingsSave!(draft);
+      if (!mounted || !saved) return;
+      setState(() => step = value);
+      return;
+    }
     if (value <= draft.currentStep - 1) setState(() => step = value);
   }
 
@@ -171,8 +268,8 @@ final class _OrganizationOnboardingPageState
           ],
         ),
         const SizedBox(height: 22),
-        if (widget.controller.error != null) ...[
-          _ErrorBanner(widget.controller.error!),
+        if (_error != null) ...[
+          _ErrorBanner(_error!),
           const SizedBox(height: 16),
         ],
         _stepBody(),
@@ -181,9 +278,7 @@ final class _OrganizationOnboardingPageState
           children: [
             if (step > 0)
               OutlinedButton.icon(
-                onPressed: widget.controller.busy
-                    ? null
-                    : () => setState(() => step--),
+                onPressed: _busy ? null : () => setState(() => step--),
                 icon: const Icon(Icons.arrow_back),
                 label: const Text('Назад'),
               ),
@@ -191,12 +286,14 @@ final class _OrganizationOnboardingPageState
             SizedBox(
               width: 250,
               child: FilledButton.icon(
-                onPressed: widget.controller.busy
+                onPressed: _busy
                     ? null
                     : step == 7
-                    ? widget.controller.activateOrganization
+                    ? _settingsMode
+                          ? _saveSettings
+                          : widget.controller.activateOrganization
                     : _saveAndContinue,
-                icon: widget.controller.busy
+                icon: _busy
                     ? const SizedBox.square(
                         dimension: 18,
                         child: CircularProgressIndicator(strokeWidth: 2),
@@ -208,7 +305,9 @@ final class _OrganizationOnboardingPageState
                       ),
                 label: Text(
                   step == 7
-                      ? 'Активировать организацию'
+                      ? _settingsMode
+                            ? 'Сохранить изменения'
+                            : 'Активировать организацию'
                       : 'Сохранить и продолжить',
                 ),
               ),
@@ -731,7 +830,15 @@ final class _OrganizationOnboardingPageState
 
     return _SubPanel(
       title: 'Зависимость ${index + 1}',
-      onDelete: () => setState(() => draft.dependencies.removeAt(index)),
+      expanded: !_collapsedDependencies.contains(dependency),
+      onToggle: () =>
+          setState(() => _toggleCollapsed(_collapsedDependencies, dependency)),
+      collapseTooltip: 'Свернуть зависимость',
+      expandTooltip: 'Развернуть зависимость',
+      onDelete: () => setState(() {
+        draft.dependencies.removeAt(index);
+        _collapsedDependencies.remove(dependency);
+      }),
       child: _responsiveFields([
         AppSelectField<String>(
           value:
@@ -1067,17 +1174,40 @@ final class _OrganizationOnboardingPageState
 
   Widget _catalogFieldControls(CatalogFieldDraft field) {
     final definition = onboardingFieldByCode[field.fieldCode]!;
-    return _fieldControls(
-      definition,
-      field.isVisible,
-      field.isRequired,
-      (value) => setState(() {
-        field.isVisible = value;
-        if (!value) field.isRequired = false;
-      }),
-      definition.canBeRequired && field.isVisible
-          ? (value) => setState(() => field.isRequired = value)
-          : null,
+    return Column(
+      children: [
+        _fieldControls(
+          definition,
+          field.isVisible,
+          field.isRequired,
+          (value) => setState(() {
+            field.isVisible = value;
+            if (!value) field.isRequired = false;
+          }),
+          definition.canBeRequired && field.isVisible
+              ? (value) => setState(() => field.isRequired = value)
+              : null,
+        ),
+        if (definition.fieldType == 'dictionary' &&
+            definition.code != 'group') ...[
+          const SizedBox(height: 8),
+          AppSelectField<String>(
+            value:
+                draft.dictionaries.any(
+                  (dictionary) => dictionary.code == field.dictionaryCode,
+                )
+                ? field.dictionaryCode
+                : null,
+            label: 'Источник значений',
+            options: [
+              const AppSelectOption(value: null, label: 'Справочник не выбран'),
+              for (final dictionary in draft.dictionaries)
+                AppSelectOption(value: dictionary.code, label: dictionary.name),
+            ],
+            onChanged: (value) => setState(() => field.dictionaryCode = value),
+          ),
+        ],
+      ],
     );
   }
 
@@ -1192,7 +1322,16 @@ final class _OrganizationOnboardingPageState
           padding: const EdgeInsets.only(bottom: 14),
           child: _SubPanel(
             title: draft.roles[roleIndex].name,
-            onDelete: () => setState(() => draft.roles.removeAt(roleIndex)),
+            expanded: !_collapsedRoles.contains(draft.roles[roleIndex]),
+            onToggle: () => setState(
+              () => _toggleCollapsed(_collapsedRoles, draft.roles[roleIndex]),
+            ),
+            collapseTooltip: 'Свернуть роль',
+            expandTooltip: 'Развернуть роль',
+            onDelete: () => setState(() {
+              final role = draft.roles.removeAt(roleIndex);
+              _collapsedRoles.remove(role);
+            }),
             child: Column(
               children: [
                 _textField('Название роли', draft.roles[roleIndex].name, (
@@ -1250,8 +1389,21 @@ final class _OrganizationOnboardingPageState
           padding: const EdgeInsets.only(bottom: 14),
           child: _SubPanel(
             title: draft.dictionaries[dictionaryIndex].name,
-            onDelete: () =>
-                setState(() => draft.dictionaries.removeAt(dictionaryIndex)),
+            expanded: !_collapsedDictionaries.contains(
+              draft.dictionaries[dictionaryIndex],
+            ),
+            onToggle: () => setState(
+              () => _toggleCollapsed(
+                _collapsedDictionaries,
+                draft.dictionaries[dictionaryIndex],
+              ),
+            ),
+            collapseTooltip: 'Свернуть справочник',
+            expandTooltip: 'Развернуть справочник',
+            onDelete: () => setState(() {
+              final dictionary = draft.dictionaries.removeAt(dictionaryIndex);
+              _collapsedDictionaries.remove(dictionary);
+            }),
             child: Column(
               children: [
                 _textField(
@@ -1498,8 +1650,9 @@ final class _OrganizationOnboardingPageState
 }
 
 final class _Header extends StatelessWidget {
-  const _Header({required this.wide});
+  const _Header({required this.wide, required this.settingsMode});
   final bool wide;
+  final bool settingsMode;
   @override
   Widget build(BuildContext context) => Padding(
     padding: EdgeInsets.fromLTRB(wide ? 28 : 16, 20, wide ? 28 : 16, 12),
@@ -1516,7 +1669,7 @@ final class _Header extends StatelessWidget {
         const SizedBox(width: 18),
         Expanded(
           child: Text(
-            'Создание организации',
+            settingsMode ? 'Настройки организации' : 'Создание организации',
             style: TextStyle(
               fontSize: wide ? 22 : 17,
               fontWeight: FontWeight.w500,

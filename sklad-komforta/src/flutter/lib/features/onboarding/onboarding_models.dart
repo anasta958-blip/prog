@@ -148,23 +148,29 @@ final class CatalogFieldDraft {
     required this.fieldCode,
     required this.isVisible,
     required this.isRequired,
+    this.dictionaryCode,
   });
 
   String fieldCode;
   bool isVisible;
   bool isRequired;
+  String? dictionaryCode;
 
   factory CatalogFieldDraft.fromJson(Map<String, dynamic> json) =>
       CatalogFieldDraft(
         fieldCode: json['fieldCode'] as String,
         isVisible: json['isVisible'] as bool,
         isRequired: json['isRequired'] as bool,
+        dictionaryCode: json['fieldCode'] == 'group'
+            ? null
+            : json['dictionaryCode'] as String?,
       );
 
   Map<String, dynamic> toJson() => {
     'fieldCode': fieldCode,
     'isVisible': isVisible,
     'isRequired': isRequired,
+    'dictionaryCode': fieldCode == 'group' ? null : dictionaryCode,
   };
 }
 
@@ -244,6 +250,7 @@ final class EntityFieldDraft {
     required this.fieldType,
     required this.isVisible,
     required this.isRequired,
+    this.dictionaryCode,
   });
   String contextCode;
   String fieldCode;
@@ -251,6 +258,7 @@ final class EntityFieldDraft {
   String fieldType;
   bool isVisible;
   bool isRequired;
+  String? dictionaryCode;
   factory EntityFieldDraft.fromJson(Map<String, dynamic> json) =>
       EntityFieldDraft(
         contextCode: json['contextCode'] as String,
@@ -259,6 +267,7 @@ final class EntityFieldDraft {
         fieldType: json['fieldType'] as String,
         isVisible: json['isVisible'] as bool,
         isRequired: json['isRequired'] as bool,
+        dictionaryCode: json['dictionaryCode'] as String?,
       );
   Map<String, dynamic> toJson() => {
     'contextCode': contextCode,
@@ -267,6 +276,7 @@ final class EntityFieldDraft {
     'fieldType': fieldType,
     'isVisible': isVisible,
     'isRequired': isRequired,
+    'dictionaryCode': dictionaryCode,
   };
 }
 

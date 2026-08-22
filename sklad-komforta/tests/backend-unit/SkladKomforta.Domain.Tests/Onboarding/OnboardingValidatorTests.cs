@@ -270,6 +270,83 @@ public sealed class OnboardingValidatorTests
         Assert.Null(exception);
     }
 
+    [Fact]
+    public void DraftAcceptsExistingDictionaryBoundToDictionaryField()
+    {
+        var source = ValidDraft();
+        var category = source.Categories[0] with
+        {
+            Fields =
+            [
+                .. source.Categories[0].Fields,
+                new CatalogFieldDraft("unit", true, false, "units"),
+            ],
+        };
+
+        var exception = Record.Exception(() => OnboardingValidator.Validate(
+            source with { Categories = [category] },
+            false));
+
+        Assert.Null(exception);
+    }
+
+    [Fact]
+    public void DraftRejectsDictionaryBoundToNonDictionaryField()
+    {
+        var source = ValidDraft();
+        var category = source.Categories[0] with
+        {
+            Fields = source.Categories[0].Fields
+                .Select(field => field.FieldCode == "base_price"
+                    ? field with { DictionaryCode = "units" }
+                    : field)
+                .ToArray(),
+        };
+
+        var exception = Assert.Throws<IdentityException>(() =>
+            OnboardingValidator.Validate(source with { Categories = [category] }, false));
+
+        Assert.Equal("onboarding_dictionary_binding_invalid", exception.Code);
+    }
+
+    [Fact]
+    public void DraftRejectsUnknownDictionaryBinding()
+    {
+        var source = ValidDraft();
+        var category = source.Categories[0] with
+        {
+            Fields =
+            [
+                .. source.Categories[0].Fields,
+                new CatalogFieldDraft("unit", true, false, "unknown"),
+            ],
+        };
+
+        var exception = Assert.Throws<IdentityException>(() =>
+            OnboardingValidator.Validate(source with { Categories = [category] }, false));
+
+        Assert.Equal("onboarding_dictionary_binding_invalid", exception.Code);
+    }
+
+    [Fact]
+    public void DraftRejectsDictionaryBoundToStructuralGroup()
+    {
+        var source = ValidDraft();
+        var category = source.Categories[0] with
+        {
+            Fields =
+            [
+                .. source.Categories[0].Fields,
+                new CatalogFieldDraft("group", true, false, "units"),
+            ],
+        };
+
+        var exception = Assert.Throws<IdentityException>(() =>
+            OnboardingValidator.Validate(source with { Categories = [category] }, false));
+
+        Assert.Equal("onboarding_dictionary_binding_invalid", exception.Code);
+    }
+
     private static OrganizationOnboardingDraft ValidDraft() => new(
         8,
         new CompanyProfileDraft("Склад Комфорта", "ООО", null, null, null, null, null, null, null),

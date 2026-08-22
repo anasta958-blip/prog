@@ -264,14 +264,10 @@ class _CatalogEditorState extends State<CatalogEditor> {
 
   CatalogDictionary? _dictionaryFor(CatalogField field) {
     if (field.fieldType != 'dictionary') return null;
-    final aliases = switch (field.code) {
-      'unit' => const ['unit', 'единиц'],
-      'supplier' => const ['supplier', 'постав'],
-      _ => [field.code, field.label.toLowerCase()],
-    };
-    for (final dictionary in widget.configuration.dictionaries) {
-      final source = '${dictionary.code} ${dictionary.name}'.toLowerCase();
-      if (aliases.any(source.contains)) return dictionary;
+    if (field.dictionaryCode case final code?) {
+      for (final dictionary in widget.configuration.dictionaries) {
+        if (dictionary.code == code) return dictionary;
+      }
     }
     return null;
   }
@@ -330,6 +326,17 @@ final class _DynamicField extends StatelessWidget {
         validator: field.isRequired && selected == null
             ? (_) => 'Выберите значение.'
             : null,
+      );
+    }
+    if (field.fieldType == 'dictionary') {
+      return AppSelectField<String>(
+        value: null,
+        label: _label,
+        options: const [
+          AppSelectOption(value: null, label: 'Справочник не назначен'),
+        ],
+        enabled: false,
+        onChanged: null,
       );
     }
     return TextFormField(

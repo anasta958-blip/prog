@@ -70,7 +70,7 @@ class _CatalogPageState extends State<CatalogPage> {
         message:
             'Добавьте категории в настройках организации, затем обновите каталог.',
         actionLabel: 'Обновить',
-        onAction: controller.refresh,
+        onAction: controller.reloadConfiguration,
       );
     }
     return Padding(
@@ -80,7 +80,7 @@ class _CatalogPageState extends State<CatalogPage> {
         children: [
           _Header(
             loading: controller.loading,
-            onRefresh: controller.refresh,
+            onRefresh: controller.reloadConfiguration,
             onCreate: () =>
                 _openEditor(controller.createDraft(), null, persistentEditor),
           ),

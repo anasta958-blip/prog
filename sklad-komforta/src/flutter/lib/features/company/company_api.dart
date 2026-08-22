@@ -5,13 +5,18 @@ import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/core/network/api_response_decoder.dart';
 import 'package:sklad_komforta_app/core/network/http_client_factory.dart'
     if (dart.library.js_interop) 'package:sklad_komforta_app/core/network/http_client_factory_web.dart';
-import 'package:sklad_komforta_app/features/company/company_models.dart';
+import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
 
 abstract interface class CompanyGateway {
   Future<CompanyProfileDraft> getProfile(String accessToken);
   Future<CompanyProfileDraft> updateProfile(
     String accessToken,
     CompanyProfileDraft profile,
+  );
+  Future<OrganizationOnboardingDraft> getConfiguration(String accessToken);
+  Future<OrganizationOnboardingDraft> updateConfiguration(
+    String accessToken,
+    OrganizationOnboardingDraft draft,
   );
   void close();
 }
@@ -38,13 +43,44 @@ final class CompanyApi implements CompanyGateway {
     return CompanyProfileDraft.fromJson(data as Map<String, dynamic>);
   }
 
+  @override
+  Future<OrganizationOnboardingDraft> getConfiguration(
+    String accessToken,
+  ) async {
+    final data = await _sendPath('GET', '/company/configuration', accessToken);
+    return OrganizationOnboardingDraft.fromJson(data as Map<String, dynamic>);
+  }
+
+  @override
+  Future<OrganizationOnboardingDraft> updateConfiguration(
+    String accessToken,
+    OrganizationOnboardingDraft draft,
+  ) async {
+    final data = await _sendPath(
+      'PUT',
+      '/company/configuration',
+      accessToken,
+      body: draft.toJson(),
+    );
+    return OrganizationOnboardingDraft.fromJson(data as Map<String, dynamic>);
+  }
+
   Future<dynamic> _send(
     String method,
     String accessToken, {
     Map<String, dynamic>? body,
   }) async {
+    return _sendPath(method, '/company/profile', accessToken, body: body);
+  }
+
+  Future<dynamic> _sendPath(
+    String method,
+    String path,
+    String accessToken, {
+    Map<String, dynamic>? body,
+  }) async {
     final request =
-        http.Request(method, Uri.parse('${_config.apiBaseUrl}/company/profile'))
+        http.Request(method, Uri.parse('${_config.apiBaseUrl}$path'))
           ..headers.addAll({
             'Authorization': 'Bearer $accessToken',
             'Content-Type': 'application/json',

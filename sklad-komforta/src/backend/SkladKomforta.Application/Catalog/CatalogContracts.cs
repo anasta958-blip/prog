@@ -9,7 +9,8 @@ public sealed record CatalogFieldSummary(
     string FieldType,
     bool IsVisible,
     bool IsRequired,
-    int SortOrder);
+    int SortOrder,
+    string? DictionaryCode);
 
 /// <summary>Группа внутри раздела каталога.</summary>
 public sealed record CatalogGroupSummary(Guid Id, string Name, int SortOrder);

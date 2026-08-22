@@ -3,7 +3,7 @@ import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/core/network/api_exception.dart';
 import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
 import 'package:sklad_komforta_app/features/company/company_api.dart';
-import 'package:sklad_komforta_app/features/company/company_models.dart';
+import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
 
 /// Состояние рабочего пространства компании и безопасное обновление токена.
 final class CompanyController extends ChangeNotifier {
@@ -15,19 +15,24 @@ final class CompanyController extends ChangeNotifier {
   final CompanyGateway _api;
   final bool _ownsApi;
 
+  /// Авторизационный контекст нужен общему редактору onboarding-настроек.
+  AuthController get authController => _auth;
+
   CompanyProfileDraft? profile;
+  OrganizationOnboardingDraft? configuration;
   bool loading = false;
   bool saving = false;
   String? error;
   bool saved = false;
 
   Future<void> initialize() async {
-    if (loading || profile != null) return;
+    if (loading || configuration != null) return;
     loading = true;
     error = null;
     notifyListeners();
     try {
-      profile = await _auth.executeAuthorized(_api.getProfile);
+      configuration = await _auth.executeAuthorized(_api.getConfiguration);
+      profile = configuration!.company;
     } on ApiException catch (exception) {
       error = exception.message;
     } on Object {
@@ -63,6 +68,32 @@ final class CompanyController extends ChangeNotifier {
       return false;
     } on Object {
       error = 'Не удалось сохранить данные компании. Проверьте подключение.';
+      return false;
+    } finally {
+      saving = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> saveConfiguration(OrganizationOnboardingDraft draft) async {
+    if (saving) return false;
+    saving = true;
+    saved = false;
+    error = null;
+    notifyListeners();
+    try {
+      configuration = await _auth.executeAuthorized(
+        (token) => _api.updateConfiguration(token, draft),
+      );
+      profile = configuration!.company;
+      saved = true;
+      return true;
+    } on ApiException catch (exception) {
+      error = exception.message;
+      return false;
+    } on Object {
+      error =
+          'Не удалось сохранить настройки организации. Проверьте подключение.';
       return false;
     } finally {
       saving = false;

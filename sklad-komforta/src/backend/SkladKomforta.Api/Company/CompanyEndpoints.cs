@@ -4,6 +4,7 @@ using SkladKomforta.Api.Authorization;
 using SkladKomforta.Application.Company;
 using SkladKomforta.Application.Contracts;
 using SkladKomforta.Application.Identity;
+using SkladKomforta.Application.Onboarding;
 
 namespace SkladKomforta.Api.Company;
 
@@ -22,6 +23,19 @@ internal static class CompanyEndpoints
                 ICompanyService service,
                 CancellationToken token) =>
                 Results.Ok(ApiResponse.Success(await service.UpdateAsync(UserId(context.User), profile, token))))
+            .RequireTenantPermission("company.manage");
+        company.MapGet("/configuration", async (
+                ICompanyService service,
+                CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.GetConfigurationAsync(token))))
+            .RequireTenantPermission("company.view");
+        company.MapPut("/configuration", async (
+                HttpContext context,
+                OrganizationOnboardingDraft draft,
+                ICompanyService service,
+                CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.UpdateConfigurationAsync(
+                    UserId(context.User), draft, token))))
             .RequireTenantPermission("company.manage");
         return endpoints;
     }

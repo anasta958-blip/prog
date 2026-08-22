@@ -126,6 +126,44 @@ final class CatalogController extends ChangeNotifier {
     }
   }
 
+  /// Повторно загружает структуру каталога после изменения настроек организации.
+  /// Обычные фильтры и пагинация используют [refresh], чтобы не запрашивать
+  /// неизменную конфигурацию при каждом пользовательском действии.
+  Future<void> reloadConfiguration() async {
+    if (loading) return;
+    loading = true;
+    error = null;
+    notifyListeners();
+    try {
+      configuration = await _authorized(
+        (token) => _api.getConfiguration(token),
+      );
+      _normalizeStructuralFilters();
+      await _loadPage();
+    } on AuthApiException catch (exception) {
+      error = exception.message;
+    } on Object {
+      error = 'Не удалось обновить структуру каталога. Проверьте подключение.';
+    } finally {
+      loading = false;
+      notifyListeners();
+    }
+  }
+
+  void _normalizeStructuralFilters() {
+    final category = selectedCategory;
+    if (category == null) {
+      categoryId = null;
+      sectionId = null;
+      page = 1;
+      return;
+    }
+    if (!category.sections.any((section) => section.id == sectionId)) {
+      sectionId = null;
+      page = 1;
+    }
+  }
+
   /// Выбирает карточку для постоянной панели редактирования.
   void selectItem(CatalogItem? item) {
     selectedItem = item;

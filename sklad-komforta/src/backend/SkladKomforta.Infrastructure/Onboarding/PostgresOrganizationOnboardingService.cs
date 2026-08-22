@@ -288,11 +288,12 @@ internal sealed class PostgresOrganizationOnboardingService(
                 var field = category.Fields[fieldIndex];
                 await ExecuteAsync(connection, transaction, """
                     INSERT INTO catalog_category_fields
-                        (category_id, field_code, is_visible, is_required, sort_order)
-                    VALUES (@category_id, @field_code, @visible, @required, @sort)
+                        (category_id, field_code, is_visible, is_required, sort_order, dictionary_code)
+                    VALUES (@category_id, @field_code, @visible, @required, @sort, @dictionary_code)
                     """, token,
                     ("category_id", categoryId), ("field_code", field.FieldCode.Trim()),
-                    ("visible", field.IsVisible), ("required", field.IsRequired), ("sort", fieldIndex));
+                    ("visible", field.IsVisible), ("required", field.IsRequired), ("sort", fieldIndex),
+                    ("dictionary_code", Db(field.DictionaryCode)));
             }
             for (var sectionIndex = 0; sectionIndex < category.Sections.Count; sectionIndex++)
             {
@@ -343,12 +344,13 @@ internal sealed class PostgresOrganizationOnboardingService(
             contextOrder[field.ContextCode] = order + 1;
             await ExecuteAsync(connection, transaction, """
                 INSERT INTO entity_field_definitions
-                    (id, context_code, field_code, label, field_type, is_visible, is_required, sort_order)
-                VALUES (@id, @context, @code, @label, @type, @visible, @required, @sort)
+                    (id, context_code, field_code, label, field_type, is_visible, is_required, sort_order, dictionary_code)
+                VALUES (@id, @context, @code, @label, @type, @visible, @required, @sort, @dictionary_code)
                 """, token,
                 ("id", Guid.NewGuid()), ("context", field.ContextCode.Trim()), ("code", field.FieldCode.Trim()),
                 ("label", field.Label.Trim()), ("type", field.FieldType.Trim()), ("visible", field.IsVisible),
-                ("required", field.IsRequired), ("sort", order));
+                ("required", field.IsRequired), ("sort", order),
+                ("dictionary_code", Db(field.DictionaryCode)));
         }
     }
 

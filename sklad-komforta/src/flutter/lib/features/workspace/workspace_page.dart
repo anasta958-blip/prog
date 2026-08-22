@@ -102,6 +102,7 @@ class _WorkspacePageState extends State<WorkspacePage> {
 
   void _select(int index) {
     setState(() => selectedIndex = index);
+    if (index == 0) catalogController.reloadConfiguration();
     if (index == 1) companyController.initialize();
     if (index == 2) widget.authController.loadSessions();
     Navigator.maybePop(context);
