@@ -42,6 +42,7 @@ internal sealed class S3ObjectStorage : IObjectStorage, IDisposable
             BucketName = _options.Bucket,
             Key = NormalizeObjectKey(objectKey),
             Verb = HttpVerb.PUT,
+            Protocol = ResolvePresignedProtocol(_options),
             ContentType = contentType,
             Expires = DateTime.UtcNow.Add(lifetime),
         });
@@ -59,8 +60,28 @@ internal sealed class S3ObjectStorage : IObjectStorage, IDisposable
             BucketName = _options.Bucket,
             Key = NormalizeObjectKey(objectKey),
             Verb = HttpVerb.GET,
+            Protocol = ResolvePresignedProtocol(_options),
             Expires = DateTime.UtcNow.Add(lifetime),
         });
+    }
+
+    /// <inheritdoc />
+    public async Task<StoredObjectMetadata?> GetMetadataAsync(
+        string objectKey,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var response = await _client.GetObjectMetadataAsync(
+                _options.Bucket,
+                NormalizeObjectKey(objectKey),
+                cancellationToken);
+            return new StoredObjectMetadata(response.ContentLength, response.Headers.ContentType ?? string.Empty);
+        }
+        catch (AmazonS3Exception exception) when (exception.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
     }
 
     /// <inheritdoc />
@@ -94,6 +115,21 @@ internal sealed class S3ObjectStorage : IObjectStorage, IDisposable
         return new AmazonS3Client(
             new BasicAWSCredentials(options.AccessKey, options.SecretKey),
             config);
+    }
+
+    /// <summary>
+    /// Сохраняет протокол публичного endpoint-а в подписанной ссылке. AWS SDK
+    /// иначе использует HTTPS по умолчанию даже для локального HTTP MinIO.
+    /// </summary>
+    private static Protocol ResolvePresignedProtocol(ObjectStorageOptions options)
+    {
+        var serviceUrl = string.IsNullOrWhiteSpace(options.PublicUrl)
+            ? options.ServiceUrl
+            : options.PublicUrl;
+        return Uri.TryCreate(serviceUrl, UriKind.Absolute, out var uri) &&
+               uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+            ? Protocol.HTTP
+            : Protocol.HTTPS;
     }
 
     /// <summary>Нормализует разделители и отклоняет пустые ключи и обход каталога.</summary>

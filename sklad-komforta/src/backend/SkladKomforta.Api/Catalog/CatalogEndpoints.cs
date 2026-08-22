@@ -60,6 +60,41 @@ internal static class CatalogEndpoints
                 return Results.Ok(ApiResponse.Success(new { deleted = true }));
             })
             .RequireTenantPermission("catalog.manage");
+        catalog.MapGet("/items/{itemId:guid}/images", async (
+                Guid itemId,
+                ICatalogService service,
+                CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.GetImagesAsync(itemId, token))))
+            .RequireTenantPermission("catalog.view");
+        catalog.MapPost("/items/{itemId:guid}/images/uploads", async (
+                HttpContext context,
+                Guid itemId,
+                BeginCatalogImageUploadRequest request,
+                ICatalogService service,
+                CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.BeginImageUploadAsync(
+                    UserId(context.User), itemId, request, token))))
+            .RequireTenantPermission("catalog.manage");
+        catalog.MapPost("/items/{itemId:guid}/images/{imageId:guid}/confirm", async (
+                HttpContext context,
+                Guid itemId,
+                Guid imageId,
+                ICatalogService service,
+                CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.ConfirmImageUploadAsync(
+                    UserId(context.User), itemId, imageId, token))))
+            .RequireTenantPermission("catalog.manage");
+        catalog.MapDelete("/items/{itemId:guid}/images/{imageId:guid}", async (
+                HttpContext context,
+                Guid itemId,
+                Guid imageId,
+                ICatalogService service,
+                CancellationToken token) =>
+            {
+                await service.DeleteImageAsync(UserId(context.User), itemId, imageId, token);
+                return Results.Ok(ApiResponse.Success(new { deleted = true }));
+            })
+            .RequireTenantPermission("catalog.manage");
         return endpoints;
     }
 

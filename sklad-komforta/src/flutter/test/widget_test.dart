@@ -495,6 +495,14 @@ void main() {
     expect(find.byKey(const Key('catalog-save')), findsOneWidget);
     expect(find.text('Справочник не назначен'), findsOneWidget);
     expect(find.text('шт'), findsNothing);
+    expect(find.text('Основное'), findsOneWidget);
+    expect(find.text('Цены'), findsOneWidget);
+    expect(find.text('Остатки'), findsOneWidget);
+    expect(find.text('Изображения'), findsOneWidget);
+
+    await tester.tap(find.text('Остатки'));
+    await tester.pumpAndSettle();
+    expect(find.text('Складской учёт ещё не подключён'), findsOneWidget);
 
     catalog.dispose();
     auth.dispose();

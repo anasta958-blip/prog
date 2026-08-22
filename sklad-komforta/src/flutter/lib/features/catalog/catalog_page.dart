@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
 import 'package:intl/intl.dart';
@@ -37,9 +39,27 @@ class _CatalogPageState extends State<CatalogPage> {
                   saving: widget.controller.saving,
                   error: widget.controller.error,
                   isNew: editingItemId == null,
+                  images: widget.controller.images,
+                  imagesLoading: widget.controller.imagesLoading,
+                  imagesError: widget.controller.imagesError,
                   onClose: _closeEditor,
                   onSave: _save,
                   onDelete: editingItemId == null ? null : _delete,
+                  onUploadImage: editingItemId == null
+                      ? null
+                      : (name, contentType, bytes) =>
+                            widget.controller.uploadImage(
+                              itemId: editingItemId!,
+                              fileName: name,
+                              contentType: contentType,
+                              bytes: bytes,
+                            ),
+                  onDeleteImage: editingItemId == null
+                      ? null
+                      : (imageId) => widget.controller.deleteImage(
+                          editingItemId!,
+                          imageId,
+                        ),
                 ),
               ),
           ],
@@ -217,6 +237,7 @@ class _CatalogPageState extends State<CatalogPage> {
       draft = value;
       editingItemId = itemId;
     });
+    if (itemId != null) unawaited(widget.controller.loadImages(itemId));
     if (persistent) return;
     await showDialog<void>(
       context: context,
@@ -225,30 +246,49 @@ class _CatalogPageState extends State<CatalogPage> {
         backgroundColor: const Color(0xFF111A27),
         child: AnimatedBuilder(
           animation: widget.controller,
-          builder: (context, _) => CatalogEditor(
-            draft: draft!,
-            configuration: widget.controller.configuration!,
-            saving: widget.controller.saving,
-            error: widget.controller.error,
-            isNew: editingItemId == null,
-            onClose: () => Navigator.pop(dialogContext),
-            onSave: () async {
-              final saved = await _save();
-              if (saved && dialogContext.mounted) {
-                Navigator.pop(dialogContext);
-              }
-              return saved;
-            },
-            onDelete: editingItemId == null
-                ? null
-                : () async {
-                    final deleted = await _delete();
-                    if (deleted && dialogContext.mounted) {
-                      Navigator.pop(dialogContext);
-                    }
-                    return deleted;
-                  },
-          ),
+          builder: (context, _) {
+            final activeDraft = draft;
+            if (activeDraft == null) return const SizedBox.shrink();
+            return CatalogEditor(
+              draft: activeDraft,
+              configuration: widget.controller.configuration!,
+              saving: widget.controller.saving,
+              error: widget.controller.error,
+              isNew: editingItemId == null,
+              images: widget.controller.images,
+              imagesLoading: widget.controller.imagesLoading,
+              imagesError: widget.controller.imagesError,
+              onClose: () => Navigator.pop(dialogContext),
+              onSave: () async {
+                final saved = await _save();
+                if (saved && dialogContext.mounted) {
+                  Navigator.pop(dialogContext);
+                }
+                return saved;
+              },
+              onDelete: editingItemId == null
+                  ? null
+                  : () async {
+                      final deleted = await _delete();
+                      if (deleted && dialogContext.mounted) {
+                        Navigator.pop(dialogContext);
+                      }
+                      return deleted;
+                    },
+              onUploadImage: editingItemId == null
+                  ? null
+                  : (name, contentType, bytes) => widget.controller.uploadImage(
+                      itemId: editingItemId!,
+                      fileName: name,
+                      contentType: contentType,
+                      bytes: bytes,
+                    ),
+              onDeleteImage: editingItemId == null
+                  ? null
+                  : (imageId) =>
+                        widget.controller.deleteImage(editingItemId!, imageId),
+            );
+          },
         ),
       ),
     );
@@ -462,12 +502,26 @@ final class _ProductCard extends StatelessWidget {
                     color: const Color(0xFF0E1621),
                     borderRadius: BorderRadius.circular(11),
                   ),
-                  child: Center(
-                    child: Icon(
-                      _categoryIcon(category?.name),
-                      size: 54,
-                      color: const Color(0xFF6688B5),
-                    ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(11),
+                    child: item.thumbnailUrl == null
+                        ? _ProductImageFallback(category: category)
+                        : Image.network(
+                            item.thumbnailUrl!,
+                            width: double.infinity,
+                            height: double.infinity,
+                            fit: BoxFit.contain,
+                            errorBuilder: (context, error, stackTrace) =>
+                                _ProductImageFallback(category: category),
+                            loadingBuilder: (context, child, progress) =>
+                                progress == null
+                                ? child
+                                : const Center(
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                          ),
                   ),
                 ),
               ),
@@ -521,6 +575,21 @@ final class _ProductCard extends StatelessWidget {
     if (amount == null) return 'Цена не указана';
     return '${NumberFormat('#,##0.##', 'ru').format(amount)} ₽';
   }
+}
+
+final class _ProductImageFallback extends StatelessWidget {
+  const _ProductImageFallback({required this.category});
+
+  final CatalogCategory? category;
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: Icon(
+      _ProductCard._categoryIcon(category?.name),
+      size: 54,
+      color: const Color(0xFF6688B5),
+    ),
+  );
 }
 
 final class _StatusBadge extends StatelessWidget {

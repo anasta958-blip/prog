@@ -1,8 +1,11 @@
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_models.dart';
 
-/// Динамическая форма карточки, построенная по настройкам выбранной категории.
+/// Редактор карточки разделяет динамические поля, цены, остатки и изображения.
 final class CatalogEditor extends StatefulWidget {
   const CatalogEditor({
     required this.draft,
@@ -10,9 +13,14 @@ final class CatalogEditor extends StatefulWidget {
     required this.saving,
     required this.error,
     required this.isNew,
+    required this.images,
+    required this.imagesLoading,
     required this.onClose,
     required this.onSave,
+    this.imagesError,
     this.onDelete,
+    this.onUploadImage,
+    this.onDeleteImage,
     super.key,
   });
 
@@ -21,9 +29,19 @@ final class CatalogEditor extends StatefulWidget {
   final bool saving;
   final String? error;
   final bool isNew;
+  final List<CatalogItemImage> images;
+  final bool imagesLoading;
+  final String? imagesError;
   final VoidCallback onClose;
   final Future<bool> Function() onSave;
   final Future<bool> Function()? onDelete;
+  final Future<bool> Function(
+    String fileName,
+    String contentType,
+    Uint8List bytes,
+  )?
+  onUploadImage;
+  final Future<bool> Function(String imageId)? onDeleteImage;
 
   @override
   State<CatalogEditor> createState() => _CatalogEditorState();
@@ -31,6 +49,7 @@ final class CatalogEditor extends StatefulWidget {
 
 class _CatalogEditorState extends State<CatalogEditor> {
   final formKey = GlobalKey<FormState>();
+  int selectedTab = 0;
 
   @override
   void initState() {
@@ -58,7 +77,7 @@ class _CatalogEditorState extends State<CatalogEditor> {
     child: Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 18, 12, 14),
+          padding: const EdgeInsets.fromLTRB(20, 18, 12, 12),
           child: Row(
             children: [
               Expanded(
@@ -78,138 +97,36 @@ class _CatalogEditorState extends State<CatalogEditor> {
             ],
           ),
         ),
+        _EditorTabs(
+          selected: selectedTab,
+          onSelected: (value) => setState(() => selectedTab = value),
+        ),
         const Divider(height: 1),
         Expanded(
           child: Form(
             key: formKey,
-            child: ListView(
-              padding: const EdgeInsets.all(20),
+            child: IndexedStack(
+              index: selectedTab,
               children: [
-                AppSelectField<String>(
-                  value: widget.draft.categoryId,
-                  label: 'Категория',
-                  options: [
-                    for (final item in widget.configuration.categories)
-                      AppSelectOption(value: item.id, label: item.name),
-                  ],
-                  enabled: !widget.saving,
-                  onChanged: widget.saving
-                      ? null
-                      : (value) {
-                          if (value == null) return;
-                          setState(() {
-                            widget.draft.categoryId = value;
-                            widget.draft.sectionId = null;
-                            widget.draft.groupId = null;
-                            final allowedCodes = category.fields
-                                .map((field) => field.code)
-                                .toSet();
-                            widget.draft.values.removeWhere(
-                              (code, _) => !allowedCodes.contains(code),
-                            );
-                            _normalizeStructure();
-                          });
-                        },
-                ),
-                if (category.sections.isNotEmpty) ...[
-                  const SizedBox(height: 14),
-                  AppSelectField<String>(
-                    value: widget.draft.sectionId,
-                    label: 'Раздел',
-                    options: [
-                      const AppSelectOption(value: null, label: 'Не выбран'),
-                      for (final item in category.sections)
-                        AppSelectOption(value: item.id, label: item.name),
-                    ],
-                    enabled: !widget.saving,
-                    onChanged: widget.saving
-                        ? null
-                        : (value) => setState(() {
-                            widget.draft.sectionId = value;
-                            widget.draft.groupId = null;
-                            _normalizeGroup();
-                          }),
-                  ),
-                ],
-                if (_groupVisible && section?.groups.isNotEmpty == true) ...[
-                  const SizedBox(height: 14),
-                  AppSelectField<String>(
-                    value: widget.draft.groupId,
-                    label: 'Группа',
-                    options: [
-                      const AppSelectOption(value: null, label: 'Без группы'),
-                      for (final item in section!.groups)
-                        AppSelectOption(value: item.id, label: item.name),
-                    ],
-                    enabled: !widget.saving,
-                    onChanged: widget.saving
-                        ? null
-                        : (value) =>
-                              setState(() => widget.draft.groupId = value),
-                  ),
-                ],
-                const SizedBox(height: 14),
-                TextFormField(
-                  initialValue: widget.draft.name,
-                  decoration: const InputDecoration(
-                    labelText: 'Наименование *',
-                  ),
-                  textInputAction: TextInputAction.next,
-                  onChanged: (value) => widget.draft.name = value,
-                  validator: (value) => value == null || value.trim().isEmpty
-                      ? 'Введите наименование.'
-                      : null,
-                ),
-                if (_fieldVisible('marking')) ...[
-                  const SizedBox(height: 14),
-                  TextFormField(
-                    initialValue: widget.draft.marking,
-                    decoration: const InputDecoration(
-                      labelText: 'Маркировка / размер',
-                    ),
-                    textInputAction: TextInputAction.next,
-                    onChanged: (value) => widget.draft.marking = value,
-                  ),
-                ],
-                for (final field in category.fields)
-                  if (_isDynamic(field)) ...[
-                    const SizedBox(height: 14),
-                    _DynamicField(
-                      key: ValueKey('${category.id}-${field.code}'),
-                      field: field,
-                      value: widget.draft.values[field.code],
-                      dictionary: _dictionaryFor(field),
-                      enabled: !widget.saving,
-                      onChanged: (value) =>
-                          widget.draft.values[field.code] = value,
-                    ),
-                  ],
-                const SizedBox(height: 14),
-                AppSelectField<String>(
-                  value: widget.draft.status,
-                  label: 'Статус',
-                  options: const [
-                    AppSelectOption(value: 'pending', label: 'Не согласовано'),
-                    AppSelectOption(value: 'approved', label: 'Согласовано'),
-                  ],
-                  enabled: !widget.saving,
-                  onChanged: widget.saving
-                      ? null
-                      : (value) => setState(
-                          () => widget.draft.status = value ?? 'pending',
-                        ),
-                ),
-                if (widget.error != null) ...[
-                  const SizedBox(height: 16),
-                  Text(
-                    widget.error!,
-                    style: const TextStyle(color: Color(0xFFFF809D)),
-                  ),
-                ],
+                _scroll(_mainFields()),
+                _scroll(_priceFields()),
+                _scroll([const _StockPlaceholder()]),
+                _scroll([_imagesEditor()]),
               ],
             ),
           ),
         ),
+        if (widget.error != null || widget.imagesError != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 8, 18, 0),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                widget.imagesError ?? widget.error!,
+                style: const TextStyle(color: Color(0xFFFF809D)),
+              ),
+            ),
+          ),
         const Divider(height: 1),
         Padding(
           padding: const EdgeInsets.all(16),
@@ -237,9 +154,8 @@ class _CatalogEditorState extends State<CatalogEditor> {
                         await widget.onSave();
                       },
                 child: widget.saving
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
+                    ? const SizedBox.square(
+                        dimension: 18,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Text('Сохранить'),
@@ -251,6 +167,256 @@ class _CatalogEditorState extends State<CatalogEditor> {
     ),
   );
 
+  Widget _scroll(List<Widget> children) =>
+      ListView(padding: const EdgeInsets.all(20), children: children);
+
+  List<Widget> _mainFields() => [
+    AppSelectField<String>(
+      value: widget.draft.categoryId,
+      label: 'Категория',
+      options: [
+        for (final item in widget.configuration.categories)
+          AppSelectOption(value: item.id, label: item.name),
+      ],
+      enabled: !widget.saving,
+      onChanged: widget.saving
+          ? null
+          : (value) {
+              if (value == null) return;
+              setState(() {
+                widget.draft.categoryId = value;
+                widget.draft.sectionId = null;
+                widget.draft.groupId = null;
+                final allowedCodes = category.fields
+                    .map((field) => field.code)
+                    .toSet();
+                widget.draft.values.removeWhere(
+                  (code, _) => !allowedCodes.contains(code),
+                );
+                _normalizeStructure();
+              });
+            },
+    ),
+    if (category.sections.isNotEmpty) ...[
+      const SizedBox(height: 14),
+      AppSelectField<String>(
+        value: widget.draft.sectionId,
+        label: 'Раздел',
+        options: [
+          const AppSelectOption(value: null, label: 'Не выбран'),
+          for (final item in category.sections)
+            AppSelectOption(value: item.id, label: item.name),
+        ],
+        enabled: !widget.saving,
+        onChanged: widget.saving
+            ? null
+            : (value) => setState(() {
+                widget.draft.sectionId = value;
+                widget.draft.groupId = null;
+                _normalizeGroup();
+              }),
+      ),
+    ],
+    if (_groupVisible && section?.groups.isNotEmpty == true) ...[
+      const SizedBox(height: 14),
+      AppSelectField<String>(
+        value: widget.draft.groupId,
+        label: 'Группа',
+        options: [
+          const AppSelectOption(value: null, label: 'Без группы'),
+          for (final item in section!.groups)
+            AppSelectOption(value: item.id, label: item.name),
+        ],
+        enabled: !widget.saving,
+        onChanged: widget.saving
+            ? null
+            : (value) => setState(() => widget.draft.groupId = value),
+      ),
+    ],
+    const SizedBox(height: 14),
+    TextFormField(
+      initialValue: widget.draft.name,
+      decoration: const InputDecoration(labelText: 'Наименование *'),
+      textInputAction: TextInputAction.next,
+      onChanged: (value) => widget.draft.name = value,
+      validator: (value) => value == null || value.trim().isEmpty
+          ? 'Введите наименование.'
+          : null,
+    ),
+    if (_fieldVisible('marking')) ...[
+      const SizedBox(height: 14),
+      TextFormField(
+        initialValue: widget.draft.marking,
+        decoration: const InputDecoration(labelText: 'Маркировка / размер'),
+        textInputAction: TextInputAction.next,
+        onChanged: (value) => widget.draft.marking = value,
+      ),
+    ],
+    for (final field in category.fields)
+      if (_isDynamic(field) && !_isPriceField(field)) ...[
+        const SizedBox(height: 14),
+        _dynamicField(field),
+      ],
+    const SizedBox(height: 14),
+    AppSelectField<String>(
+      value: widget.draft.status,
+      label: 'Статус',
+      options: const [
+        AppSelectOption(value: 'pending', label: 'Не согласовано'),
+        AppSelectOption(value: 'approved', label: 'Согласовано'),
+      ],
+      enabled: !widget.saving,
+      onChanged: widget.saving
+          ? null
+          : (value) => setState(() => widget.draft.status = value ?? 'pending'),
+    ),
+  ];
+
+  List<Widget> _priceFields() {
+    final fields = category.fields
+        .where((field) => _isDynamic(field) && _isPriceField(field))
+        .toList();
+    if (fields.isEmpty) {
+      return const [
+        _EmptyTab(
+          icon: Icons.payments_outlined,
+          title: 'Ценовые поля не настроены',
+          message: 'Добавьте нужные поля в настройках этой категории.',
+        ),
+      ];
+    }
+    return [
+      const _TabIntroduction(
+        icon: Icons.payments_outlined,
+        title: 'Цены товара',
+        message: 'Здесь собраны денежные и процентные поля карточки.',
+      ),
+      for (final field in fields) ...[
+        const SizedBox(height: 14),
+        _dynamicField(field),
+      ],
+    ];
+  }
+
+  Widget _dynamicField(CatalogField field) => _DynamicField(
+    key: ValueKey('${category.id}-${field.code}'),
+    field: field,
+    value: widget.draft.values[field.code],
+    dictionary: _dictionaryFor(field),
+    enabled: !widget.saving,
+    onChanged: (value) => widget.draft.values[field.code] = value,
+  );
+
+  Widget _imagesEditor() {
+    if (widget.isNew) {
+      return const _EmptyTab(
+        icon: Icons.add_photo_alternate_outlined,
+        title: 'Сначала сохраните товар',
+        message:
+            'После первого сохранения к карточке можно добавить изображения.',
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: _TabIntroduction(
+                icon: Icons.photo_library_outlined,
+                title: 'Изображения товара',
+                message:
+                    'JPEG, PNG или WebP, не более 10 МБ. Максимум 8 файлов.',
+              ),
+            ),
+            const SizedBox(width: 12),
+            FilledButton.icon(
+              onPressed:
+                  widget.imagesLoading ||
+                      widget.images.length >= 8 ||
+                      widget.onUploadImage == null
+                  ? null
+                  : _pickImage,
+              icon: widget.imagesLoading
+                  ? const SizedBox.square(
+                      dimension: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.add_photo_alternate_outlined),
+              label: const Text('Добавить'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 18),
+        if (widget.images.isEmpty && !widget.imagesLoading)
+          const _EmptyTab(
+            icon: Icons.image_not_supported_outlined,
+            title: 'Изображений пока нет',
+            message: 'Добавьте первое изображение товара.',
+          )
+        else
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              crossAxisSpacing: 10,
+              mainAxisSpacing: 10,
+              childAspectRatio: 0.88,
+            ),
+            itemCount: widget.images.length,
+            itemBuilder: (context, index) {
+              final image = widget.images[index];
+              return _ImageTile(
+                image: image,
+                busy: widget.imagesLoading,
+                onDelete: widget.onDeleteImage == null
+                    ? null
+                    : () => widget.onDeleteImage!(image.id),
+              );
+            },
+          ),
+      ],
+    );
+  }
+
+  Future<void> _pickImage() async {
+    final file = await FilePicker.pickFile(
+      type: FileType.custom,
+      allowedExtensions: const ['jpg', 'jpeg', 'png', 'webp'],
+    );
+    if (!mounted || file == null) return;
+    Uint8List bytes;
+    try {
+      bytes = await file.readAsBytes();
+    } on Object {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось прочитать выбранный файл.')),
+      );
+      return;
+    }
+    if (!mounted) return;
+    final extension = file.name.contains('.')
+        ? file.name.split('.').last.toLowerCase()
+        : '';
+    final contentType = switch (extension) {
+      'jpg' || 'jpeg' => 'image/jpeg',
+      'png' => 'image/png',
+      'webp' => 'image/webp',
+      _ => null,
+    };
+    if (contentType == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Выберите изображение JPEG, PNG или WebP.'),
+        ),
+      );
+      return;
+    }
+    await widget.onUploadImage!(file.name, contentType, bytes);
+  }
+
   bool get _groupVisible => _fieldVisible('group');
 
   bool _fieldVisible(String code) =>
@@ -261,6 +427,9 @@ class _CatalogEditorState extends State<CatalogEditor> {
       !const {'group', 'name', 'marking'}.contains(field.code) &&
       field.fieldType != 'calculated_money' &&
       field.fieldType != 'relation';
+
+  bool _isPriceField(CatalogField field) =>
+      const {'money', 'percent', 'calculated_money'}.contains(field.fieldType);
 
   CatalogDictionary? _dictionaryFor(CatalogField field) {
     if (field.fieldType != 'dictionary') return null;
@@ -284,6 +453,204 @@ class _CatalogEditorState extends State<CatalogEditor> {
       widget.draft.groupId = section!.groups.single.id;
     }
   }
+}
+
+final class _EditorTabs extends StatelessWidget {
+  const _EditorTabs({required this.selected, required this.onSelected});
+  final int selected;
+  final ValueChanged<int> onSelected;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    height: 58,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Row(
+        children: [
+          Expanded(child: _tab(0, Icons.tune, 'Основное')),
+          Expanded(child: _tab(1, Icons.payments_outlined, 'Цены')),
+          Expanded(child: _tab(2, Icons.warehouse_outlined, 'Остатки')),
+          Expanded(child: _tab(3, Icons.photo_library_outlined, 'Изображения')),
+        ],
+      ),
+    ),
+  );
+
+  Widget _tab(int index, IconData icon, String label) => TextButton(
+    onPressed: () => onSelected(index),
+    style: TextButton.styleFrom(
+      foregroundColor: selected == index
+          ? const Color(0xFF6DA2FF)
+          : const Color(0xFF9AAAC2),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+      side: BorderSide(
+        color: selected == index ? const Color(0xFF4D8DFF) : Colors.transparent,
+        width: 0,
+      ),
+    ),
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(icon, size: 17),
+        const SizedBox(height: 3),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(label, style: const TextStyle(fontSize: 11)),
+        ),
+      ],
+    ),
+  );
+}
+
+final class _StockPlaceholder extends StatelessWidget {
+  const _StockPlaceholder();
+
+  @override
+  Widget build(BuildContext context) => const _EmptyTab(
+    icon: Icons.warehouse_outlined,
+    title: 'Складской учёт ещё не подключён',
+    message:
+        'Здесь будут остатки товара по каждому складу и общий доступный остаток. '
+        'Сейчас данные не сохраняются, чтобы не создавать фиктивную складскую модель.',
+  );
+}
+
+final class _TabIntroduction extends StatelessWidget {
+  const _TabIntroduction({
+    required this.icon,
+    required this.title,
+    required this.message,
+  });
+  final IconData icon;
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Icon(icon, color: const Color(0xFF6DA2FF), size: 22),
+      const SizedBox(width: 10),
+      Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 4),
+            Text(
+              message,
+              style: const TextStyle(color: Color(0xFF8FA3BF), height: 1.35),
+            ),
+          ],
+        ),
+      ),
+    ],
+  );
+}
+
+final class _EmptyTab extends StatelessWidget {
+  const _EmptyTab({
+    required this.icon,
+    required this.title,
+    required this.message,
+  });
+  final IconData icon;
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(22),
+    decoration: BoxDecoration(
+      color: const Color(0xFF151F2E),
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: const Color(0xFF2A3B52)),
+    ),
+    child: Column(
+      children: [
+        Icon(icon, size: 34, color: const Color(0xFF6D86A8)),
+        const SizedBox(height: 12),
+        Text(
+          title,
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          message,
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: Color(0xFF8FA3BF), height: 1.4),
+        ),
+      ],
+    ),
+  );
+}
+
+final class _ImageTile extends StatelessWidget {
+  const _ImageTile({
+    required this.image,
+    required this.busy,
+    required this.onDelete,
+  });
+  final CatalogItemImage image;
+  final bool busy;
+  final VoidCallback? onDelete;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: const Color(0xFF0C1522),
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: const Color(0xFF2A3B52)),
+    ),
+    child: ClipRRect(
+      borderRadius: BorderRadius.circular(11),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.network(
+            image.downloadUrl,
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => const Center(
+              child: Icon(
+                Icons.broken_image_outlined,
+                color: Color(0xFF7185A3),
+              ),
+            ),
+          ),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(9, 18, 38, 8),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.transparent, Color(0xE6101824)],
+                ),
+              ),
+              child: Text(
+                image.fileName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 11),
+              ),
+            ),
+          ),
+          Positioned(
+            right: 6,
+            bottom: 4,
+            child: IconButton.filledTonal(
+              tooltip: 'Удалить изображение',
+              onPressed: busy ? null : onDelete,
+              icon: const Icon(Icons.delete_outline, size: 17),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 final class _DynamicField extends StatelessWidget {

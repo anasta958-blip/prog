@@ -59,7 +59,8 @@ public sealed record CatalogItemSummary(
     Guid? CreatedBy,
     DateTimeOffset CreatedAt,
     Guid? UpdatedBy,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    string? ThumbnailUrl = null);
 
 /// <summary>Одна страница каталога и общее количество найденных карточек.</summary>
 public sealed record CatalogItemPage(
@@ -67,6 +68,27 @@ public sealed record CatalogItemPage(
     int Page,
     int PageSize,
     int Total);
+
+/// <summary>Готовое изображение карточки с временной ссылкой для просмотра.</summary>
+public sealed record CatalogItemImageSummary(
+    Guid Id,
+    string FileName,
+    string ContentType,
+    long ByteSize,
+    int SortOrder,
+    string DownloadUrl);
+
+/// <summary>Проверяемые метаданные файла до выдачи ссылки на загрузку.</summary>
+public sealed record BeginCatalogImageUploadRequest(
+    string FileName,
+    string ContentType,
+    long ByteSize);
+
+/// <summary>Короткоживущая ссылка для прямой загрузки изображения в S3.</summary>
+public sealed record CatalogImageUploadTicket(
+    Guid ImageId,
+    string UploadUrl,
+    DateTimeOffset ExpiresAt);
 
 /// <summary>Фильтры серверной страницы каталога.</summary>
 public sealed record CatalogItemQuery(
@@ -96,4 +118,8 @@ public interface ICatalogService
     Task<CatalogItemSummary> CreateItemAsync(Guid actorUserId, SaveCatalogItemRequest request, CancellationToken cancellationToken);
     Task<CatalogItemSummary> UpdateItemAsync(Guid actorUserId, Guid itemId, SaveCatalogItemRequest request, CancellationToken cancellationToken);
     Task DeleteItemAsync(Guid actorUserId, Guid itemId, CancellationToken cancellationToken);
+    Task<IReadOnlyList<CatalogItemImageSummary>> GetImagesAsync(Guid itemId, CancellationToken cancellationToken);
+    Task<CatalogImageUploadTicket> BeginImageUploadAsync(Guid actorUserId, Guid itemId, BeginCatalogImageUploadRequest request, CancellationToken cancellationToken);
+    Task<CatalogItemImageSummary> ConfirmImageUploadAsync(Guid actorUserId, Guid itemId, Guid imageId, CancellationToken cancellationToken);
+    Task DeleteImageAsync(Guid actorUserId, Guid itemId, Guid imageId, CancellationToken cancellationToken);
 }

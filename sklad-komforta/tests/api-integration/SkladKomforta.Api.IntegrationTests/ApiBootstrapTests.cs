@@ -67,6 +67,15 @@ public sealed class ApiBootstrapTests : IClassFixture<ApiFactory>
     }
 
     [Fact]
+    public async Task CatalogImagesEndpointRequiresAccessToken()
+    {
+        var itemId = Guid.NewGuid();
+        var response = await _client.GetAsync($"/api/v1/catalog/items/{itemId}/images");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
     public async Task CompanyEndpointRequiresAccessToken()
     {
         var response = await _client.GetAsync("/api/v1/company/profile");

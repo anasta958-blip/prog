@@ -176,6 +176,7 @@ final class CatalogItem {
     required this.values,
     required this.createdAt,
     required this.updatedAt,
+    this.thumbnailUrl,
   });
   final String id;
   final String categoryId;
@@ -187,6 +188,7 @@ final class CatalogItem {
   final Map<String, dynamic> values;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final String? thumbnailUrl;
   factory CatalogItem.fromJson(Map<String, dynamic> json) => CatalogItem(
     id: json['id'] as String,
     categoryId: json['categoryId'] as String,
@@ -200,6 +202,21 @@ final class CatalogItem {
     ),
     createdAt: DateTime.parse(json['createdAt'] as String),
     updatedAt: DateTime.parse(json['updatedAt'] as String),
+    thumbnailUrl: json['thumbnailUrl'] as String?,
+  );
+
+  CatalogItem withThumbnail(String? value) => CatalogItem(
+    id: id,
+    categoryId: categoryId,
+    sectionId: sectionId,
+    groupId: groupId,
+    name: name,
+    marking: marking,
+    status: status,
+    values: values,
+    createdAt: createdAt,
+    updatedAt: updatedAt,
+    thumbnailUrl: value,
   );
 }
 
@@ -224,6 +241,51 @@ final class CatalogItemPage {
         page: json['page'] as int,
         pageSize: json['pageSize'] as int,
         total: json['total'] as int,
+      );
+}
+
+/// Изображение карточки с короткоживущей защищённой ссылкой просмотра.
+final class CatalogItemImage {
+  const CatalogItemImage({
+    required this.id,
+    required this.fileName,
+    required this.contentType,
+    required this.byteSize,
+    required this.sortOrder,
+    required this.downloadUrl,
+  });
+  final String id;
+  final String fileName;
+  final String contentType;
+  final int byteSize;
+  final int sortOrder;
+  final String downloadUrl;
+  factory CatalogItemImage.fromJson(Map<String, dynamic> json) =>
+      CatalogItemImage(
+        id: json['id'] as String,
+        fileName: json['fileName'] as String,
+        contentType: json['contentType'] as String,
+        byteSize: json['byteSize'] as int,
+        sortOrder: json['sortOrder'] as int,
+        downloadUrl: json['downloadUrl'] as String,
+      );
+}
+
+/// Параметры прямой загрузки в закрытое S3-совместимое хранилище.
+final class CatalogImageUploadTicket {
+  const CatalogImageUploadTicket({
+    required this.imageId,
+    required this.uploadUrl,
+    required this.expiresAt,
+  });
+  final String imageId;
+  final String uploadUrl;
+  final DateTime expiresAt;
+  factory CatalogImageUploadTicket.fromJson(Map<String, dynamic> json) =>
+      CatalogImageUploadTicket(
+        imageId: json['imageId'] as String,
+        uploadUrl: json['uploadUrl'] as String,
+        expiresAt: DateTime.parse(json['expiresAt'] as String),
       );
 }
 

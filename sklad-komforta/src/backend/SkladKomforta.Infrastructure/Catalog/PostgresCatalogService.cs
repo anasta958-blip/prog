@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text.Json;
 using Npgsql;
 using NpgsqlTypes;
+using SkladKomforta.Application.Abstractions.Files;
 using SkladKomforta.Application.Abstractions.Persistence;
 using SkladKomforta.Application.Catalog;
 using SkladKomforta.Application.Identity;
@@ -15,9 +16,20 @@ namespace SkladKomforta.Infrastructure.Catalog;
 /// Хранит карточки в текущей tenant-схеме и проверяет их по материализованной
 /// onboarding-конфигурации до выполнения изменяющего SQL.
 /// </summary>
-internal sealed class PostgresCatalogService(IDatabaseConnectionFactory connectionFactory) : ICatalogService
+internal sealed class PostgresCatalogService(
+    IDatabaseConnectionFactory connectionFactory,
+    IObjectStorage objectStorage) : ICatalogService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly Dictionary<string, string> ImageExtensions =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["image/jpeg"] = ".jpg",
+            ["image/png"] = ".png",
+            ["image/webp"] = ".webp",
+        };
+    private const long MaxImageByteSize = 10 * 1024 * 1024;
+    private const int MaxImagesPerItem = 8;
     private static readonly HashSet<string> ReservedValueCodes =
         ["group", "name", "marking"];
 
@@ -46,8 +58,18 @@ internal sealed class PostgresCatalogService(IDatabaseConnectionFactory connecti
             SELECT item.id, item.category_id, item.section_id, item.group_id,
                    item.name, item.marking, item.status, item.values,
                    item.created_by, item.created_at, item.updated_by, item.updated_at,
+                   image.object_key,
                    count(*) OVER()
             FROM catalog_items AS item
+            LEFT JOIN LATERAL (
+                SELECT catalog_image.object_key
+                FROM catalog_item_images AS catalog_image
+                WHERE catalog_image.catalog_item_id = item.id
+                  AND catalog_image.ready_at IS NOT NULL
+                  AND catalog_image.deleted_at IS NULL
+                ORDER BY catalog_image.sort_order, catalog_image.created_at, catalog_image.id
+                LIMIT 1
+            ) AS image ON true
             WHERE item.deleted_at IS NULL
               AND (@category_id IS NULL OR item.category_id = @category_id)
               AND (@section_id IS NULL OR item.section_id = @section_id)
@@ -69,8 +91,19 @@ internal sealed class PostgresCatalogService(IDatabaseConnectionFactory connecti
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            items.Add(ReadItem(reader));
-            total = checked((int)reader.GetInt64(12));
+            var item = ReadItem(reader);
+            if (!reader.IsDBNull(12))
+            {
+                item = item with
+                {
+                    ThumbnailUrl = await objectStorage.CreateDownloadUrlAsync(
+                        reader.GetString(12),
+                        TimeSpan.FromMinutes(15),
+                        cancellationToken),
+                };
+            }
+            items.Add(item);
+            total = checked((int)reader.GetInt64(13));
         }
         return new CatalogItemPage(items, page, pageSize, total);
     }
@@ -170,6 +203,194 @@ internal sealed class PostgresCatalogService(IDatabaseConnectionFactory connecti
         if (await command.ExecuteNonQueryAsync(cancellationToken) != 1) throw NotFound();
         await WriteAuditAsync(connection, transaction, actorUserId, itemId, "deleted", before, null, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<CatalogItemImageSummary>> GetImagesAsync(
+        Guid itemId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
+        await ReadItemAsync(connection, null, itemId, cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, file_name, content_type, byte_size, sort_order, object_key
+            FROM catalog_item_images
+            WHERE catalog_item_id = @item_id
+              AND ready_at IS NOT NULL AND deleted_at IS NULL
+            ORDER BY sort_order, created_at, id
+            """;
+        AddParameter(command, "item_id", itemId);
+        var rows = new List<ImageRow>();
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+                rows.Add(new ImageRow(
+                    reader.GetGuid(0),
+                    reader.GetString(1),
+                    reader.GetString(2),
+                    reader.GetInt64(3),
+                    reader.GetInt32(4),
+                    reader.GetString(5),
+                    true));
+        }
+
+        var result = new List<CatalogItemImageSummary>(rows.Count);
+        foreach (var row in rows)
+        {
+            result.Add(new CatalogItemImageSummary(
+                row.Id,
+                row.FileName,
+                row.ContentType,
+                row.ByteSize,
+                row.SortOrder,
+                await objectStorage.CreateDownloadUrlAsync(
+                    row.ObjectKey,
+                    TimeSpan.FromMinutes(5),
+                    cancellationToken)));
+        }
+        return result;
+    }
+
+    /// <inheritdoc />
+    public async Task<CatalogImageUploadTicket> BeginImageUploadAsync(
+        Guid actorUserId,
+        Guid itemId,
+        BeginCatalogImageUploadRequest request,
+        CancellationToken cancellationToken)
+    {
+        var fileName = Path.GetFileName(request.FileName.Trim());
+        if (fileName.Length is < 1 or > 180)
+            throw Invalid("catalog_image_name_invalid", "Имя изображения должно содержать от 1 до 180 символов.");
+        if (!ImageExtensions.TryGetValue(request.ContentType.Trim(), out var extension))
+            throw Invalid("catalog_image_type_invalid", "Допустимы изображения JPEG, PNG и WebP.");
+        if (request.ByteSize is < 1 or > MaxImageByteSize)
+            throw Invalid("catalog_image_size_invalid", "Размер изображения не должен превышать 10 МБ.");
+
+        await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await ReadItemAsync(connection, transaction, itemId, cancellationToken);
+        int sortOrder;
+        await using (var count = connection.CreateCommand())
+        {
+            count.Transaction = transaction;
+            count.CommandText = """
+                SELECT count(*), COALESCE(max(sort_order), -1) + 1
+                FROM catalog_item_images
+                WHERE catalog_item_id = @item_id AND deleted_at IS NULL
+                  AND (ready_at IS NOT NULL OR created_at > now() - interval '1 hour')
+                """;
+            AddParameter(count, "item_id", itemId);
+            await using var reader = await count.ExecuteReaderAsync(cancellationToken);
+            await reader.ReadAsync(cancellationToken);
+            if (reader.GetInt64(0) >= MaxImagesPerItem)
+                throw Invalid("catalog_image_limit", "К одной карточке можно добавить не более 8 изображений.");
+            sortOrder = reader.GetInt32(1);
+        }
+
+        var imageId = Guid.NewGuid();
+        var objectKey = $"catalog/{itemId:N}/{imageId:N}{extension}";
+        await using (var insert = connection.CreateCommand())
+        {
+            insert.Transaction = transaction;
+            insert.CommandText = """
+                INSERT INTO catalog_item_images
+                    (id, catalog_item_id, object_key, file_name, content_type,
+                     byte_size, sort_order, created_by)
+                VALUES
+                    (@id, @item_id, @object_key, @file_name, @content_type,
+                     @byte_size, @sort_order, @actor)
+                """;
+            AddParameter(insert, "id", imageId);
+            AddParameter(insert, "item_id", itemId);
+            AddParameter(insert, "object_key", objectKey);
+            AddParameter(insert, "file_name", fileName);
+            AddParameter(insert, "content_type", request.ContentType.Trim().ToLowerInvariant());
+            AddParameter(insert, "byte_size", request.ByteSize);
+            AddParameter(insert, "sort_order", sortOrder);
+            AddParameter(insert, "actor", actorUserId);
+            await insert.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await transaction.CommitAsync(cancellationToken);
+
+        var expiresAt = DateTimeOffset.UtcNow.AddMinutes(5);
+        return new CatalogImageUploadTicket(
+            imageId,
+            await objectStorage.CreateUploadUrlAsync(
+                objectKey,
+                request.ContentType.Trim().ToLowerInvariant(),
+                TimeSpan.FromMinutes(5),
+                cancellationToken),
+            expiresAt);
+    }
+
+    /// <inheritdoc />
+    public async Task<CatalogItemImageSummary> ConfirmImageUploadAsync(
+        Guid actorUserId,
+        Guid itemId,
+        Guid imageId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var row = await ReadImageRowAsync(connection, transaction, itemId, imageId, false, cancellationToken);
+        var metadata = await objectStorage.GetMetadataAsync(row.ObjectKey, cancellationToken);
+        if (metadata is null || metadata.ByteSize != row.ByteSize ||
+            !string.Equals(metadata.ContentType, row.ContentType, StringComparison.OrdinalIgnoreCase))
+        {
+            throw Invalid("catalog_image_upload_invalid", "Загруженный файл не соответствует выбранному изображению.");
+        }
+
+        await using (var update = connection.CreateCommand())
+        {
+            update.Transaction = transaction;
+            update.CommandText = """
+                UPDATE catalog_item_images SET ready_at = COALESCE(ready_at, now())
+                WHERE id = @id AND catalog_item_id = @item_id AND deleted_at IS NULL
+                """;
+            AddParameter(update, "id", imageId);
+            AddParameter(update, "item_id", itemId);
+            if (await update.ExecuteNonQueryAsync(cancellationToken) != 1)
+                throw ImageNotFound();
+        }
+        await WriteImageAuditAsync(connection, transaction, actorUserId, itemId, imageId, "image_added", cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        var downloadUrl = await objectStorage.CreateDownloadUrlAsync(row.ObjectKey, TimeSpan.FromMinutes(5), cancellationToken);
+        return new CatalogItemImageSummary(row.Id, row.FileName, row.ContentType, row.ByteSize, row.SortOrder, downloadUrl);
+    }
+
+    /// <inheritdoc />
+    public async Task DeleteImageAsync(
+        Guid actorUserId,
+        Guid itemId,
+        Guid imageId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var row = await ReadImageRowAsync(connection, transaction, itemId, imageId, false, cancellationToken);
+        await using (var update = connection.CreateCommand())
+        {
+            update.Transaction = transaction;
+            update.CommandText = """
+                UPDATE catalog_item_images SET deleted_at = now()
+                WHERE id = @id AND catalog_item_id = @item_id AND deleted_at IS NULL
+                """;
+            AddParameter(update, "id", imageId);
+            AddParameter(update, "item_id", itemId);
+            if (await update.ExecuteNonQueryAsync(cancellationToken) != 1)
+                throw ImageNotFound();
+        }
+        await WriteImageAuditAsync(
+            connection,
+            transaction,
+            actorUserId,
+            itemId,
+            imageId,
+            row.IsReady ? "image_deleted" : "image_upload_cancelled",
+            cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        await objectStorage.DeleteAsync(row.ObjectKey, cancellationToken);
     }
 
     private static async Task<IReadOnlyList<CatalogCategorySummary>> ReadCategoriesAsync(
@@ -412,6 +633,61 @@ internal sealed class PostgresCatalogService(IDatabaseConnectionFactory connecti
             .ToDictionary(item => item.Name, item => item.Value.Clone(), StringComparer.Ordinal);
     }
 
+    private static async Task<ImageRow> ReadImageRowAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        Guid itemId,
+        Guid imageId,
+        bool requireReady,
+        CancellationToken token)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT id, file_name, content_type, byte_size, sort_order, object_key,
+                   ready_at IS NOT NULL
+            FROM catalog_item_images
+            WHERE id = @id AND catalog_item_id = @item_id AND deleted_at IS NULL
+              AND (@require_ready = false OR ready_at IS NOT NULL)
+            """;
+        AddParameter(command, "id", imageId);
+        AddParameter(command, "item_id", itemId);
+        AddParameter(command, "require_ready", requireReady);
+        await using var reader = await command.ExecuteReaderAsync(token);
+        if (!await reader.ReadAsync(token)) throw ImageNotFound();
+        return new ImageRow(
+            reader.GetGuid(0),
+            reader.GetString(1),
+            reader.GetString(2),
+            reader.GetInt64(3),
+            reader.GetInt32(4),
+            reader.GetString(5),
+            reader.GetBoolean(6));
+    }
+
+    private static async Task WriteImageAuditAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        Guid actor,
+        Guid itemId,
+        Guid imageId,
+        string action,
+        CancellationToken token)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO audit_log (actor_user_id, entity_type, entity_id, action, diff)
+            VALUES (@actor, 'catalog_item', @item_id, @action,
+                    jsonb_build_object('imageId', @image_id))
+            """;
+        AddParameter(command, "actor", actor);
+        AddParameter(command, "item_id", itemId);
+        AddParameter(command, "image_id", imageId);
+        AddParameter(command, "action", action);
+        await command.ExecuteNonQueryAsync(token);
+    }
+
     private static async Task WriteAuditAsync(
         DbConnection connection,
         DbTransaction transaction,
@@ -495,6 +771,9 @@ internal sealed class PostgresCatalogService(IDatabaseConnectionFactory connecti
     private static IdentityException NotFound() =>
         new(404, "catalog_item_not_found", "Товар каталога не найден.");
 
+    private static IdentityException ImageNotFound() =>
+        new(404, "catalog_image_not_found", "Изображение товара не найдено.");
+
     private static void AddParameter(DbCommand command, string name, object value)
     {
         var parameter = command.CreateParameter();
@@ -521,6 +800,15 @@ internal sealed class PostgresCatalogService(IDatabaseConnectionFactory connecti
         string Marking,
         string Status,
         IReadOnlyDictionary<string, JsonElement> Values);
+
+    private sealed record ImageRow(
+        Guid Id,
+        string FileName,
+        string ContentType,
+        long ByteSize,
+        int SortOrder,
+        string ObjectKey,
+        bool IsReady);
 
     private sealed class MutableCategory(Guid id, string name, int sortOrder)
     {

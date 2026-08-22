@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:sklad_komforta_app/core/config/app_config.dart';
+import 'package:sklad_komforta_app/core/network/api_exception.dart';
 import 'package:sklad_komforta_app/core/network/api_response_decoder.dart';
 import 'package:sklad_komforta_app/core/network/http_client_factory.dart'
     if (dart.library.js_interop) 'package:sklad_komforta_app/core/network/http_client_factory_web.dart';
@@ -31,8 +33,21 @@ abstract interface class CatalogGateway {
   void close();
 }
 
+/// Дополнительный контракт файлов карточки, отделённый от базового CRUD.
+abstract interface class CatalogImageGateway {
+  Future<List<CatalogItemImage>> getImages(String accessToken, String itemId);
+  Future<CatalogItemImage> uploadImage({
+    required String accessToken,
+    required String itemId,
+    required String fileName,
+    required String contentType,
+    required Uint8List bytes,
+  });
+  Future<void> deleteImage(String accessToken, String itemId, String imageId);
+}
+
 /// HTTP-реализация каталога с единым серверным конвертом `{ok,data,error}`.
-final class CatalogApi implements CatalogGateway {
+final class CatalogApi implements CatalogGateway, CatalogImageGateway {
   CatalogApi(this._config) : _client = createPlatformHttpClient();
 
   final AppConfig _config;
@@ -103,6 +118,102 @@ final class CatalogApi implements CatalogGateway {
   @override
   Future<void> deleteItem(String accessToken, String itemId) async {
     await _send('DELETE', '/catalog/items/$itemId', accessToken);
+  }
+
+  @override
+  Future<List<CatalogItemImage>> getImages(
+    String accessToken,
+    String itemId,
+  ) async {
+    final data = await _send(
+      'GET',
+      '/catalog/items/$itemId/images',
+      accessToken,
+    );
+    return (data as List<dynamic>)
+        .map((item) => CatalogItemImage.fromJson(item as Map<String, dynamic>))
+        .toList(growable: false);
+  }
+
+  @override
+  Future<CatalogItemImage> uploadImage({
+    required String accessToken,
+    required String itemId,
+    required String fileName,
+    required String contentType,
+    required Uint8List bytes,
+  }) async {
+    final ticketData = await _send(
+      'POST',
+      '/catalog/items/$itemId/images/uploads',
+      accessToken,
+      body: {
+        'fileName': fileName,
+        'contentType': contentType,
+        'byteSize': bytes.length,
+      },
+    );
+    final ticket = CatalogImageUploadTicket.fromJson(
+      ticketData as Map<String, dynamic>,
+    );
+    try {
+      final uploadUri = Uri.parse(ticket.uploadUrl);
+      late final http.Response uploadResponse;
+      try {
+        // Используем тот же управляемый платформенный клиент, что и для REST API.
+        uploadResponse = await _client.put(
+          uploadUri,
+          headers: {'Content-Type': contentType},
+          body: bytes,
+        );
+      } on http.ClientException catch (exception) {
+        final port = uploadUri.hasPort ? ':${uploadUri.port}' : '';
+        throw ApiException(
+          'catalog_image_storage_unreachable',
+          'Хранилище изображений недоступно по адресу '
+              '${uploadUri.host}$port: ${exception.message}',
+        );
+      }
+      if (uploadResponse.statusCode < 200 || uploadResponse.statusCode >= 300) {
+        throw ApiException(
+          'catalog_image_upload_failed',
+          'Не удалось загрузить изображение в хранилище.',
+          uploadResponse.statusCode,
+        );
+      }
+      final confirmed = await _send(
+        'POST',
+        '/catalog/items/$itemId/images/${ticket.imageId}/confirm',
+        accessToken,
+      );
+      return CatalogItemImage.fromJson(confirmed as Map<String, dynamic>);
+    } on Object {
+      // Неудачная попытка не должна занимать один из восьми слотов карточки.
+      // Ошибку очистки намеренно не подменяем исходной ошибкой загрузки.
+      try {
+        await _send(
+          'DELETE',
+          '/catalog/items/$itemId/images/${ticket.imageId}',
+          accessToken,
+        );
+      } on Object {
+        // Сервер дополнительно исключает устаревшие ticket из лимита через час.
+      }
+      rethrow;
+    }
+  }
+
+  @override
+  Future<void> deleteImage(
+    String accessToken,
+    String itemId,
+    String imageId,
+  ) async {
+    await _send(
+      'DELETE',
+      '/catalog/items/$itemId/images/$imageId',
+      accessToken,
+    );
   }
 
   Future<dynamic> _send(

@@ -1,5 +1,4 @@
 import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/features/auth/auth_api.dart';
@@ -22,6 +21,7 @@ final class CatalogController extends ChangeNotifier {
   final bool _ownsApi;
   final int pageSize;
   Timer? _searchTimer;
+  int _imageLoadGeneration = 0;
 
   CatalogConfiguration? configuration;
   CatalogItemPage? result;
@@ -33,7 +33,10 @@ final class CatalogController extends ChangeNotifier {
   int page = 1;
   bool loading = false;
   bool saving = false;
+  bool imagesLoading = false;
   String? error;
+  String? imagesError;
+  List<CatalogItemImage> images = const [];
 
   List<CatalogItem> get items => result?.items ?? const [];
   int get total => result?.total ?? 0;
@@ -166,8 +169,113 @@ final class CatalogController extends ChangeNotifier {
 
   /// Выбирает карточку для постоянной панели редактирования.
   void selectItem(CatalogItem? item) {
+    if (selectedItem?.id != item?.id) {
+      images = const [];
+      imagesError = null;
+    }
     selectedItem = item;
     notifyListeners();
+  }
+
+  Future<void> loadImages(String itemId) async {
+    final imageApi = _api is CatalogImageGateway
+        ? _api as CatalogImageGateway
+        : null;
+    if (imageApi == null) return;
+    final generation = ++_imageLoadGeneration;
+    imagesLoading = true;
+    imagesError = null;
+    notifyListeners();
+    try {
+      final loaded = await _authorized(
+        (token) => imageApi.getImages(token, itemId),
+      );
+      if (generation == _imageLoadGeneration && selectedItem?.id == itemId) {
+        images = loaded;
+      }
+    } on AuthApiException catch (exception) {
+      if (generation == _imageLoadGeneration) {
+        imagesError = exception.message;
+      }
+    } on Object {
+      if (generation == _imageLoadGeneration) {
+        imagesError = 'Не удалось загрузить изображения.';
+      }
+    } finally {
+      if (generation == _imageLoadGeneration) {
+        imagesLoading = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<bool> uploadImage({
+    required String itemId,
+    required String fileName,
+    required String contentType,
+    required Uint8List bytes,
+  }) async {
+    final imageApi = _api is CatalogImageGateway
+        ? _api as CatalogImageGateway
+        : null;
+    if (imageApi == null || imagesLoading) return false;
+    imagesLoading = true;
+    imagesError = null;
+    notifyListeners();
+    try {
+      final uploaded = await _authorized(
+        (token) => imageApi.uploadImage(
+          accessToken: token,
+          itemId: itemId,
+          fileName: fileName,
+          contentType: contentType,
+          bytes: bytes,
+        ),
+      );
+      images = [...images, uploaded]
+        ..sort((left, right) => left.sortOrder.compareTo(right.sortOrder));
+      _replaceItemThumbnail(itemId, images.first.downloadUrl);
+      return true;
+    } on AuthApiException catch (exception) {
+      imagesError = exception.message;
+      return false;
+    } on Object {
+      imagesError = 'Не удалось загрузить изображение.';
+      return false;
+    } finally {
+      imagesLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> deleteImage(String itemId, String imageId) async {
+    final imageApi = _api is CatalogImageGateway
+        ? _api as CatalogImageGateway
+        : null;
+    if (imageApi == null || imagesLoading) return false;
+    imagesLoading = true;
+    imagesError = null;
+    notifyListeners();
+    try {
+      await _authorized(
+        (token) => imageApi.deleteImage(token, itemId, imageId),
+      );
+      images = images.where((image) => image.id != imageId).toList();
+      _replaceItemThumbnail(
+        itemId,
+        images.isEmpty ? null : images.first.downloadUrl,
+      );
+      return true;
+    } on AuthApiException catch (exception) {
+      imagesError = exception.message;
+      return false;
+    } on Object {
+      imagesError = 'Не удалось удалить изображение.';
+      return false;
+    } finally {
+      imagesLoading = false;
+      notifyListeners();
+    }
   }
 
   CatalogItemDraft createDraft() {
@@ -240,6 +348,26 @@ final class CatalogController extends ChangeNotifier {
     result = loaded;
     page = loaded.page;
     return loaded;
+  }
+
+  /// Обновляет только обложку изменённой карточки, не перезагружая страницу каталога.
+  void _replaceItemThumbnail(String itemId, String? thumbnailUrl) {
+    final current = result;
+    if (current == null) return;
+    result = CatalogItemPage(
+      items: current.items
+          .map(
+            (item) =>
+                item.id == itemId ? item.withThumbnail(thumbnailUrl) : item,
+          )
+          .toList(growable: false),
+      page: current.page,
+      pageSize: current.pageSize,
+      total: current.total,
+    );
+    if (selectedItem?.id == itemId) {
+      selectedItem = selectedItem!.withThumbnail(thumbnailUrl);
+    }
   }
 
   Future<T> _authorized<T>(Future<T> Function(String token) request) =>

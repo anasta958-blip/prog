@@ -20,7 +20,10 @@
 - `pageSize` — от 1 до 100, по умолчанию 50.
 
 Сортировка: сначала последние изменённые карточки. Ответ содержит `items`,
-`page`, `pageSize`, `total`. Требуемое право: `catalog.view`.
+`page`, `pageSize`, `total`. У каждого элемента `thumbnailUrl` содержит
+короткоживущую ссылку на первое готовое изображение либо `null`. Обложка
+выбирается в том же SQL-запросе, поэтому список не создаёт отдельный запрос к
+базе для каждой карточки. Требуемое право: `catalog.view`.
 
 ## Карточка
 
@@ -51,3 +54,17 @@
 Все ответы используют единый контракт `{ "ok": true, "data": ..., "error": null }`.
 Ошибки имеют стабильные коды, включая `catalog_item_exists`,
 `catalog_price_invalid`, `catalog_structure_invalid` и `catalog_field_type_invalid`.
+# Изображения карточки
+
+- `GET /api/v1/catalog/items/{itemId}/images` возвращает готовые изображения с
+  временными download URL;
+- `POST /api/v1/catalog/items/{itemId}/images/uploads` проверяет имя, MIME и
+  размер и выдаёт upload ticket на пять минут;
+- клиент загружает байты напрямую в S3/MinIO методом `PUT` с тем же
+  `Content-Type`;
+- `POST /api/v1/catalog/items/{itemId}/images/{imageId}/confirm` сверяет
+  метаданные реального объекта и только затем делает изображение видимым;
+- `DELETE /api/v1/catalog/items/{itemId}/images/{imageId}` удаляет изображение.
+
+Чтение требует `catalog.view`, остальные операции — `catalog.manage`. Допустимы
+JPEG, PNG и WebP размером до 10 МБ, не более восьми изображений на карточку.
