@@ -143,14 +143,42 @@ final class CatalogDictionary {
       );
 }
 
+/// Разрешённое направление привязки карточек между двумя категориями.
+final class CatalogDependency {
+  const CatalogDependency({
+    required this.id,
+    required this.sourceCategoryId,
+    required this.targetCategoryId,
+    required this.targetFieldCode,
+    required this.sortOrder,
+  });
+
+  final String id;
+  final String sourceCategoryId;
+  final String targetCategoryId;
+  final String targetFieldCode;
+  final int sortOrder;
+
+  factory CatalogDependency.fromJson(Map<String, dynamic> json) =>
+      CatalogDependency(
+        id: json['id'] as String,
+        sourceCategoryId: json['sourceCategoryId'] as String,
+        targetCategoryId: json['targetCategoryId'] as String,
+        targetFieldCode: json['targetFieldCode'] as String,
+        sortOrder: json['sortOrder'] as int,
+      );
+}
+
 /// Полная tenant-конфигурация, необходимая для динамического каталога.
 final class CatalogConfiguration {
   const CatalogConfiguration({
     required this.categories,
     required this.dictionaries,
+    this.dependencies = const [],
   });
   final List<CatalogCategory> categories;
   final List<CatalogDictionary> dictionaries;
+  final List<CatalogDependency> dependencies;
   factory CatalogConfiguration.fromJson(
     Map<String, dynamic> json,
   ) => CatalogConfiguration(
@@ -159,6 +187,9 @@ final class CatalogConfiguration {
         .toList(growable: false),
     dictionaries: (json['dictionaries'] as List<dynamic>)
         .map((item) => CatalogDictionary.fromJson(item as Map<String, dynamic>))
+        .toList(growable: false),
+    dependencies: ((json['dependencies'] as List<dynamic>?) ?? const [])
+        .map((item) => CatalogDependency.fromJson(item as Map<String, dynamic>))
         .toList(growable: false),
   );
 }
@@ -287,6 +318,60 @@ final class CatalogImageUploadTicket {
         uploadUrl: json['uploadUrl'] as String,
         expiresAt: DateTime.parse(json['expiresAt'] as String),
       );
+}
+
+/// Карточка исходной категории, доступная для новой привязки.
+final class CatalogRelationCandidate {
+  const CatalogRelationCandidate({
+    required this.id,
+    required this.name,
+    required this.marking,
+    required this.status,
+  });
+
+  final String id;
+  final String name;
+  final String marking;
+  final String status;
+
+  factory CatalogRelationCandidate.fromJson(Map<String, dynamic> json) =>
+      CatalogRelationCandidate(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        marking: json['marking'] as String,
+        status: json['status'] as String,
+      );
+}
+
+/// Одна карточка, прикреплённая к редактируемому товару по UUID.
+final class CatalogItemRelation {
+  const CatalogItemRelation({
+    required this.dependencyId,
+    required this.sourceItemId,
+    required this.sourceName,
+    required this.sourceMarking,
+    required this.sortOrder,
+  });
+
+  final String dependencyId;
+  final String sourceItemId;
+  final String sourceName;
+  final String sourceMarking;
+  final int sortOrder;
+
+  factory CatalogItemRelation.fromJson(Map<String, dynamic> json) =>
+      CatalogItemRelation(
+        dependencyId: json['dependencyId'] as String,
+        sourceItemId: json['sourceItemId'] as String,
+        sourceName: json['sourceName'] as String,
+        sourceMarking: json['sourceMarking'] as String,
+        sortOrder: json['sortOrder'] as int,
+      );
+
+  Map<String, dynamic> toSaveJson() => {
+    'dependencyId': dependencyId,
+    'sourceItemId': sourceItemId,
+  };
 }
 
 /// Полное редактируемое состояние карточки для POST и PUT.

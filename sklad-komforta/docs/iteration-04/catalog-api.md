@@ -68,3 +68,15 @@
 
 Чтение требует `catalog.view`, остальные операции — `catalog.manage`. Допустимы
 JPEG, PNG и WebP размером до 10 МБ, не более восьми изображений на карточку.
+
+# Связи карточек
+
+- `GET /api/v1/catalog/items/{itemId}/relations` — сохранённые связи карточки;
+- `GET /api/v1/catalog/dependencies/{dependencyId}/candidates` — серверный поиск
+  карточек исходной категории, параметры `search` и `limit`;
+- `PUT /api/v1/catalog/items/{itemId}/relations` — полная атомарная замена
+  набора связей.
+
+Тело замены является массивом объектов `dependencyId` и `sourceItemId`.
+Количество не передаётся и не хранится. Чтение и поиск требуют `catalog.view`,
+изменение — `catalog.manage`.

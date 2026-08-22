@@ -95,6 +95,30 @@ internal static class CatalogEndpoints
                 return Results.Ok(ApiResponse.Success(new { deleted = true }));
             })
             .RequireTenantPermission("catalog.manage");
+        catalog.MapGet("/items/{itemId:guid}/relations", async (
+                Guid itemId,
+                ICatalogService service,
+                CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.GetRelationsAsync(itemId, token))))
+            .RequireTenantPermission("catalog.view");
+        catalog.MapPut("/items/{itemId:guid}/relations", async (
+                HttpContext context,
+                Guid itemId,
+                IReadOnlyList<SaveCatalogItemRelationRequest> request,
+                ICatalogService service,
+                CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.ReplaceRelationsAsync(
+                    UserId(context.User), itemId, request, token))))
+            .RequireTenantPermission("catalog.manage");
+        catalog.MapGet("/dependencies/{dependencyId:guid}/candidates", async (
+                Guid dependencyId,
+                string? search,
+                int? limit,
+                ICatalogService service,
+                CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.SearchRelationCandidatesAsync(
+                    dependencyId, search, limit ?? 30, token))))
+            .RequireTenantPermission("catalog.view");
         return endpoints;
     }
 

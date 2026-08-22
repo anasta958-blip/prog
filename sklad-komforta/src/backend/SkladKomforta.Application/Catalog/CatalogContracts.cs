@@ -41,10 +41,19 @@ public sealed record CatalogDictionarySummary(
     int SortOrder,
     IReadOnlyList<CatalogDictionaryItemSummary> Items);
 
+/// <summary>Разрешённое направление связи между двумя категориями.</summary>
+public sealed record CatalogDependencySummary(
+    Guid Id,
+    Guid SourceCategoryId,
+    Guid TargetCategoryId,
+    string TargetFieldCode,
+    int SortOrder);
+
 /// <summary>Полная конфигурация, необходимая клиенту для построения каталога.</summary>
 public sealed record CatalogConfiguration(
     IReadOnlyList<CatalogCategorySummary> Categories,
-    IReadOnlyList<CatalogDictionarySummary> Dictionaries);
+    IReadOnlyList<CatalogDictionarySummary> Dictionaries,
+    IReadOnlyList<CatalogDependencySummary> Dependencies);
 
 /// <summary>Карточка каталога с системными и настроенными значениями.</summary>
 public sealed record CatalogItemSummary(
@@ -90,6 +99,26 @@ public sealed record CatalogImageUploadTicket(
     string UploadUrl,
     DateTimeOffset ExpiresAt);
 
+/// <summary>Карточка, которую можно выбрать как зависимую позицию.</summary>
+public sealed record CatalogRelationCandidate(
+    Guid Id,
+    string Name,
+    string Marking,
+    string Status);
+
+/// <summary>Сохранённая зависимая позиция целевой карточки.</summary>
+public sealed record CatalogItemRelationSummary(
+    Guid DependencyId,
+    Guid SourceItemId,
+    string SourceName,
+    string SourceMarking,
+    int SortOrder);
+
+/// <summary>Одна строка полной замены зависимых позиций карточки.</summary>
+public sealed record SaveCatalogItemRelationRequest(
+    Guid DependencyId,
+    Guid SourceItemId);
+
 /// <summary>Фильтры серверной страницы каталога.</summary>
 public sealed record CatalogItemQuery(
     Guid? CategoryId,
@@ -122,4 +151,7 @@ public interface ICatalogService
     Task<CatalogImageUploadTicket> BeginImageUploadAsync(Guid actorUserId, Guid itemId, BeginCatalogImageUploadRequest request, CancellationToken cancellationToken);
     Task<CatalogItemImageSummary> ConfirmImageUploadAsync(Guid actorUserId, Guid itemId, Guid imageId, CancellationToken cancellationToken);
     Task DeleteImageAsync(Guid actorUserId, Guid itemId, Guid imageId, CancellationToken cancellationToken);
+    Task<IReadOnlyList<CatalogItemRelationSummary>> GetRelationsAsync(Guid itemId, CancellationToken cancellationToken);
+    Task<IReadOnlyList<CatalogRelationCandidate>> SearchRelationCandidatesAsync(Guid dependencyId, string? search, int limit, CancellationToken cancellationToken);
+    Task<IReadOnlyList<CatalogItemRelationSummary>> ReplaceRelationsAsync(Guid actorUserId, Guid itemId, IReadOnlyList<SaveCatalogItemRelationRequest> relations, CancellationToken cancellationToken);
 }

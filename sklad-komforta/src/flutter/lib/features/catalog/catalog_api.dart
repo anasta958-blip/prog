@@ -46,8 +46,27 @@ abstract interface class CatalogImageGateway {
   Future<void> deleteImage(String accessToken, String itemId, String imageId);
 }
 
+/// Контракт привязок карточек отделён от базового CRUD и файлов.
+abstract interface class CatalogRelationGateway {
+  Future<List<CatalogItemRelation>> getRelations(
+    String accessToken,
+    String itemId,
+  );
+  Future<List<CatalogRelationCandidate>> searchRelationCandidates({
+    required String accessToken,
+    required String dependencyId,
+    required String search,
+  });
+  Future<List<CatalogItemRelation>> replaceRelations({
+    required String accessToken,
+    required String itemId,
+    required List<CatalogItemRelation> relations,
+  });
+}
+
 /// HTTP-реализация каталога с единым серверным конвертом `{ok,data,error}`.
-final class CatalogApi implements CatalogGateway, CatalogImageGateway {
+final class CatalogApi
+    implements CatalogGateway, CatalogImageGateway, CatalogRelationGateway {
   CatalogApi(this._config) : _client = createPlatformHttpClient();
 
   final AppConfig _config;
@@ -216,12 +235,68 @@ final class CatalogApi implements CatalogGateway, CatalogImageGateway {
     );
   }
 
+  @override
+  Future<List<CatalogItemRelation>> getRelations(
+    String accessToken,
+    String itemId,
+  ) async {
+    final data = await _send(
+      'GET',
+      '/catalog/items/$itemId/relations',
+      accessToken,
+    );
+    return (data as List<dynamic>)
+        .map(
+          (item) => CatalogItemRelation.fromJson(item as Map<String, dynamic>),
+        )
+        .toList(growable: false);
+  }
+
+  @override
+  Future<List<CatalogRelationCandidate>> searchRelationCandidates({
+    required String accessToken,
+    required String dependencyId,
+    required String search,
+  }) async {
+    final data = await _send(
+      'GET',
+      '/catalog/dependencies/$dependencyId/candidates',
+      accessToken,
+      query: {'search': search.trim(), 'limit': '30'},
+    );
+    return (data as List<dynamic>)
+        .map(
+          (item) =>
+              CatalogRelationCandidate.fromJson(item as Map<String, dynamic>),
+        )
+        .toList(growable: false);
+  }
+
+  @override
+  Future<List<CatalogItemRelation>> replaceRelations({
+    required String accessToken,
+    required String itemId,
+    required List<CatalogItemRelation> relations,
+  }) async {
+    final data = await _send(
+      'PUT',
+      '/catalog/items/$itemId/relations',
+      accessToken,
+      body: relations.map((item) => item.toSaveJson()).toList(),
+    );
+    return (data as List<dynamic>)
+        .map(
+          (item) => CatalogItemRelation.fromJson(item as Map<String, dynamic>),
+        )
+        .toList(growable: false);
+  }
+
   Future<dynamic> _send(
     String method,
     String path,
     String accessToken, {
     Map<String, String>? query,
-    Map<String, dynamic>? body,
+    Object? body,
   }) async {
     final uri = Uri.parse(
       '${_config.apiBaseUrl}$path',

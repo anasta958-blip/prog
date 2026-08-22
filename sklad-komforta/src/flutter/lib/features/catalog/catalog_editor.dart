@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
@@ -15,12 +16,18 @@ final class CatalogEditor extends StatefulWidget {
     required this.isNew,
     required this.images,
     required this.imagesLoading,
+    required this.relations,
+    required this.relationsLoading,
     required this.onClose,
     required this.onSave,
     this.imagesError,
+    this.relationsError,
     this.onDelete,
     this.onUploadImage,
     this.onDeleteImage,
+    this.onSearchRelations,
+    this.onAddRelation,
+    this.onRemoveRelation,
     super.key,
   });
 
@@ -31,7 +38,10 @@ final class CatalogEditor extends StatefulWidget {
   final bool isNew;
   final List<CatalogItemImage> images;
   final bool imagesLoading;
+  final List<CatalogItemRelation> relations;
+  final bool relationsLoading;
   final String? imagesError;
+  final String? relationsError;
   final VoidCallback onClose;
   final Future<bool> Function() onSave;
   final Future<bool> Function()? onDelete;
@@ -42,6 +52,18 @@ final class CatalogEditor extends StatefulWidget {
   )?
   onUploadImage;
   final Future<bool> Function(String imageId)? onDeleteImage;
+  final Future<List<CatalogRelationCandidate>> Function(
+    String dependencyId,
+    String search,
+  )?
+  onSearchRelations;
+  final Future<bool> Function(
+    CatalogDependency dependency,
+    CatalogRelationCandidate candidate,
+  )?
+  onAddRelation;
+  final Future<bool> Function(String dependencyId, String sourceItemId)?
+  onRemoveRelation;
 
   @override
   State<CatalogEditor> createState() => _CatalogEditorState();
@@ -112,17 +134,20 @@ class _CatalogEditorState extends State<CatalogEditor> {
                 _scroll(_priceFields()),
                 _scroll([const _StockPlaceholder()]),
                 _scroll([_imagesEditor()]),
+                _scroll([_relationsEditor()]),
               ],
             ),
           ),
         ),
-        if (widget.error != null || widget.imagesError != null)
+        if (widget.error != null ||
+            widget.imagesError != null ||
+            widget.relationsError != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(18, 8, 18, 0),
             child: Align(
               alignment: Alignment.centerLeft,
               child: Text(
-                widget.imagesError ?? widget.error!,
+                widget.relationsError ?? widget.imagesError ?? widget.error!,
                 style: const TextStyle(color: Color(0xFFFF809D)),
               ),
             ),
@@ -380,6 +405,128 @@ class _CatalogEditorState extends State<CatalogEditor> {
     );
   }
 
+  Widget _relationsEditor() {
+    if (widget.isNew) {
+      return const _EmptyTab(
+        icon: Icons.account_tree_outlined,
+        title: 'Сначала сохраните товар',
+        message:
+            'После первого сохранения к карточке можно привязать другие карточки.',
+      );
+    }
+    final dependencies = widget.configuration.dependencies
+        .where((item) => item.targetCategoryId == widget.draft.categoryId)
+        .toList();
+    if (dependencies.isEmpty) {
+      return const _EmptyTab(
+        icon: Icons.link_off_outlined,
+        title: 'Зависимости не настроены',
+        message: 'Разрешённые связи категорий задаются в настройках компании.',
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const _TabIntroduction(
+          icon: Icons.account_tree_outlined,
+          title: 'Связанные карточки',
+          message:
+              'Одна карточка может использоваться в любом количестве других товаров.',
+        ),
+        const SizedBox(height: 16),
+        for (final dependency in dependencies) ...[
+          _relationGroup(dependency),
+          const SizedBox(height: 12),
+        ],
+      ],
+    );
+  }
+
+  Widget _relationGroup(CatalogDependency dependency) {
+    final sourceCategory = widget.configuration.categories.firstWhere(
+      (item) => item.id == dependency.sourceCategoryId,
+    );
+    final attached = widget.relations
+        .where((item) => item.dependencyId == dependency.id)
+        .toList();
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFF0E1621),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF29384D)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    sourceCategory.name,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+                FilledButton.icon(
+                  onPressed:
+                      widget.relationsLoading ||
+                          widget.onSearchRelations == null ||
+                          widget.onAddRelation == null
+                      ? null
+                      : () => _pickRelation(dependency, sourceCategory.name),
+                  icon: const Icon(Icons.add_link, size: 18),
+                  label: const Text('Привязать'),
+                ),
+              ],
+            ),
+            if (attached.isEmpty) ...[
+              const SizedBox(height: 12),
+              const Text(
+                'Карточки не привязаны',
+                style: TextStyle(color: Color(0xFF8298B8)),
+              ),
+            ] else
+              for (final relation in attached) ...[
+                const SizedBox(height: 10),
+                _RelationRow(
+                  relation: relation,
+                  busy: widget.relationsLoading,
+                  onDelete: widget.onRemoveRelation == null
+                      ? null
+                      : () => widget.onRemoveRelation!(
+                          relation.dependencyId,
+                          relation.sourceItemId,
+                        ),
+                ),
+              ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickRelation(
+    CatalogDependency dependency,
+    String categoryName,
+  ) async {
+    final candidate = await showDialog<CatalogRelationCandidate>(
+      context: context,
+      builder: (context) => _RelationPickerDialog(
+        title: categoryName,
+        dependencyId: dependency.id,
+        excludedIds: widget.relations
+            .where((item) => item.dependencyId == dependency.id)
+            .map((item) => item.sourceItemId)
+            .toSet(),
+        search: widget.onSearchRelations!,
+      ),
+    );
+    if (candidate != null && mounted) {
+      await widget.onAddRelation!(dependency, candidate);
+    }
+  }
+
   Future<void> _pickImage() async {
     final file = await FilePicker.pickFile(
       type: FileType.custom,
@@ -471,6 +618,7 @@ final class _EditorTabs extends StatelessWidget {
           Expanded(child: _tab(1, Icons.payments_outlined, 'Цены')),
           Expanded(child: _tab(2, Icons.warehouse_outlined, 'Остатки')),
           Expanded(child: _tab(3, Icons.photo_library_outlined, 'Изображения')),
+          Expanded(child: _tab(4, Icons.account_tree_outlined, 'Связи')),
         ],
       ),
     ),
@@ -500,6 +648,197 @@ final class _EditorTabs extends StatelessWidget {
       ],
     ),
   );
+}
+
+final class _RelationRow extends StatelessWidget {
+  const _RelationRow({
+    required this.relation,
+    required this.busy,
+    required this.onDelete,
+  });
+
+  final CatalogItemRelation relation;
+  final bool busy;
+  final Future<bool> Function()? onDelete;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: const Color(0xFF152132),
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(12, 9, 4, 9),
+      child: Row(
+        children: [
+          const Icon(Icons.link, size: 18, color: Color(0xFF6DA2FF)),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  relation.sourceName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                if (relation.sourceMarking.isNotEmpty)
+                  Text(
+                    relation.sourceMarking,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF8298B8),
+                      fontSize: 12,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: 'Убрать связь',
+            onPressed: busy || onDelete == null ? null : onDelete,
+            color: const Color(0xFFFF7180),
+            icon: const Icon(Icons.link_off, size: 19),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+final class _RelationPickerDialog extends StatefulWidget {
+  const _RelationPickerDialog({
+    required this.title,
+    required this.dependencyId,
+    required this.excludedIds,
+    required this.search,
+  });
+
+  final String title;
+  final String dependencyId;
+  final Set<String> excludedIds;
+  final Future<List<CatalogRelationCandidate>> Function(
+    String dependencyId,
+    String search,
+  )
+  search;
+
+  @override
+  State<_RelationPickerDialog> createState() => _RelationPickerDialogState();
+}
+
+final class _RelationPickerDialogState extends State<_RelationPickerDialog> {
+  Timer? timer;
+  List<CatalogRelationCandidate> items = const [];
+  bool loading = true;
+  String? error;
+  int generation = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _load('');
+  }
+
+  @override
+  void dispose() {
+    timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text('Выберите: ${widget.title}'),
+    content: SizedBox(
+      width: 520,
+      height: 430,
+      child: Column(
+        children: [
+          TextField(
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: 'Поиск по наименованию или маркировке',
+              prefixIcon: Icon(Icons.search),
+            ),
+            onChanged: (value) {
+              timer?.cancel();
+              timer = Timer(
+                const Duration(milliseconds: 300),
+                () => _load(value),
+              );
+            },
+          ),
+          const SizedBox(height: 14),
+          Expanded(
+            child: loading
+                ? const Center(child: CircularProgressIndicator())
+                : error != null
+                ? Center(child: Text(error!))
+                : items.isEmpty
+                ? const Center(child: Text('Подходящие карточки не найдены'))
+                : ListView.separated(
+                    itemCount: items.length,
+                    separatorBuilder: (context, index) =>
+                        const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final item = items[index];
+                      return ListTile(
+                        title: Text(item.name),
+                        subtitle: item.marking.isEmpty
+                            ? null
+                            : Text(item.marking),
+                        trailing: item.status == 'approved'
+                            ? const Icon(
+                                Icons.check_circle_outline,
+                                color: Color(0xFF43CE8B),
+                              )
+                            : const Icon(
+                                Icons.schedule,
+                                color: Color(0xFFF5B64B),
+                              ),
+                        onTap: () => Navigator.pop(context, item),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Отмена'),
+      ),
+    ],
+  );
+
+  Future<void> _load(String query) async {
+    final request = ++generation;
+    if (mounted) {
+      setState(() {
+        loading = true;
+        error = null;
+      });
+    }
+    try {
+      final loaded = await widget.search(widget.dependencyId, query);
+      if (!mounted || request != generation) return;
+      setState(() {
+        items = loaded
+            .where((item) => !widget.excludedIds.contains(item.id))
+            .toList(growable: false);
+        loading = false;
+      });
+    } on Object {
+      if (!mounted || request != generation) return;
+      setState(() {
+        error = 'Не удалось загрузить карточки.';
+        loading = false;
+      });
+    }
+  }
 }
 
 final class _StockPlaceholder extends StatelessWidget {

@@ -39,7 +39,8 @@ internal sealed class PostgresCatalogService(
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
         var categories = await ReadCategoriesAsync(connection, cancellationToken);
         var dictionaries = await ReadDictionariesAsync(connection, cancellationToken);
-        return new CatalogConfiguration(categories, dictionaries);
+        var dependencies = await ReadDependenciesAsync(connection, cancellationToken);
+        return new CatalogConfiguration(categories, dictionaries, dependencies);
     }
 
     /// <inheritdoc />
@@ -393,6 +394,112 @@ internal sealed class PostgresCatalogService(
         await objectStorage.DeleteAsync(row.ObjectKey, cancellationToken);
     }
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<CatalogItemRelationSummary>> GetRelationsAsync(
+        Guid itemId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
+        await ReadItemAsync(connection, null, itemId, cancellationToken);
+        return await ReadRelationsAsync(connection, null, itemId, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<CatalogRelationCandidate>> SearchRelationCandidatesAsync(
+        Guid dependencyId,
+        string? search,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        var normalizedSearch = search?.Trim() ?? string.Empty;
+        var normalizedLimit = Math.Clamp(limit, 1, 50);
+        await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT item.id, item.name, item.marking, item.status
+            FROM catalog_category_dependencies AS dependency
+            JOIN catalog_items AS item
+              ON item.category_id = dependency.source_category_id
+             AND item.deleted_at IS NULL
+            WHERE dependency.id = @dependency_id
+              AND (@search = '' OR item.name ILIKE '%' || @search || '%'
+                   OR item.marking ILIKE '%' || @search || '%')
+            ORDER BY item.name, item.marking, item.id
+            LIMIT @limit
+            """;
+        AddParameter(command, "dependency_id", dependencyId);
+        AddParameter(command, "search", normalizedSearch);
+        AddParameter(command, "limit", normalizedLimit);
+        var result = new List<CatalogRelationCandidate>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            result.Add(new CatalogRelationCandidate(
+                reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetString(3)));
+        return result;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<CatalogItemRelationSummary>> ReplaceRelationsAsync(
+        Guid actorUserId,
+        Guid itemId,
+        IReadOnlyList<SaveCatalogItemRelationRequest> relations,
+        CancellationToken cancellationToken)
+    {
+        if (relations
+            .Select(item => (item.DependencyId, item.SourceItemId))
+            .Distinct()
+            .Count() != relations.Count)
+            throw Invalid("catalog_relation_duplicate", "Одна карточка не может быть привязана дважды.");
+
+        await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var target = await ReadItemAsync(connection, transaction, itemId, cancellationToken);
+        var before = await ReadRelationsAsync(connection, transaction, itemId, cancellationToken);
+
+        for (var index = 0; index < relations.Count; index++)
+            await ValidateRelationAsync(
+                connection,
+                transaction,
+                target.CategoryId,
+                relations[index],
+                cancellationToken);
+
+        await using (var delete = connection.CreateCommand())
+        {
+            delete.Transaction = transaction;
+            delete.CommandText = "DELETE FROM catalog_item_relations WHERE target_item_id = @target_item_id";
+            AddParameter(delete, "target_item_id", itemId);
+            await delete.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        for (var index = 0; index < relations.Count; index++)
+        {
+            var relation = relations[index];
+            await using var insert = connection.CreateCommand();
+            insert.Transaction = transaction;
+            insert.CommandText = """
+                INSERT INTO catalog_item_relations
+                    (dependency_id, target_item_id, source_item_id, sort_order,
+                     created_by, updated_by)
+                VALUES
+                    (@dependency_id, @target_item_id, @source_item_id, @sort_order,
+                     @actor, @actor)
+                """;
+            AddParameter(insert, "dependency_id", relation.DependencyId);
+            AddParameter(insert, "target_item_id", itemId);
+            AddParameter(insert, "source_item_id", relation.SourceItemId);
+            AddParameter(insert, "sort_order", index);
+            AddParameter(insert, "actor", actorUserId);
+            await insert.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        var after = await ReadRelationsAsync(connection, transaction, itemId, cancellationToken);
+        await WriteRelationAuditAsync(
+            connection, transaction, actorUserId, itemId, before, after, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return after;
+    }
+
     private static async Task<IReadOnlyList<CatalogCategorySummary>> ReadCategoriesAsync(
         DbConnection connection,
         CancellationToken token)
@@ -486,6 +593,25 @@ internal sealed class PostgresCatalogService(
                     reader.GetGuid(4), reader.GetString(5), reader.GetInt32(6)));
         }
         return dictionaries.Values.OrderBy(item => item.SortOrder).Select(item => item.ToSummary()).ToArray();
+    }
+
+    private static async Task<IReadOnlyList<CatalogDependencySummary>> ReadDependenciesAsync(
+        DbConnection connection,
+        CancellationToken token)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, source_category_id, target_category_id, target_field_code, sort_order
+            FROM catalog_category_dependencies
+            ORDER BY sort_order, id
+            """;
+        var result = new List<CatalogDependencySummary>();
+        await using var reader = await command.ExecuteReaderAsync(token);
+        while (await reader.ReadAsync(token))
+            result.Add(new CatalogDependencySummary(
+                reader.GetGuid(0), reader.GetGuid(1), reader.GetGuid(2),
+                reader.GetString(3), reader.GetInt32(4)));
+        return result;
     }
 
     private static async Task<NormalizedItem> ValidateAsync(
@@ -685,6 +811,84 @@ internal sealed class PostgresCatalogService(
         AddParameter(command, "item_id", itemId);
         AddParameter(command, "image_id", imageId);
         AddParameter(command, "action", action);
+        await command.ExecuteNonQueryAsync(token);
+    }
+
+    private static async Task<IReadOnlyList<CatalogItemRelationSummary>> ReadRelationsAsync(
+        DbConnection connection,
+        DbTransaction? transaction,
+        Guid itemId,
+        CancellationToken token)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT relation.dependency_id, source.id, source.name, source.marking,
+                   relation.sort_order
+            FROM catalog_item_relations AS relation
+            JOIN catalog_items AS source
+              ON source.id = relation.source_item_id AND source.deleted_at IS NULL
+            WHERE relation.target_item_id = @target_item_id
+            ORDER BY relation.sort_order, relation.id
+            """;
+        AddParameter(command, "target_item_id", itemId);
+        var result = new List<CatalogItemRelationSummary>();
+        await using var reader = await command.ExecuteReaderAsync(token);
+        while (await reader.ReadAsync(token))
+            result.Add(new CatalogItemRelationSummary(
+                reader.GetGuid(0), reader.GetGuid(1), reader.GetString(2),
+                reader.GetString(3), reader.GetInt32(4)));
+        return result;
+    }
+
+    private static async Task ValidateRelationAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        Guid targetCategoryId,
+        SaveCatalogItemRelationRequest relation,
+        CancellationToken token)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT EXISTS (
+                SELECT 1
+                FROM catalog_category_dependencies AS dependency
+                JOIN catalog_items AS source
+                  ON source.id = @source_item_id
+                 AND source.category_id = dependency.source_category_id
+                 AND source.deleted_at IS NULL
+                WHERE dependency.id = @dependency_id
+                  AND dependency.target_category_id = @target_category_id
+            )
+            """;
+        AddParameter(command, "source_item_id", relation.SourceItemId);
+        AddParameter(command, "dependency_id", relation.DependencyId);
+        AddParameter(command, "target_category_id", targetCategoryId);
+        if (await command.ExecuteScalarAsync(token) is not true)
+            throw Invalid(
+                "catalog_relation_invalid",
+                "Выбранную карточку нельзя привязать по этой зависимости.");
+    }
+
+    private static async Task WriteRelationAuditAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        Guid actor,
+        Guid itemId,
+        IReadOnlyList<CatalogItemRelationSummary> before,
+        IReadOnlyList<CatalogItemRelationSummary> after,
+        CancellationToken token)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO audit_log (actor_user_id, entity_type, entity_id, action, diff)
+            VALUES (@actor, 'catalog_item', @item_id, 'relations_replaced', CAST(@diff AS jsonb))
+            """;
+        AddParameter(command, "actor", actor);
+        AddParameter(command, "item_id", itemId);
+        AddParameter(command, "diff", JsonSerializer.Serialize(new { before, after }, JsonOptions));
         await command.ExecuteNonQueryAsync(token);
     }
 

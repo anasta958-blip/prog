@@ -129,6 +129,32 @@ void main() {
       auth.dispose();
     },
   );
+
+  test('связь сохраняет UUID выбранной карточки без количества', () async {
+    final catalogApi = _MemoryCatalogGateway();
+    final auth = _authorizedController(config);
+    final controller = CatalogController(config, auth, api: catalogApi);
+    await controller.initialize();
+    controller.selectItem(controller.items.single);
+    await controller.loadRelations(controller.items.single.id);
+
+    final candidates = await controller.searchRelationCandidates(
+      _dependency.id,
+      'монтаж',
+    );
+    final added = await controller.addRelation(
+      controller.items.single.id,
+      _dependency,
+      candidates.single,
+    );
+
+    expect(added, isTrue);
+    expect(controller.relations.single.sourceName, 'Монтаж');
+    expect(catalogApi.savedRelations.single.sourceItemId, _workCandidate.id);
+
+    controller.dispose();
+    auth.dispose();
+  });
 }
 
 AuthController _authorizedController(AppConfig config) => AuthController(
@@ -170,6 +196,21 @@ final _category = CatalogCategory(
   sections: const [],
 );
 
+const _dependency = CatalogDependency(
+  id: '44444444-4444-4444-4444-444444444444',
+  sourceCategoryId: '55555555-5555-5555-5555-555555555555',
+  targetCategoryId: '11111111-1111-1111-1111-111111111111',
+  targetFieldCode: 'linked_services',
+  sortOrder: 0,
+);
+
+const _workCandidate = CatalogRelationCandidate(
+  id: '66666666-6666-6666-6666-666666666666',
+  name: 'Монтаж',
+  marking: 'M-1',
+  status: 'approved',
+);
+
 CatalogItem _item({
   String id = '22222222-2222-2222-2222-222222222222',
   String name = 'Вентилятор',
@@ -187,7 +228,8 @@ CatalogItem _item({
   updatedAt: DateTime.utc(2026, 8, 2),
 );
 
-final class _MemoryCatalogGateway implements CatalogGateway {
+final class _MemoryCatalogGateway
+    implements CatalogGateway, CatalogRelationGateway {
   final items = <CatalogItem>[_item()];
   CatalogConfiguration configuration = CatalogConfiguration(
     categories: [_category],
@@ -198,6 +240,7 @@ final class _MemoryCatalogGateway implements CatalogGateway {
   int? lastPageSize;
   String? lastSearch;
   CatalogItemDraft? createdDraft;
+  List<CatalogItemRelation> savedRelations = const [];
 
   @override
   Future<CatalogConfiguration> getConfiguration(String accessToken) async {
@@ -250,6 +293,29 @@ final class _MemoryCatalogGateway implements CatalogGateway {
 
   @override
   Future<void> deleteItem(String accessToken, String itemId) async {}
+
+  @override
+  Future<List<CatalogItemRelation>> getRelations(
+    String accessToken,
+    String itemId,
+  ) async => savedRelations;
+
+  @override
+  Future<List<CatalogRelationCandidate>> searchRelationCandidates({
+    required String accessToken,
+    required String dependencyId,
+    required String search,
+  }) async => [_workCandidate];
+
+  @override
+  Future<List<CatalogItemRelation>> replaceRelations({
+    required String accessToken,
+    required String itemId,
+    required List<CatalogItemRelation> relations,
+  }) async {
+    savedRelations = List.unmodifiable(relations);
+    return savedRelations;
+  }
 
   @override
   void close() {}

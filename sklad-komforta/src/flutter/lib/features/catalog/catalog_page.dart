@@ -42,6 +42,9 @@ class _CatalogPageState extends State<CatalogPage> {
                   images: widget.controller.images,
                   imagesLoading: widget.controller.imagesLoading,
                   imagesError: widget.controller.imagesError,
+                  relations: widget.controller.relations,
+                  relationsLoading: widget.controller.relationsLoading,
+                  relationsError: widget.controller.relationsError,
                   onClose: _closeEditor,
                   onSave: _save,
                   onDelete: editingItemId == null ? null : _delete,
@@ -60,6 +63,19 @@ class _CatalogPageState extends State<CatalogPage> {
                           editingItemId!,
                           imageId,
                         ),
+                  onSearchRelations: widget.controller.searchRelationCandidates,
+                  onAddRelation: editingItemId == null
+                      ? null
+                      : (dependency, candidate) => widget.controller
+                            .addRelation(editingItemId!, dependency, candidate),
+                  onRemoveRelation: editingItemId == null
+                      ? null
+                      : (dependencyId, sourceItemId) =>
+                            widget.controller.removeRelation(
+                              editingItemId!,
+                              dependencyId,
+                              sourceItemId,
+                            ),
                 ),
               ),
           ],
@@ -237,7 +253,10 @@ class _CatalogPageState extends State<CatalogPage> {
       draft = value;
       editingItemId = itemId;
     });
-    if (itemId != null) unawaited(widget.controller.loadImages(itemId));
+    if (itemId != null) {
+      unawaited(widget.controller.loadImages(itemId));
+      unawaited(widget.controller.loadRelations(itemId));
+    }
     if (persistent) return;
     await showDialog<void>(
       context: context,
@@ -258,6 +277,9 @@ class _CatalogPageState extends State<CatalogPage> {
               images: widget.controller.images,
               imagesLoading: widget.controller.imagesLoading,
               imagesError: widget.controller.imagesError,
+              relations: widget.controller.relations,
+              relationsLoading: widget.controller.relationsLoading,
+              relationsError: widget.controller.relationsError,
               onClose: () => Navigator.pop(dialogContext),
               onSave: () async {
                 final saved = await _save();
@@ -287,6 +309,22 @@ class _CatalogPageState extends State<CatalogPage> {
                   ? null
                   : (imageId) =>
                         widget.controller.deleteImage(editingItemId!, imageId),
+              onSearchRelations: widget.controller.searchRelationCandidates,
+              onAddRelation: editingItemId == null
+                  ? null
+                  : (dependency, candidate) => widget.controller.addRelation(
+                      editingItemId!,
+                      dependency,
+                      candidate,
+                    ),
+              onRemoveRelation: editingItemId == null
+                  ? null
+                  : (dependencyId, sourceItemId) =>
+                        widget.controller.removeRelation(
+                          editingItemId!,
+                          dependencyId,
+                          sourceItemId,
+                        ),
             );
           },
         ),

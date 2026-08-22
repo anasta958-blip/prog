@@ -22,6 +22,7 @@ final class CatalogController extends ChangeNotifier {
   final int pageSize;
   Timer? _searchTimer;
   int _imageLoadGeneration = 0;
+  int _relationLoadGeneration = 0;
 
   CatalogConfiguration? configuration;
   CatalogItemPage? result;
@@ -34,9 +35,12 @@ final class CatalogController extends ChangeNotifier {
   bool loading = false;
   bool saving = false;
   bool imagesLoading = false;
+  bool relationsLoading = false;
   String? error;
   String? imagesError;
+  String? relationsError;
   List<CatalogItemImage> images = const [];
+  List<CatalogItemRelation> relations = const [];
 
   List<CatalogItem> get items => result?.items ?? const [];
   int get total => result?.total ?? 0;
@@ -172,9 +176,134 @@ final class CatalogController extends ChangeNotifier {
     if (selectedItem?.id != item?.id) {
       images = const [];
       imagesError = null;
+      relations = const [];
+      relationsError = null;
     }
     selectedItem = item;
     notifyListeners();
+  }
+
+  Future<void> loadRelations(String itemId) async {
+    final relationApi = _api is CatalogRelationGateway
+        ? _api as CatalogRelationGateway
+        : null;
+    if (relationApi == null) return;
+    final generation = ++_relationLoadGeneration;
+    relationsLoading = true;
+    relationsError = null;
+    notifyListeners();
+    try {
+      final loaded = await _authorized(
+        (token) => relationApi.getRelations(token, itemId),
+      );
+      if (generation == _relationLoadGeneration && selectedItem?.id == itemId) {
+        relations = loaded;
+      }
+    } on AuthApiException catch (exception) {
+      if (generation == _relationLoadGeneration) {
+        relationsError = exception.message;
+      }
+    } on Object {
+      if (generation == _relationLoadGeneration) {
+        relationsError = 'Не удалось загрузить связанные карточки.';
+      }
+    } finally {
+      if (generation == _relationLoadGeneration) {
+        relationsLoading = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<List<CatalogRelationCandidate>> searchRelationCandidates(
+    String dependencyId,
+    String search,
+  ) async {
+    final relationApi = _api is CatalogRelationGateway
+        ? _api as CatalogRelationGateway
+        : null;
+    if (relationApi == null) return const [];
+    return _authorized(
+      (token) => relationApi.searchRelationCandidates(
+        accessToken: token,
+        dependencyId: dependencyId,
+        search: search,
+      ),
+    );
+  }
+
+  Future<bool> addRelation(
+    String itemId,
+    CatalogDependency dependency,
+    CatalogRelationCandidate candidate,
+  ) async {
+    if (relations.any(
+      (item) =>
+          item.dependencyId == dependency.id &&
+          item.sourceItemId == candidate.id,
+    )) {
+      relationsError = 'Эта карточка уже привязана.';
+      notifyListeners();
+      return false;
+    }
+    final next = [
+      ...relations,
+      CatalogItemRelation(
+        dependencyId: dependency.id,
+        sourceItemId: candidate.id,
+        sourceName: candidate.name,
+        sourceMarking: candidate.marking,
+        sortOrder: relations.length,
+      ),
+    ];
+    return _replaceRelations(itemId, next);
+  }
+
+  Future<bool> removeRelation(
+    String itemId,
+    String dependencyId,
+    String sourceItemId,
+  ) => _replaceRelations(
+    itemId,
+    relations
+        .where(
+          (item) =>
+              item.dependencyId != dependencyId ||
+              item.sourceItemId != sourceItemId,
+        )
+        .toList(),
+  );
+
+  Future<bool> _replaceRelations(
+    String itemId,
+    List<CatalogItemRelation> next,
+  ) async {
+    final relationApi = _api is CatalogRelationGateway
+        ? _api as CatalogRelationGateway
+        : null;
+    if (relationApi == null || relationsLoading) return false;
+    relationsLoading = true;
+    relationsError = null;
+    notifyListeners();
+    try {
+      relations = await _authorized(
+        (token) => relationApi.replaceRelations(
+          accessToken: token,
+          itemId: itemId,
+          relations: next,
+        ),
+      );
+      return true;
+    } on AuthApiException catch (exception) {
+      relationsError = exception.message;
+      return false;
+    } on Object {
+      relationsError = 'Не удалось сохранить связанные карточки.';
+      return false;
+    } finally {
+      relationsLoading = false;
+      notifyListeners();
+    }
   }
 
   Future<void> loadImages(String itemId) async {
