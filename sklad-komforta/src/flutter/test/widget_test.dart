@@ -3,8 +3,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sklad_komforta_app/app/app.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/core/security/token_store.dart';
+import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
 import 'package:sklad_komforta_app/features/auth/auth_api.dart';
 import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
+import 'package:sklad_komforta_app/features/catalog/catalog_api.dart';
+import 'package:sklad_komforta_app/features/catalog/catalog_controller.dart';
+import 'package:sklad_komforta_app/features/catalog/catalog_models.dart';
+import 'package:sklad_komforta_app/features/catalog/catalog_page.dart';
 import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
 
 void main() {
@@ -219,7 +224,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final dropdown = find.byType(DropdownMenu<String>);
+    final dropdown = find.byType(AppSelectField<String>).first;
     final fieldBounds = tester.getRect(dropdown);
     await tester.tap(dropdown);
     await tester.pumpAndSettle();
@@ -442,6 +447,139 @@ void main() {
 
     controller.dispose();
   });
+
+  testWidgets('каталог использует карточный вариант и постоянный редактор', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    final auth = AuthController(
+      config,
+      api: _OfflineAuthGateway(),
+      tokens: _MemoryTokenRepository(),
+    )..accessToken = 'access-token';
+    final catalog = CatalogController(
+      config,
+      auth,
+      api: _WidgetCatalogGateway(),
+    );
+    catalog.configuration = _widgetCatalogConfiguration;
+    catalog.result = CatalogItemPage(
+      items: [_widgetCatalogItem],
+      page: 1,
+      pageSize: 12,
+      total: 1,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildAppTheme(),
+        home: Scaffold(body: CatalogPage(controller: catalog)),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Каталог товаров'), findsOneWidget);
+    expect(find.text('Вентилятор канальный'), findsOneWidget);
+    expect(find.byKey(const Key('catalog-create')), findsOneWidget);
+
+    await tester.tap(find.text('Вентилятор канальный'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Редактирование товара'), findsOneWidget);
+    expect(find.byKey(const Key('catalog-save')), findsOneWidget);
+
+    catalog.dispose();
+    auth.dispose();
+  });
+}
+
+final _widgetCatalogConfiguration = CatalogConfiguration(
+  categories: [
+    CatalogCategory(
+      id: '11111111-1111-1111-1111-111111111111',
+      name: 'Оборудование',
+      sortOrder: 0,
+      fields: const [
+        CatalogField(
+          code: 'name',
+          label: 'Наименование',
+          fieldType: 'text',
+          isVisible: true,
+          isRequired: true,
+          sortOrder: 0,
+        ),
+        CatalogField(
+          code: 'marking',
+          label: 'Маркировка / размер',
+          fieldType: 'text',
+          isVisible: true,
+          isRequired: false,
+          sortOrder: 1,
+        ),
+        CatalogField(
+          code: 'base_price',
+          label: 'Цена',
+          fieldType: 'money',
+          isVisible: true,
+          isRequired: true,
+          sortOrder: 2,
+        ),
+      ],
+      sections: const [],
+    ),
+  ],
+  dictionaries: const [],
+);
+
+final _widgetCatalogItem = CatalogItem(
+  id: '22222222-2222-2222-2222-222222222222',
+  categoryId: '11111111-1111-1111-1111-111111111111',
+  sectionId: null,
+  groupId: null,
+  name: 'Вентилятор канальный',
+  marking: 'VK-1',
+  status: 'approved',
+  values: const {'base_price': 15000},
+  createdAt: DateTime.utc(2026, 8, 1),
+  updatedAt: DateTime.utc(2026, 8, 2),
+);
+
+final class _WidgetCatalogGateway implements CatalogGateway {
+  @override
+  Future<CatalogItem> createItem(
+    String accessToken,
+    CatalogItemDraft draft,
+  ) async => _widgetCatalogItem;
+  @override
+  Future<void> deleteItem(String accessToken, String itemId) async {}
+  @override
+  Future<CatalogConfiguration> getConfiguration(String accessToken) async =>
+      _widgetCatalogConfiguration;
+  @override
+  Future<CatalogItemPage> getItems({
+    required String accessToken,
+    String? categoryId,
+    String? sectionId,
+    String? status,
+    String? search,
+    required int page,
+    required int pageSize,
+  }) async => CatalogItemPage(
+    items: [_widgetCatalogItem],
+    page: 1,
+    pageSize: pageSize,
+    total: 1,
+  );
+  @override
+  Future<CatalogItem> updateItem(
+    String accessToken,
+    String itemId,
+    CatalogItemDraft draft,
+  ) async => _widgetCatalogItem;
+  @override
+  void close() {}
 }
 
 /// Тестовый transport без сети: восстановление сессии всегда завершается отказом.

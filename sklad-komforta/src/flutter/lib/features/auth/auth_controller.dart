@@ -19,11 +19,12 @@ enum AuthStage {
 /// Управляет только состоянием авторизации и не содержит UI-разметки.
 final class AuthController extends ChangeNotifier {
   /// Создаёт production-контроллер либо принимает тестовые adapter-ы.
-  AuthController(AppConfig config, {AuthGateway? api, TokenRepository? tokens})
+  AuthController(this.config, {AuthGateway? api, TokenRepository? tokens})
     : _api = api ?? AuthApi(config),
       _tokens = tokens ?? TokenStore();
 
   final AuthGateway _api;
+  final AppConfig config;
   final TokenRepository _tokens;
   AuthStage stage = AuthStage.loading;
   String? error;
@@ -294,6 +295,26 @@ final class AuthController extends ChangeNotifier {
       if (exception.statusCode != 401) rethrow;
       await _refreshAccessToken();
       return request(accessToken!);
+    }
+  }
+
+  /// Выполняет запрос бизнес-модуля с текущим access token и один раз
+  /// повторяет его после безопасной ротации refresh-сессии.
+  Future<T> executeAuthorized<T>(
+    Future<T> Function(String accessToken) request,
+  ) async {
+    try {
+      return await _withValidAccessToken(request) as T;
+    } on AuthApiException catch (exception) {
+      if (exception.statusCode == 401) {
+        await _tokens.clear();
+        accessToken = null;
+        sessions = const [];
+        stage = AuthStage.login;
+        error = 'Сессия истекла. Войдите снова.';
+        notifyListeners();
+      }
+      rethrow;
     }
   }
 

@@ -11,6 +11,7 @@ using SkladKomforta.Application.Abstractions.Files;
 using SkladKomforta.Application.Abstractions.Persistence;
 using SkladKomforta.Application.Abstractions.Tenancy;
 using SkladKomforta.Infrastructure.Caching;
+using SkladKomforta.Infrastructure.Catalog;
 using SkladKomforta.Infrastructure.Authorization;
 using SkladKomforta.Infrastructure.Configuration;
 using SkladKomforta.Infrastructure.Files;
@@ -130,6 +131,8 @@ public static class DependencyInjection
         services.AddScoped<SkladKomforta.Application.Authorization.ITenantPermissionEvaluator, PostgresTenantPermissionEvaluator>();
         services.AddScoped<SkladKomforta.Application.Authorization.IRoleAdministrationService, PostgresRoleAdministrationService>();
         services.AddScoped<SkladKomforta.Application.Onboarding.IOrganizationOnboardingService, PostgresOrganizationOnboardingService>();
+        services.AddScoped<SkladKomforta.Application.Catalog.ICatalogService, PostgresCatalogService>();
+        services.AddScoped<SkladKomforta.Application.Company.ICompanyService, Company.PostgresCompanyService>();
 
         return services;
     }

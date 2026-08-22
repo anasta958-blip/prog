@@ -3,6 +3,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
 import 'package:sklad_komforta_app/features/onboarding/organization_onboarding_page.dart';
+import 'package:sklad_komforta_app/features/workspace/workspace_page.dart';
 
 /// Владеет auth controller и запускает восстановление сессии один раз.
 final class AuthFlowPage extends StatefulWidget {
@@ -54,6 +55,12 @@ final class _AuthShell extends StatelessWidget {
   Widget build(BuildContext context) {
     if (controller.stage == AuthStage.organization) {
       return OrganizationOnboardingPage(controller: controller);
+    }
+    if (controller.stage == AuthStage.ready) {
+      return WorkspacePage(
+        config: controller.config,
+        authController: controller,
+      );
     }
     final content = _StageContent(controller: controller);
     return Scaffold(
@@ -193,7 +200,7 @@ final class _StageContent extends StatelessWidget {
         AuthStage.organization => OrganizationOnboardingPage(
           controller: controller,
         ),
-        AuthStage.ready => _SessionsView(controller: controller),
+        AuthStage.ready => const SizedBox.shrink(),
       },
     ),
   );
@@ -528,68 +535,6 @@ final class _RecoveryCodes extends StatelessWidget {
         ],
       ),
     ),
-  );
-}
-
-final class _SessionsView extends StatelessWidget {
-  const _SessionsView({required this.controller});
-  final AuthController controller;
-  @override
-  Widget build(BuildContext context) => ListView(
-    children: [
-      Row(
-        children: [
-          const Expanded(
-            child: Text(
-              'Активные устройства',
-              style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
-            ),
-          ),
-          IconButton(
-            tooltip: 'Выйти',
-            onPressed: controller.busy ? null : controller.logout,
-            icon: const Icon(Icons.logout),
-          ),
-        ],
-      ),
-      const SizedBox(height: 8),
-      const Text(
-        'Здесь отображаются действующие refresh-сессии вашей учётной записи.',
-        style: TextStyle(color: Color(0xFF8FA4C2)),
-      ),
-      const SizedBox(height: 24),
-      for (final session in controller.sessions)
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.devices_outlined),
-            title: Text(
-              (session['deviceName'] as String?) ?? 'Неизвестное устройство',
-            ),
-            subtitle: Text(
-              (session['ipAddress'] as String?) ?? 'IP не определён',
-            ),
-            trailing: session['isCurrent'] == true
-                ? const Chip(label: Text('Текущее'))
-                : IconButton(
-                    tooltip: 'Отозвать сессию',
-                    onPressed: controller.busy
-                        ? null
-                        : () =>
-                              controller.revokeSession(session['id'] as String),
-                    icon: const Icon(Icons.close),
-                  ),
-          ),
-        ),
-      if (controller.sessions.any(
-        (session) => session['isCurrent'] != true,
-      )) ...[
-        const SizedBox(height: 12),
-        OutlinedButton(
-          onPressed: controller.busy ? null : controller.revokeOtherSessions,
-          child: const Text('Завершить остальные сессии'),
-        ),
-      ],
-    ],
   );
 }
 

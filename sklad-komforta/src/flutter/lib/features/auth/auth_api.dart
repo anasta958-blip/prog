@@ -1,18 +1,14 @@
 import 'dart:convert';
+
 import 'package:http/http.dart' as http;
 import 'package:sklad_komforta_app/core/config/app_config.dart';
+import 'package:sklad_komforta_app/core/network/api_exception.dart';
+import 'package:sklad_komforta_app/core/network/api_response_decoder.dart';
 import 'package:sklad_komforta_app/core/network/http_client_factory.dart'
     if (dart.library.js_interop) 'package:sklad_komforta_app/core/network/http_client_factory_web.dart';
 
-/// Ошибка API со стабильным кодом и безопасным сообщением сервера.
-final class AuthApiException implements Exception {
-  const AuthApiException(this.code, this.message, [this.statusCode]);
-  final String code;
-  final String message;
-  final int? statusCode;
-  @override
-  String toString() => message;
-}
+/// Совместимое имя ошибки auth-слоя; реализация едина для всех REST-модулей.
+typedef AuthApiException = ApiException;
 
 /// Контракт Identity API, позволяющий проверять контроллер без реальной сети.
 abstract interface class AuthGateway {
@@ -55,7 +51,7 @@ final class AuthApi implements AuthGateway {
       },
       body: jsonEncode(body),
     );
-    return _unwrap(response);
+    return decodeApiResponse(response);
   }
 
   /// Выполняет авторизованный GET для списка активных устройств.
@@ -65,7 +61,7 @@ final class AuthApi implements AuthGateway {
       Uri.parse('${_config.apiBaseUrl}$path'),
       headers: {'Authorization': 'Bearer $accessToken'},
     );
-    return _unwrap(response);
+    return decodeApiResponse(response);
   }
 
   @override
@@ -74,43 +70,7 @@ final class AuthApi implements AuthGateway {
       Uri.parse('${_config.apiBaseUrl}$path'),
       headers: {'Authorization': 'Bearer $accessToken'},
     );
-    return _unwrap(response);
-  }
-
-  dynamic _unwrap(http.Response response) {
-    final decodedBody = utf8.decode(response.bodyBytes);
-    if (response.statusCode == 401 && decodedBody.trim().isEmpty) {
-      throw const AuthApiException(
-        'session_expired',
-        'Сессия истекла. Войдите снова.',
-        401,
-      );
-    }
-    final Map<String, dynamic> envelope;
-    try {
-      envelope = jsonDecode(decodedBody) as Map<String, dynamic>;
-    } on FormatException {
-      throw AuthApiException(
-        'invalid_server_response',
-        'Сервер вернул некорректный ответ (HTTP ${response.statusCode}).',
-        response.statusCode,
-      );
-    } on TypeError {
-      throw AuthApiException(
-        'invalid_server_response',
-        'Сервер вернул ответ неизвестного формата (HTTP ${response.statusCode}).',
-        response.statusCode,
-      );
-    }
-    if (envelope['ok'] != true) {
-      final error = envelope['error'] as Map<String, dynamic>?;
-      throw AuthApiException(
-        error?['code'] as String? ?? 'request_failed',
-        error?['message'] as String? ?? 'Не удалось выполнить запрос.',
-        response.statusCode,
-      );
-    }
-    return envelope['data'];
+    return decodeApiResponse(response);
   }
 
   /// Освобождает сокеты при уничтожении auth controller.

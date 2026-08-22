@@ -16,12 +16,7 @@ public static class OnboardingValidator
         if (draft.CurrentStep is < 1 or > 8)
             Fail("onboarding_step_invalid", "Номер шага должен быть от 1 до 8.");
 
-        RequireText(draft.Company.OrganizationName, 2, 200, "Название организации");
-        ValidateDigits(draft.Company.Inn, [10, 12], "ИНН должен содержать 10 или 12 цифр.");
-        ValidateDigits(draft.Company.Kpp, [9], "КПП должен содержать 9 цифр.");
-        ValidateDigits(draft.Company.Ogrn, [13, 15], "ОГРН должен содержать 13 или 15 цифр.");
-        ValidatePhone(draft.Company.Phone);
-        ValidateEmail(draft.Company.Email);
+        ValidateCompany(draft.Company);
         ValidateUnique(draft.Workflows.Select(item => item.Code), "Коды канбанов");
         ValidateUnique(draft.Categories.Select(item => item.ClientId), "Идентификаторы категорий");
         ValidateUnique(draft.Categories.Select(item => item.Name), "Названия категорий");
@@ -96,6 +91,17 @@ public static class OnboardingValidator
                  item.Categories.Any(category => category.FieldCodes.Count == 0)) ||
              draft.Dictionaries.Count == 0))
             Fail("onboarding_incomplete", "Заполните канбаны, каталог, поля и справочники перед активацией.");
+    }
+
+    /// <summary>Проверяет реквизиты одинаково при onboarding и последующем редактировании.</summary>
+    public static void ValidateCompany(CompanyProfileDraft company)
+    {
+        RequireText(company.OrganizationName, 2, 200, "Название организации");
+        ValidateDigits(company.Inn, [10, 12], "ИНН должен содержать 10 или 12 цифр.");
+        ValidateDigits(company.Kpp, [9], "КПП должен содержать 9 цифр.");
+        ValidateDigits(company.Ogrn, [13, 15], "ОГРН должен содержать 13 или 15 цифр.");
+        ValidatePhone(company.Phone);
+        ValidateEmail(company.Email);
     }
 
     /// <summary>

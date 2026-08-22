@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
 import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
+import 'package:sklad_komforta_app/features/company/company_profile_form.dart';
 import 'package:sklad_komforta_app/features/onboarding/onboarding_field_registry.dart';
 import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
 
@@ -48,8 +50,6 @@ final class _OrganizationOnboardingPageState
     '#8B5CF6',
     '#06B6D4',
   ];
-  static final _digitsOnly = FilteringTextInputFormatter.digitsOnly;
-
   late OrganizationOnboardingDraft draft;
   late int step;
   final _companyFormKey = GlobalKey<FormState>();
@@ -231,117 +231,11 @@ final class _OrganizationOnboardingPageState
   };
 
   Widget _companyEditor() {
-    final company = draft.company;
     return Form(
       key: _companyFormKey,
-      child: Column(
-        children: [
-          _responsiveFields([
-            _textField(
-              'Название организации',
-              company.organizationName,
-              (value) => setState(() => company.organizationName = value),
-              validator: (value) => value.trim().length < 2
-                  ? 'Введите не менее двух символов'
-                  : null,
-            ),
-            DropdownMenu<String>(
-              initialSelection: company.companyType,
-              expandedInsets: EdgeInsets.zero,
-              label: const Text('Тип компании'),
-              dropdownMenuEntries: const [
-                DropdownMenuEntry(value: 'ООО', label: 'ООО'),
-                DropdownMenuEntry(value: 'ИП', label: 'ИП'),
-                DropdownMenuEntry(value: 'АО', label: 'АО'),
-              ],
-              onSelected: (value) =>
-                  setState(() => company.companyType = value),
-            ),
-          ]),
-          const SizedBox(height: 14),
-          _textField('Юридическое название', company.legalName ?? '', (value) {
-            setState(() => company.legalName = value);
-          }),
-          const SizedBox(height: 14),
-          _responsiveFields([
-            _textField(
-              'ИНН',
-              company.inn ?? '',
-              (value) => setState(() => company.inn = value),
-              keyboardType: TextInputType.number,
-              inputFormatters: [
-                _digitsOnly,
-                LengthLimitingTextInputFormatter(12),
-              ],
-              validator: (value) => _validateDigitsLength(value, const {
-                10,
-                12,
-              }, 'ИНН должен содержать 10 или 12 цифр'),
-            ),
-            _textField(
-              'КПП',
-              company.kpp ?? '',
-              (value) => setState(() => company.kpp = value),
-              keyboardType: TextInputType.number,
-              inputFormatters: [
-                _digitsOnly,
-                LengthLimitingTextInputFormatter(9),
-              ],
-              validator: (value) => _validateDigitsLength(value, const {
-                9,
-              }, 'КПП должен содержать 9 цифр'),
-            ),
-            _textField(
-              'ОГРН',
-              company.ogrn ?? '',
-              (value) => setState(() => company.ogrn = value),
-              keyboardType: TextInputType.number,
-              inputFormatters: [
-                _digitsOnly,
-                LengthLimitingTextInputFormatter(15),
-              ],
-              validator: (value) => _validateDigitsLength(value, const {
-                13,
-                15,
-              }, 'ОГРН должен содержать 13 или 15 цифр'),
-            ),
-          ]),
-          const SizedBox(height: 22),
-          const Divider(),
-          const SizedBox(height: 18),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              'Контактные данные',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-          ),
-          const SizedBox(height: 14),
-          _textField('Адрес', company.address ?? '', (value) {
-            setState(() => company.address = value);
-          }),
-          const SizedBox(height: 14),
-          _responsiveFields([
-            _textField(
-              'Телефон',
-              company.phone ?? '',
-              (value) => setState(() => company.phone = value),
-              keyboardType: TextInputType.phone,
-              inputFormatters: [
-                FilteringTextInputFormatter.allow(RegExp(r'[0-9+()\-\s]')),
-                LengthLimitingTextInputFormatter(24),
-              ],
-              validator: _validatePhone,
-            ),
-            _textField(
-              'Email',
-              company.email ?? '',
-              (value) => setState(() => company.email = value),
-              keyboardType: TextInputType.emailAddress,
-              validator: _validateEmail,
-            ),
-          ]),
-        ],
+      child: CompanyProfileForm(
+        profile: draft.company,
+        onChanged: () => setState(() {}),
       ),
     );
   }
@@ -475,16 +369,18 @@ final class _OrganizationOnboardingPageState
           const SizedBox(width: 8),
           SizedBox(
             width: 148,
-            child: DropdownButtonFormField<String>(
+            child: AppSelectField<String>(
               key: ValueKey('${column.clientId}-${column.color}'),
-              initialValue: column.color,
-              isExpanded: true,
-              decoration: const InputDecoration(labelText: 'Цвет'),
-              items: _workflowColors
+              value: column.color,
+              label: 'Цвет',
+              options: _workflowColors
                   .map(
-                    (color) => DropdownMenuItem(
+                    (color) => AppSelectOption(
                       value: color,
-                      child: _ColorOption(color),
+                      label: color,
+                      color: Color(
+                        int.parse(color.substring(1), radix: 16) | 0xFF000000,
+                      ),
                     ),
                   )
                   .toList(),
@@ -837,22 +733,18 @@ final class _OrganizationOnboardingPageState
       title: 'Зависимость ${index + 1}',
       onDelete: () => setState(() => draft.dependencies.removeAt(index)),
       child: _responsiveFields([
-        DropdownButtonFormField<String>(
-          initialValue:
+        AppSelectField<String>(
+          value:
               sourceItems.any(
                 (category) =>
                     category.clientId == dependency.sourceCategoryClientId,
               )
               ? dependency.sourceCategoryClientId
               : null,
-          isExpanded: true,
-          decoration: const InputDecoration(labelText: 'Что привязываем'),
-          items: [
+          label: 'Что привязываем',
+          options: [
             for (final category in sourceItems)
-              DropdownMenuItem(
-                value: category.clientId,
-                child: Text(category.name, overflow: TextOverflow.ellipsis),
-              ),
+              AppSelectOption(value: category.clientId, label: category.name),
           ],
           onChanged: (value) {
             if (value != null) {
@@ -860,22 +752,18 @@ final class _OrganizationOnboardingPageState
             }
           },
         ),
-        DropdownButtonFormField<String>(
-          initialValue:
+        AppSelectField<String>(
+          value:
               targetItems.any(
                 (category) =>
                     category.clientId == dependency.targetCategoryClientId,
               )
               ? dependency.targetCategoryClientId
               : null,
-          isExpanded: true,
-          decoration: const InputDecoration(labelText: 'К чему привязываем'),
-          items: [
+          label: 'К чему привязываем',
+          options: [
             for (final category in targetItems)
-              DropdownMenuItem(
-                value: category.clientId,
-                child: Text(category.name, overflow: TextOverflow.ellipsis),
-              ),
+              AppSelectOption(value: category.clientId, label: category.name),
           ],
           onChanged: (value) {
             if (value == null) return;
@@ -889,25 +777,19 @@ final class _OrganizationOnboardingPageState
             });
           },
         ),
-        DropdownButtonFormField<String>(
-          initialValue:
+        AppSelectField<String>(
+          value:
               relationFields.any(
                 (field) => field.fieldCode == dependency.targetFieldCode,
               )
               ? dependency.targetFieldCode
               : null,
-          isExpanded: true,
-          decoration: const InputDecoration(
-            labelText: 'В какое поле записывать',
-          ),
-          items: [
+          label: 'В какое поле записывать',
+          options: [
             for (final field in relationFields)
-              DropdownMenuItem(
+              AppSelectOption(
                 value: field.fieldCode,
-                child: Text(
-                  onboardingFieldByCode[field.fieldCode]!.label,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                label: onboardingFieldByCode[field.fieldCode]!.label,
               ),
           ],
           onChanged: (value) {
@@ -1552,35 +1434,6 @@ final class _OrganizationOnboardingPageState
     decoration: InputDecoration(labelText: label),
   );
 
-  static String? _validateDigitsLength(
-    String value,
-    Set<int> allowedLengths,
-    String message,
-  ) {
-    final normalized = value.trim();
-    if (normalized.isEmpty) return null;
-    return allowedLengths.contains(normalized.length) ? null : message;
-  }
-
-  static String? _validatePhone(String value) {
-    final normalized = value.trim();
-    if (normalized.isEmpty) return null;
-    final digits = normalized.replaceAll(RegExp(r'\D'), '');
-    return digits.length >= 10 && digits.length <= 15
-        ? null
-        : 'Телефон должен содержать от 10 до 15 цифр';
-  }
-
-  static String? _validateEmail(String value) {
-    final normalized = value.trim();
-    if (normalized.isEmpty) return null;
-    final valid = RegExp(
-      r'^[^\s@]+@[^\s@]+\.[^\s@]+$',
-      caseSensitive: false,
-    ).hasMatch(normalized);
-    return valid ? null : 'Введите корректный email';
-  }
-
   Widget _responsiveFields(List<Widget> fields) => LayoutBuilder(
     builder: (context, constraints) => constraints.maxWidth < 620
         ? Column(
@@ -2021,27 +1874,6 @@ final class _StatusChip extends StatelessWidget {
   Widget build(BuildContext context) => const Chip(
     avatar: Icon(Icons.circle, size: 9, color: Color(0xFF67A0FF)),
     label: Text('Организация ещё не активирована'),
-  );
-}
-
-final class _ColorOption extends StatelessWidget {
-  const _ColorOption(this.hex);
-  final String hex;
-  @override
-  Widget build(BuildContext context) => Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Container(
-        width: 16,
-        height: 16,
-        decoration: BoxDecoration(
-          color: Color(int.parse(hex.substring(1), radix: 16) | 0xFF000000),
-          shape: BoxShape.circle,
-        ),
-      ),
-      const SizedBox(width: 7),
-      Flexible(child: Text(hex, overflow: TextOverflow.ellipsis)),
-    ],
   );
 }
 

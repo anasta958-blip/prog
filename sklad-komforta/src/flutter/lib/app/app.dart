@@ -41,7 +41,7 @@ class SkladKomfortaApp extends StatelessWidget {
       ],
       supportedLocales: AppLocalizations.supportedLocales,
       locale: const Locale('ru'),
-      theme: _buildTheme(),
+      theme: buildAppTheme(),
       home: AuthFlowPage(
         config: config,
         controller: authController,
@@ -49,54 +49,51 @@ class SkladKomfortaApp extends StatelessWidget {
       ),
     );
   }
+}
 
-  /// Возвращает централизованную тему технического каркаса без стилей будущих
-  /// бизнес-модулей, которые будут сформированы после утверждения дизайна.
-  ThemeData _buildTheme() {
-    const background = Color(0xFF0D121A);
-    const surface = Color(0xFF161E2B);
-    const accent = Color(0xFF4D8DFF);
+/// Возвращает централизованную тему всех экранов приложения.
+ThemeData buildAppTheme() {
+  const background = Color(0xFF0D121A);
+  const surface = Color(0xFF161E2B);
+  const accent = Color(0xFF4D8DFF);
 
-    return ThemeData(
-      brightness: Brightness.dark,
-      scaffoldBackgroundColor: background,
-      colorScheme: const ColorScheme.dark(
-        primary: accent,
-        surface: surface,
-        onSurface: Color(0xFFF2F6FF),
+  return ThemeData(
+    brightness: Brightness.dark,
+    scaffoldBackgroundColor: background,
+    colorScheme: const ColorScheme.dark(
+      primary: accent,
+      surface: surface,
+      onSurface: Color(0xFFF2F6FF),
+    ),
+    textTheme: const TextTheme(
+      headlineMedium: TextStyle(
+        fontFamily: 'Georgia',
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.4,
       ),
-      textTheme: const TextTheme(
-        headlineMedium: TextStyle(
-          fontFamily: 'Georgia',
-          fontWeight: FontWeight.w700,
-          letterSpacing: -0.4,
-        ),
-        bodyMedium: TextStyle(height: 1.5),
+      bodyMedium: TextStyle(height: 1.5),
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: const Color(0xFF0D151F),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Color(0xFF2B3A51)),
       ),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: const Color(0xFF0D151F),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Color(0xFF2B3A51)),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Color(0xFF2B3A51)),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: accent, width: 1.5),
-        ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: Color(0xFF2B3A51)),
       ),
-      filledButtonTheme: FilledButtonThemeData(
-        style: FilledButton.styleFrom(
-          minimumSize: const Size.fromHeight(48),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: accent, width: 1.5),
       ),
-    );
-  }
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        minimumSize: const Size(0, 48),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    ),
+  );
 }
