@@ -4,7 +4,7 @@ import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
 import 'package:sklad_komforta_app/features/onboarding/onboarding_field_registry.dart';
 import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
 
-/// Полноэкранный семишаговый мастер создания изолированной организации.
+/// Полноэкранный восьмишаговый мастер создания изолированной организации.
 final class OrganizationOnboardingPage extends StatefulWidget {
   const OrganizationOnboardingPage({required this.controller, super.key});
 
@@ -23,6 +23,7 @@ final class _OrganizationOnboardingPageState
     ('Канбаны', Icons.view_kanban_outlined),
     ('Каталог', Icons.inventory_2_outlined),
     ('Поля', Icons.view_column_outlined),
+    ('Зависимости', Icons.account_tree_outlined),
     ('Роли', Icons.admin_panel_settings_outlined),
     ('Справочники', Icons.menu_book_outlined),
     ('Проверка', Icons.fact_check_outlined),
@@ -52,6 +53,12 @@ final class _OrganizationOnboardingPageState
   late OrganizationOnboardingDraft draft;
   late int step;
   final _companyFormKey = GlobalKey<FormState>();
+  final Set<String> _collapsedWorkflowCodes = <String>{};
+  final Set<String> _collapsedCategoryIds = <String>{};
+  final Set<String> _collapsedFieldCategoryIds = <String>{};
+  final Set<String> _collapsedWorkflowFieldCodes = <String>{};
+  final Set<CatalogSectionDraft> _expandedCatalogSections =
+      <CatalogSectionDraft>{};
 
   @override
   void initState() {
@@ -59,7 +66,7 @@ final class _OrganizationOnboardingPageState
     draft =
         widget.controller.onboardingDraft ??
         OrganizationOnboardingDraft.initial();
-    step = draft.currentStep.clamp(1, 7) - 1;
+    step = draft.currentStep.clamp(1, 8) - 1;
   }
 
   /// Сохраняет агрегат целиком, чтобы сервер мог проверить межшаговые связи.
@@ -68,12 +75,12 @@ final class _OrganizationOnboardingPageState
       _showMessage('Проверьте заполнение реквизитов организации.');
       return;
     }
-    draft.currentStep = (step + 2).clamp(1, 7);
+    draft.currentStep = (step + 2).clamp(1, 8);
     await widget.controller.saveOnboardingStep(draft);
     if (!mounted || widget.controller.error != null) return;
     setState(() {
       draft = widget.controller.onboardingDraft ?? draft;
-      step = (step + 1).clamp(0, 6);
+      step = (step + 1).clamp(0, 7);
     });
   }
 
@@ -186,7 +193,7 @@ final class _OrganizationOnboardingPageState
               child: FilledButton.icon(
                 onPressed: widget.controller.busy
                     ? null
-                    : step == 6
+                    : step == 7
                     ? widget.controller.activateOrganization
                     : _saveAndContinue,
                 icon: widget.controller.busy
@@ -195,12 +202,12 @@ final class _OrganizationOnboardingPageState
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : Icon(
-                        step == 6
+                        step == 7
                             ? Icons.verified_outlined
                             : Icons.arrow_forward,
                       ),
                 label: Text(
-                  step == 6
+                  step == 7
                       ? 'Активировать организацию'
                       : 'Сохранить и продолжить',
                 ),
@@ -217,8 +224,9 @@ final class _OrganizationOnboardingPageState
     1 => _workflowEditor(),
     2 => _catalogEditor(),
     3 => _fieldsEditor(),
-    4 => _rolesEditor(),
-    5 => _dictionariesEditor(),
+    4 => _dependenciesEditor(),
+    5 => _rolesEditor(),
+    6 => _dictionariesEditor(),
     _ => _review(),
   };
 
@@ -237,15 +245,17 @@ final class _OrganizationOnboardingPageState
                   ? 'Введите не менее двух символов'
                   : null,
             ),
-            DropdownButtonFormField<String>(
-              initialValue: company.companyType,
-              decoration: const InputDecoration(labelText: 'Тип компании'),
-              items: const [
-                DropdownMenuItem(value: 'ООО', child: Text('ООО')),
-                DropdownMenuItem(value: 'ИП', child: Text('ИП')),
-                DropdownMenuItem(value: 'АО', child: Text('АО')),
+            DropdownMenu<String>(
+              initialSelection: company.companyType,
+              expandedInsets: EdgeInsets.zero,
+              label: const Text('Тип компании'),
+              dropdownMenuEntries: const [
+                DropdownMenuEntry(value: 'ООО', label: 'ООО'),
+                DropdownMenuEntry(value: 'ИП', label: 'ИП'),
+                DropdownMenuEntry(value: 'АО', label: 'АО'),
               ],
-              onChanged: (value) => setState(() => company.companyType = value),
+              onSelected: (value) =>
+                  setState(() => company.companyType = value),
             ),
           ]),
           const SizedBox(height: 14),
@@ -347,16 +357,18 @@ final class _OrganizationOnboardingPageState
       Align(
         alignment: Alignment.centerLeft,
         child: OutlinedButton.icon(
-          onPressed: () => setState(
-            () => draft.workflows.add(
+          onPressed: () => setState(() {
+            final code = _nextWorkflowCode();
+            draft.workflows.add(
               WorkflowDraft(
-                code: 'workflow_${draft.workflows.length + 1}',
+                code: code,
                 name: 'Новый канбан',
                 columns: [],
                 transitions: [],
               ),
-            ),
-          ),
+            );
+            _collapsedWorkflowCodes.remove(code);
+          }),
           icon: const Icon(Icons.add),
           label: const Text('Добавить канбан'),
         ),
@@ -364,47 +376,73 @@ final class _OrganizationOnboardingPageState
     ],
   );
 
-  Widget _workflowPanel(WorkflowDraft workflow) => _SubPanel(
-    title: workflow.name,
-    onDelete: () => setState(() => draft.workflows.remove(workflow)),
-    child: Column(
-      children: [
-        _responsiveFields([
-          _textField('Код', workflow.code, (value) => workflow.code = value),
+  /// Возвращает первый свободный технический код, не показываемый пользователю.
+  /// Поиск свободного номера исключает дубли после удаления канбана из середины.
+  String _nextWorkflowCode() {
+    final usedCodes = draft.workflows.map((workflow) => workflow.code).toSet();
+    var number = 1;
+    while (usedCodes.contains('workflow_$number')) {
+      number++;
+    }
+    return 'workflow_$number';
+  }
+
+  Widget _workflowPanel(WorkflowDraft workflow) {
+    final isExpanded = !_collapsedWorkflowCodes.contains(workflow.code);
+    return _SubPanel(
+      title: workflow.name.trim().isEmpty
+          ? 'Канбан без названия'
+          : workflow.name,
+      expanded: isExpanded,
+      collapseTooltip: 'Свернуть канбан',
+      expandTooltip: 'Развернуть канбан',
+      onToggle: () => setState(() {
+        if (isExpanded) {
+          _collapsedWorkflowCodes.add(workflow.code);
+        } else {
+          _collapsedWorkflowCodes.remove(workflow.code);
+        }
+      }),
+      onDelete: () => setState(() {
+        draft.workflows.remove(workflow);
+        _collapsedWorkflowCodes.remove(workflow.code);
+      }),
+      child: Column(
+        children: [
           _textField('Название канбана', workflow.name, (value) {
             setState(() => workflow.name = value);
           }),
-        ]),
-        const SizedBox(height: 12),
-        for (final column in List<WorkflowColumnDraft>.of(workflow.columns))
-          KeyedSubtree(
-            key: ValueKey(column.clientId),
-            child: _workflowColumnRow(workflow, column),
+          const SizedBox(height: 12),
+          for (final column in List<WorkflowColumnDraft>.of(workflow.columns))
+            KeyedSubtree(
+              key: ValueKey(column.clientId),
+              child: _workflowColumnRow(workflow, column),
+            ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => setState(() {
+                workflow.columns.add(
+                  WorkflowColumnDraft(
+                    clientId:
+                        '${workflow.code}-${DateTime.now().microsecondsSinceEpoch}',
+                    name: 'Новый столбец',
+                    color: '#4D8DFF',
+                  ),
+                );
+              }),
+              icon: const Icon(Icons.add),
+              label: const Text('Добавить столбец'),
+            ),
           ),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton.icon(
-            onPressed: () => setState(() {
-              workflow.columns.add(
-                WorkflowColumnDraft(
-                  clientId:
-                      '${workflow.code}-${DateTime.now().microsecondsSinceEpoch}',
-                  name: 'Новый столбец',
-                  color: '#4D8DFF',
-                ),
-              );
-            }),
-            icon: const Icon(Icons.add),
-            label: const Text('Добавить столбец'),
-          ),
-        ),
-        if (workflow.columns.length > 1) ...[
-          const SizedBox(height: 10),
-          _workflowTransitionsEditor(workflow),
+          if (workflow.columns.length > 1) ...[
+            const SizedBox(height: 10),
+            _workflowTransitionsEditor(workflow),
+          ],
         ],
-      ],
-    ),
-  );
+      ),
+    );
+  }
 
   Widget _workflowColumnRow(
     WorkflowDraft workflow,
@@ -540,11 +578,36 @@ final class _OrganizationOnboardingPageState
         categoryIndex++
       )
         Padding(
+          key: ValueKey(draft.categories[categoryIndex].clientId),
           padding: const EdgeInsets.only(bottom: 14),
           child: _SubPanel(
             title: draft.categories[categoryIndex].name,
-            onDelete: () =>
-                setState(() => draft.categories.removeAt(categoryIndex)),
+            expanded: !_collapsedCategoryIds.contains(
+              draft.categories[categoryIndex].clientId,
+            ),
+            collapseTooltip: 'Свернуть категорию',
+            expandTooltip: 'Развернуть категорию',
+            onToggle: () => setState(() {
+              final categoryId = draft.categories[categoryIndex].clientId;
+              if (!_collapsedCategoryIds.add(categoryId)) {
+                _collapsedCategoryIds.remove(categoryId);
+              }
+            }),
+            onDelete: () => setState(() {
+              final category = draft.categories.removeAt(categoryIndex);
+              _collapsedCategoryIds.remove(category.clientId);
+              _expandedCatalogSections.removeAll(category.sections);
+              draft.dependencies.removeWhere(
+                (dependency) =>
+                    dependency.sourceCategoryClientId == category.clientId ||
+                    dependency.targetCategoryClientId == category.clientId,
+              );
+              for (final workflow in draft.workflows) {
+                workflow.categories.removeWhere(
+                  (item) => item.categoryClientId == category.clientId,
+                );
+              }
+            }),
             child: Column(
               children: [
                 _textField('Категория', draft.categories[categoryIndex].name, (
@@ -559,89 +622,104 @@ final class _OrganizationOnboardingPageState
                       draft.categories[categoryIndex].sections.length;
                   sectionIndex++
                 )
-                  ExpansionTile(
-                    tilePadding: EdgeInsets.zero,
-                    title: Text(
-                      draft
+                  _CatalogSectionPanel(
+                    title: draft
+                        .categories[categoryIndex]
+                        .sections[sectionIndex]
+                        .name,
+                    expanded: _expandedCatalogSections.contains(
+                      draft.categories[categoryIndex].sections[sectionIndex],
+                    ),
+                    onToggle: () => setState(() {
+                      final section = draft
                           .categories[categoryIndex]
-                          .sections[sectionIndex]
-                          .name,
-                    ),
-                    trailing: IconButton(
-                      tooltip: 'Удалить раздел',
-                      onPressed: () => setState(
-                        () => draft.categories[categoryIndex].sections.removeAt(
-                          sectionIndex,
-                        ),
-                      ),
-                      icon: const Icon(Icons.delete_outline),
-                    ),
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(4, 14, 4, 0),
-                        child: _textField(
-                          'Название раздела',
-                          draft
-                              .categories[categoryIndex]
-                              .sections[sectionIndex]
-                              .name,
-                          (value) => setState(
-                            () =>
-                                draft
-                                        .categories[categoryIndex]
-                                        .sections[sectionIndex]
-                                        .name =
-                                    value,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      for (
-                        var groupIndex = 0;
-                        groupIndex <
-                            draft
-                                .categories[categoryIndex]
-                                .sections[sectionIndex]
-                                .groups
-                                .length;
-                        groupIndex++
-                      )
-                        _DeleteRow(
-                          onDelete: () => setState(
-                            () => draft
-                                .categories[categoryIndex]
-                                .sections[sectionIndex]
-                                .groups
-                                .removeAt(groupIndex),
-                          ),
+                          .sections[sectionIndex];
+                      if (!_expandedCatalogSections.add(section)) {
+                        _expandedCatalogSections.remove(section);
+                      }
+                    }),
+                    onDelete: () => setState(() {
+                      final section = draft.categories[categoryIndex].sections
+                          .removeAt(sectionIndex);
+                      _expandedCatalogSections.remove(section);
+                    }),
+                    child: Column(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(24, 14, 4, 0),
                           child: _textField(
-                            'Группа',
+                            'Название раздела',
                             draft
                                 .categories[categoryIndex]
                                 .sections[sectionIndex]
-                                .groups[groupIndex]
                                 .name,
-                            (value) =>
-                                draft
-                                        .categories[categoryIndex]
-                                        .sections[sectionIndex]
-                                        .groups[groupIndex]
-                                        .name =
-                                    value,
+                            (value) => setState(
+                              () =>
+                                  draft
+                                          .categories[categoryIndex]
+                                          .sections[sectionIndex]
+                                          .name =
+                                      value,
+                            ),
                           ),
                         ),
-                      TextButton.icon(
-                        onPressed: () => setState(
-                          () => draft
-                              .categories[categoryIndex]
-                              .sections[sectionIndex]
-                              .groups
-                              .add(CatalogGroupDraft('Новая группа')),
+                        const SizedBox(height: 8),
+                        for (
+                          var groupIndex = 0;
+                          groupIndex <
+                              draft
+                                  .categories[categoryIndex]
+                                  .sections[sectionIndex]
+                                  .groups
+                                  .length;
+                          groupIndex++
+                        )
+                          Padding(
+                            padding: const EdgeInsets.only(left: 32),
+                            child: _DeleteRow(
+                              onDelete: () => setState(
+                                () => draft
+                                    .categories[categoryIndex]
+                                    .sections[sectionIndex]
+                                    .groups
+                                    .removeAt(groupIndex),
+                              ),
+                              child: _textField(
+                                'Группа',
+                                draft
+                                    .categories[categoryIndex]
+                                    .sections[sectionIndex]
+                                    .groups[groupIndex]
+                                    .name,
+                                (value) =>
+                                    draft
+                                            .categories[categoryIndex]
+                                            .sections[sectionIndex]
+                                            .groups[groupIndex]
+                                            .name =
+                                        value,
+                              ),
+                            ),
+                          ),
+                        Padding(
+                          padding: const EdgeInsets.only(left: 32),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: TextButton.icon(
+                              onPressed: () => setState(
+                                () => draft
+                                    .categories[categoryIndex]
+                                    .sections[sectionIndex]
+                                    .groups
+                                    .add(CatalogGroupDraft('Новая группа')),
+                              ),
+                              icon: const Icon(Icons.add),
+                              label: const Text('Добавить группу'),
+                            ),
+                          ),
                         ),
-                        icon: const Icon(Icons.add),
-                        label: const Text('Добавить группу'),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 Align(
                   alignment: Alignment.centerLeft,
@@ -680,64 +758,430 @@ final class _OrganizationOnboardingPageState
   );
 
   Widget _fieldsEditor() {
-    const contexts = {
-      'quote': 'КП',
-      'preliminary_quote': 'ПКП',
-      'order': 'Комплектация',
-    };
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const _InfoBanner(
-          'Поля выбираются из системного реестра. Так расчёты скидки, наценки, цены и суммы работают одинаково во всех организациях.',
+          'Сначала настройте поля карточек категорий. Ниже привяжите категории к канбанам и выберите поля, которые будут видны в карточках каждого канбана.',
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 20),
+        const _SectionTitle(
+          title: 'Поля карточек категорий',
+          subtitle: 'Состав, порядок, видимость и обязательность полей.',
+        ),
+        const SizedBox(height: 12),
         for (final category in draft.categories)
           Padding(
             padding: const EdgeInsets.only(bottom: 14),
             child: _catalogFieldPanel(category),
           ),
-        for (final entry in contexts.entries)
+        const SizedBox(height: 8),
+        const _SectionTitle(
+          title: 'Поля в канбанах',
+          subtitle:
+              'Для каждого канбана выберите категории, затем поля их карточек.',
+        ),
+        const SizedBox(height: 12),
+        for (final workflow in draft.workflows)
           Padding(
             padding: const EdgeInsets.only(bottom: 14),
-            child: _fieldContextPanel(entry.key, entry.value),
+            child: _workflowFieldPanel(workflow),
           ),
       ],
     );
   }
 
-  Widget _catalogFieldPanel(CatalogCategoryDraft category) => _SubPanel(
-    title: 'Карточка категории: ${category.name}',
-    child: Column(
-      children: [
-        for (var index = 0; index < category.fields.length; index++)
-          _OrderedRow(
-            key: ValueKey(
-              '${category.clientId}:${category.fields[index].fieldCode}',
-            ),
-            index: index,
-            length: category.fields.length,
-            onMove: (delta) => setState(() {
-              final field = category.fields.removeAt(index);
-              category.fields.insert(index + delta, field);
-            }),
-            onDelete: () => setState(() => category.fields.removeAt(index)),
-            child: _catalogFieldControls(category.fields[index]),
+  Widget _dependenciesEditor() => Column(
+    children: [
+      const _InfoBanner(
+        'Зависимость определяет, позиции какой категории можно привязывать к позициям другой категории. Например: «Работы» → «Оборудование» → «Связанные позиции».',
+      ),
+      const SizedBox(height: 14),
+      if (draft.categories.length < 2)
+        const _InfoBanner('Для зависимости нужны как минимум две категории.'),
+      for (var index = 0; index < draft.dependencies.length; index++)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: _dependencyPanel(index, draft.dependencies[index]),
+        ),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: OutlinedButton.icon(
+          onPressed: draft.categories.length < 2 ? null : _addDependency,
+          icon: const Icon(Icons.add),
+          label: const Text('Добавить зависимость'),
+        ),
+      ),
+    ],
+  );
+
+  Widget _dependencyPanel(int index, CategoryDependencyDraft dependency) {
+    final sourceItems = draft.categories
+        .where(
+          (category) => category.clientId != dependency.targetCategoryClientId,
+        )
+        .toList();
+    final targetItems = draft.categories
+        .where(
+          (category) =>
+              category.clientId != dependency.sourceCategoryClientId &&
+              _relationFields(category).isNotEmpty,
+        )
+        .toList();
+    final target = _categoryByClientId(dependency.targetCategoryClientId);
+    final relationFields = target == null
+        ? const <CatalogFieldDraft>[]
+        : _relationFields(target);
+
+    return _SubPanel(
+      title: 'Зависимость ${index + 1}',
+      onDelete: () => setState(() => draft.dependencies.removeAt(index)),
+      child: _responsiveFields([
+        DropdownButtonFormField<String>(
+          initialValue:
+              sourceItems.any(
+                (category) =>
+                    category.clientId == dependency.sourceCategoryClientId,
+              )
+              ? dependency.sourceCategoryClientId
+              : null,
+          isExpanded: true,
+          decoration: const InputDecoration(labelText: 'Что привязываем'),
+          items: [
+            for (final category in sourceItems)
+              DropdownMenuItem(
+                value: category.clientId,
+                child: Text(category.name, overflow: TextOverflow.ellipsis),
+              ),
+          ],
+          onChanged: (value) {
+            if (value != null) {
+              setState(() => dependency.sourceCategoryClientId = value);
+            }
+          },
+        ),
+        DropdownButtonFormField<String>(
+          initialValue:
+              targetItems.any(
+                (category) =>
+                    category.clientId == dependency.targetCategoryClientId,
+              )
+              ? dependency.targetCategoryClientId
+              : null,
+          isExpanded: true,
+          decoration: const InputDecoration(labelText: 'К чему привязываем'),
+          items: [
+            for (final category in targetItems)
+              DropdownMenuItem(
+                value: category.clientId,
+                child: Text(category.name, overflow: TextOverflow.ellipsis),
+              ),
+          ],
+          onChanged: (value) {
+            if (value == null) return;
+            final selected = draft.categories.firstWhere(
+              (category) => category.clientId == value,
+            );
+            final fields = _relationFields(selected);
+            setState(() {
+              dependency.targetCategoryClientId = value;
+              dependency.targetFieldCode = fields.first.fieldCode;
+            });
+          },
+        ),
+        DropdownButtonFormField<String>(
+          initialValue:
+              relationFields.any(
+                (field) => field.fieldCode == dependency.targetFieldCode,
+              )
+              ? dependency.targetFieldCode
+              : null,
+          isExpanded: true,
+          decoration: const InputDecoration(
+            labelText: 'В какое поле записывать',
           ),
-        _addFieldButton(
-          selectedCodes: category.fields.map((item) => item.fieldCode),
-          onSelected: (definition) => setState(
-            () => category.fields.add(
-              CatalogFieldDraft(
-                fieldCode: definition.code,
-                isVisible: true,
-                isRequired: definition.code == 'name',
+          items: [
+            for (final field in relationFields)
+              DropdownMenuItem(
+                value: field.fieldCode,
+                child: Text(
+                  onboardingFieldByCode[field.fieldCode]!.label,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+          ],
+          onChanged: (value) {
+            if (value != null) {
+              setState(() => dependency.targetFieldCode = value);
+            }
+          },
+        ),
+      ]),
+    );
+  }
+
+  List<CatalogFieldDraft> _relationFields(CatalogCategoryDraft category) =>
+      category.fields
+          .where(
+            (field) =>
+                onboardingFieldByCode[field.fieldCode]?.fieldType == 'relation',
+          )
+          .toList();
+
+  CatalogCategoryDraft? _categoryByClientId(String clientId) {
+    for (final category in draft.categories) {
+      if (category.clientId == clientId) return category;
+    }
+    return null;
+  }
+
+  void _addDependency() {
+    CatalogCategoryDraft? target;
+    for (final category in draft.categories) {
+      if (_relationFields(category).isNotEmpty) {
+        target = category;
+        break;
+      }
+    }
+    if (target == null) {
+      _showMessage(
+        'Сначала добавьте relation-поле «Связанные позиции» в карточку целевой категории.',
+      );
+      return;
+    }
+    CatalogCategoryDraft? source;
+    for (final category in draft.categories) {
+      if (category.clientId != target.clientId) {
+        source = category;
+        break;
+      }
+    }
+    if (source == null) return;
+    final selectedTarget = target;
+    final selectedSource = source;
+    setState(() {
+      draft.dependencies.add(
+        CategoryDependencyDraft(
+          clientId: 'dependency_${DateTime.now().microsecondsSinceEpoch}',
+          sourceCategoryClientId: selectedSource.clientId,
+          targetCategoryClientId: selectedTarget.clientId,
+          targetFieldCode: _relationFields(selectedTarget).first.fieldCode,
+        ),
+      );
+    });
+  }
+
+  Widget _catalogFieldPanel(CatalogCategoryDraft category) {
+    final isExpanded = !_collapsedFieldCategoryIds.contains(category.clientId);
+    return _SubPanel(
+      title: 'Категория: ${category.name}',
+      expanded: isExpanded,
+      collapseTooltip: 'Свернуть поля категории',
+      expandTooltip: 'Развернуть поля категории',
+      onToggle: () => setState(() {
+        if (isExpanded) {
+          _collapsedFieldCategoryIds.add(category.clientId);
+        } else {
+          _collapsedFieldCategoryIds.remove(category.clientId);
+        }
+      }),
+      child: Column(
+        children: [
+          for (var index = 0; index < category.fields.length; index++)
+            _OrderedRow(
+              key: ValueKey(
+                '${category.clientId}:${category.fields[index].fieldCode}',
+              ),
+              index: index,
+              length: category.fields.length,
+              onMove: (delta) => setState(() {
+                final field = category.fields.removeAt(index);
+                category.fields.insert(index + delta, field);
+              }),
+              onDelete: () => setState(() {
+                final field = category.fields.removeAt(index);
+                draft.dependencies.removeWhere(
+                  (dependency) =>
+                      dependency.targetCategoryClientId == category.clientId &&
+                      dependency.targetFieldCode == field.fieldCode,
+                );
+                _removeUnavailableWorkflowField(category, field.fieldCode);
+              }),
+              child: _catalogFieldControls(category.fields[index]),
+            ),
+          _addFieldButton(
+            selectedCodes: category.fields.map((item) => item.fieldCode),
+            onSelected: (definition) => setState(
+              () => category.fields.add(
+                CatalogFieldDraft(
+                  fieldCode: definition.code,
+                  isVisible: true,
+                  isRequired: definition.code == 'name',
+                ),
               ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  /// Возвращает поля категории вместе с расчётными полями, доступными системе.
+  List<OnboardingFieldDefinition> _workflowAvailableFields(
+    CatalogCategoryDraft category,
+  ) {
+    final result = <OnboardingFieldDefinition>[];
+    final added = <String>{};
+    for (final field in category.fields) {
+      final definition = onboardingFieldByCode[field.fieldCode];
+      if (definition != null && added.add(definition.code)) {
+        result.add(definition);
+      }
+    }
+    for (final definition in onboardingFieldDefinitions) {
+      if (definition.isCalculated && added.add(definition.code)) {
+        result.add(definition);
+      }
+    }
+    return result;
+  }
+
+  /// Удаляет поле из карточек канбанов, если категория больше его не поддерживает.
+  void _removeUnavailableWorkflowField(
+    CatalogCategoryDraft category,
+    String fieldCode,
+  ) {
+    if (_workflowAvailableFields(
+      category,
+    ).any((definition) => definition.code == fieldCode)) {
+      return;
+    }
+    for (final workflow in draft.workflows) {
+      final selection = _workflowCategory(workflow, category.clientId);
+      selection?.fieldCodes.remove(fieldCode);
+    }
+  }
+
+  WorkflowCategoryDraft? _workflowCategory(
+    WorkflowDraft workflow,
+    String categoryClientId,
+  ) {
+    for (final category in workflow.categories) {
+      if (category.categoryClientId == categoryClientId) return category;
+    }
+    return null;
+  }
+
+  Widget _workflowFieldPanel(WorkflowDraft workflow) {
+    final isExpanded = !_collapsedWorkflowFieldCodes.contains(workflow.code);
+    return _SubPanel(
+      title: 'Канбан: ${workflow.name}',
+      expanded: isExpanded,
+      collapseTooltip: 'Свернуть поля канбана',
+      expandTooltip: 'Развернуть поля канбана',
+      onToggle: () => setState(() {
+        if (isExpanded) {
+          _collapsedWorkflowFieldCodes.add(workflow.code);
+        } else {
+          _collapsedWorkflowFieldCodes.remove(workflow.code);
+        }
+      }),
+      child: Column(
+        children: [
+          for (final category in draft.categories)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _workflowCategoryFields(workflow, category),
+            ),
+          if (draft.categories.isEmpty)
+            const _EmptyHint('Сначала добавьте категории на шаге «Каталог».'),
+        ],
+      ),
+    );
+  }
+
+  Widget _workflowCategoryFields(
+    WorkflowDraft workflow,
+    CatalogCategoryDraft category,
+  ) {
+    final selection = _workflowCategory(workflow, category.clientId);
+    final availableFields = _workflowAvailableFields(category);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFF0D1724),
+        border: Border.all(color: const Color(0xFF263A52)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              controlAffinity: ListTileControlAffinity.leading,
+              title: Text(
+                category.name,
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+              subtitle: const Text('Использовать категорию в этом канбане'),
+              value: selection != null,
+              onChanged: (enabled) => setState(() {
+                if (enabled ?? false) {
+                  workflow.categories.add(
+                    WorkflowCategoryDraft(
+                      categoryClientId: category.clientId,
+                      fieldCodes: [
+                        for (final field in category.fields)
+                          if (field.isVisible) field.fieldCode,
+                      ],
+                    ),
+                  );
+                } else {
+                  workflow.categories.removeWhere(
+                    (item) => item.categoryClientId == category.clientId,
+                  );
+                }
+              }),
+            ),
+            if (selection != null) ...[
+              const Divider(height: 18),
+              Padding(
+                padding: const EdgeInsets.only(left: 18),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    for (final definition in availableFields)
+                      SizedBox(
+                        width: 250,
+                        child: CheckboxListTile(
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                          controlAffinity: ListTileControlAffinity.leading,
+                          title: Text(definition.label),
+                          subtitle: definition.isCalculated
+                              ? const Text('Расчётное поле')
+                              : null,
+                          value: selection.fieldCodes.contains(definition.code),
+                          onChanged: (enabled) => setState(() {
+                            selection.fieldCodes.remove(definition.code);
+                            if (enabled ?? false) {
+                              selection.fieldCodes.add(definition.code);
+                            }
+                          }),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ],
         ),
-      ],
-    ),
-  );
+      ),
+    );
+  }
 
   Widget _catalogFieldControls(CatalogFieldDraft field) {
     final definition = onboardingFieldByCode[field.fieldCode]!;
@@ -752,58 +1196,6 @@ final class _OrganizationOnboardingPageState
       definition.canBeRequired && field.isVisible
           ? (value) => setState(() => field.isRequired = value)
           : null,
-    );
-  }
-
-  Widget _fieldContextPanel(String contextCode, String title) {
-    final fields = draft.fields
-        .where((item) => item.contextCode == contextCode)
-        .toList();
-    return _SubPanel(
-      title: 'Поля: $title',
-      child: Column(
-        children: [
-          for (var index = 0; index < fields.length; index++)
-            _OrderedRow(
-              index: index,
-              length: fields.length,
-              onMove: (delta) => setState(
-                () => _swapFields(fields[index], fields[index + delta]),
-              ),
-              onDelete: () =>
-                  setState(() => draft.fields.remove(fields[index])),
-              child: _fieldControls(
-                onboardingFieldByCode[fields[index].fieldCode]!,
-                fields[index].isVisible,
-                fields[index].isRequired,
-                (value) => setState(() {
-                  fields[index].isVisible = value;
-                  if (!value) fields[index].isRequired = false;
-                }),
-                onboardingFieldByCode[fields[index].fieldCode]!.canBeRequired &&
-                        fields[index].isVisible
-                    ? (value) =>
-                          setState(() => fields[index].isRequired = value)
-                    : null,
-              ),
-            ),
-          _addFieldButton(
-            selectedCodes: fields.map((item) => item.fieldCode),
-            onSelected: (definition) => setState(
-              () => draft.fields.add(
-                EntityFieldDraft(
-                  contextCode: contextCode,
-                  fieldCode: definition.code,
-                  label: definition.label,
-                  fieldType: definition.fieldType,
-                  isVisible: true,
-                  isRequired: definition.code == 'name',
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -833,10 +1225,25 @@ final class _OrganizationOnboardingPageState
         mainAxisSize: MainAxisSize.min,
         children: [
           _Flag(label: 'Показывать', value: visible, onChanged: onVisible),
-          _Flag(label: 'Обязательное', value: required, onChanged: onRequired),
+          if (definition.isCalculated)
+            const _Flag(
+              label: 'Рассчитывается',
+              value: true,
+              onChanged: null,
+              tooltip:
+                  'Значение вычисляется автоматически и не вводится пользователем.',
+            )
+          else
+            _Flag(
+              label: 'Обязательное',
+              value: required,
+              onChanged: onRequired,
+              tooltip:
+                  'Без значения этого поля позицию нельзя будет сохранить.',
+            ),
         ],
       );
-      return constraints.maxWidth < 470
+      return constraints.maxWidth < 620
           ? Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [title, flags],
@@ -891,13 +1298,6 @@ final class _OrganizationOnboardingPageState
         isRequired: code == 'name' || code == 'quantity',
       ),
   ];
-
-  void _swapFields(EntityFieldDraft first, EntityFieldDraft second) {
-    final firstIndex = draft.fields.indexOf(first);
-    final secondIndex = draft.fields.indexOf(second);
-    draft.fields[firstIndex] = second;
-    draft.fields[secondIndex] = first;
-  }
 
   Widget _rolesEditor() => Column(
     children: [
@@ -972,22 +1372,15 @@ final class _OrganizationOnboardingPageState
                 setState(() => draft.dictionaries.removeAt(dictionaryIndex)),
             child: Column(
               children: [
-                _responsiveFields([
-                  _textField('Код', draft.dictionaries[dictionaryIndex].code, (
-                    value,
-                  ) {
-                    draft.dictionaries[dictionaryIndex].code = value;
-                  }),
-                  _textField(
-                    'Название',
-                    draft.dictionaries[dictionaryIndex].name,
-                    (value) {
-                      setState(
-                        () => draft.dictionaries[dictionaryIndex].name = value,
-                      );
-                    },
-                  ),
-                ]),
+                _textField(
+                  'Название',
+                  draft.dictionaries[dictionaryIndex].name,
+                  (value) {
+                    setState(
+                      () => draft.dictionaries[dictionaryIndex].name = value,
+                    );
+                  },
+                ),
                 const SizedBox(height: 10),
                 for (
                   var itemIndex = 0;
@@ -1033,7 +1426,7 @@ final class _OrganizationOnboardingPageState
           onPressed: () => setState(
             () => draft.dictionaries.add(
               DictionaryDraft(
-                code: 'dictionary_${draft.dictionaries.length + 1}',
+                code: _nextDictionaryCode(),
                 name: 'Новый справочник',
                 items: [],
               ),
@@ -1045,6 +1438,19 @@ final class _OrganizationOnboardingPageState
       ),
     ],
   );
+
+  /// Возвращает первый свободный технический код справочника.
+  /// Код не зависит от названия и остаётся стабильным после переименования.
+  String _nextDictionaryCode() {
+    final usedCodes = draft.dictionaries
+        .map((dictionary) => dictionary.code)
+        .toSet();
+    var number = 1;
+    while (usedCodes.contains('dictionary_$number')) {
+      number++;
+    }
+    return 'dictionary_$number';
+  }
 
   Widget _review() => Column(
     children: [
@@ -1060,6 +1466,7 @@ final class _OrganizationOnboardingPageState
       ),
       _ReviewRow('Категории', '${draft.categories.length}'),
       _ReviewRow('Поля', '${draft.fields.length}'),
+      _ReviewRow('Зависимости', '${draft.dependencies.length}'),
       _ReviewRow('Дополнительные роли', '${draft.roles.length}'),
       _ReviewRow('Справочники', '${draft.dictionaries.length}'),
     ],
@@ -1120,6 +1527,7 @@ final class _OrganizationOnboardingPageState
           const SizedBox(height: 8),
           _ReviewRow('Канбаны', '${draft.workflows.length}'),
           _ReviewRow('Категории', '${draft.categories.length}'),
+          _ReviewRow('Зависимости', '${draft.dependencies.length}'),
           _ReviewRow('Роли', '${draft.roles.length + 1}'),
         ],
       ],
@@ -1281,6 +1689,7 @@ final class _Progress extends StatelessWidget {
     'Канбаны',
     'Каталог',
     'Поля',
+    'Зависимости',
     'Роли',
     'Справочники',
     'Проверка',
@@ -1344,14 +1753,14 @@ final class _Progress extends StatelessWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  '${step + 1} из 7 · ${labels[step]}',
+                  '${step + 1} из 8 · ${labels[step]}',
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
               ),
               SizedBox(
                 width: 90,
                 child: LinearProgressIndicator(
-                  value: (step + 1) / 7,
+                  value: (step + 1) / 8,
                   minHeight: 5,
                 ),
               ),
@@ -1390,6 +1799,38 @@ final class _StepCircle extends StatelessWidget {
   );
 }
 
+final class _SectionTitle extends StatelessWidget {
+  const _SectionTitle({required this.title, required this.subtitle});
+
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        title,
+        style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+      ),
+      const SizedBox(height: 3),
+      Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+    ],
+  );
+}
+
+final class _EmptyHint extends StatelessWidget {
+  const _EmptyHint(this.message);
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Align(
+    alignment: Alignment.centerLeft,
+    child: Text(message, style: Theme.of(context).textTheme.bodySmall),
+  );
+}
+
 final class _Panel extends StatelessWidget {
   const _Panel({required this.child});
   final Widget child;
@@ -1411,11 +1852,90 @@ final class _Panel extends StatelessWidget {
   );
 }
 
+/// Раскрываемый раздел каталога без системного accessibility-announcement.
+/// Стандартный ExpansionTile на Windows отправляет некорректный `viewId`,
+/// поэтому здесь состояние контролируется родительским экраном напрямую.
+final class _CatalogSectionPanel extends StatelessWidget {
+  const _CatalogSectionPanel({
+    required this.title,
+    required this.expanded,
+    required this.onToggle,
+    required this.onDelete,
+    required this.child,
+  });
+
+  final String title;
+  final bool expanded;
+  final VoidCallback onToggle;
+  final VoidCallback onDelete;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    children: [
+      Semantics(
+        button: true,
+        label: expanded ? 'Свернуть раздел' : 'Развернуть раздел',
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: onToggle,
+          child: Padding(
+            padding: const EdgeInsets.only(left: 12),
+            child: Row(
+              children: [
+                ExcludeSemantics(
+                  child: AnimatedRotation(
+                    turns: expanded ? .5 : 0,
+                    duration: const Duration(milliseconds: 180),
+                    child: const Icon(Icons.keyboard_arrow_down),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+                Semantics(
+                  button: true,
+                  label: 'Удалить раздел',
+                  child: IconButton(
+                    onPressed: onDelete,
+                    icon: const Icon(Icons.delete_outline),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      AnimatedSize(
+        duration: const Duration(milliseconds: 180),
+        alignment: Alignment.topCenter,
+        child: expanded ? child : const SizedBox.shrink(),
+      ),
+    ],
+  );
+}
+
 final class _SubPanel extends StatelessWidget {
-  const _SubPanel({required this.title, required this.child, this.onDelete});
+  const _SubPanel({
+    required this.title,
+    required this.child,
+    this.onDelete,
+    this.onToggle,
+    this.expanded = true,
+    this.collapseTooltip = 'Свернуть блок',
+    this.expandTooltip = 'Развернуть блок',
+  });
   final String title;
   final Widget child;
   final VoidCallback? onDelete;
+  final VoidCallback? onToggle;
+  final bool expanded;
+  final String collapseTooltip;
+  final String expandTooltip;
   @override
   Widget build(BuildContext context) => DecoratedBox(
     decoration: BoxDecoration(
@@ -1435,6 +1955,19 @@ final class _SubPanel extends StatelessWidget {
                   style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
               ),
+              if (onToggle != null)
+                Semantics(
+                  button: true,
+                  label: expanded ? collapseTooltip : expandTooltip,
+                  child: IconButton(
+                    onPressed: onToggle,
+                    icon: AnimatedRotation(
+                      turns: expanded ? .5 : 0,
+                      duration: const Duration(milliseconds: 180),
+                      child: const Icon(Icons.keyboard_arrow_down),
+                    ),
+                  ),
+                ),
               if (onDelete != null)
                 IconButton(
                   onPressed: onDelete,
@@ -1443,8 +1976,13 @@ final class _SubPanel extends StatelessWidget {
                 ),
             ],
           ),
-          const SizedBox(height: 12),
-          child,
+          AnimatedSize(
+            duration: const Duration(milliseconds: 180),
+            alignment: Alignment.topCenter,
+            child: expanded
+                ? Padding(padding: const EdgeInsets.only(top: 12), child: child)
+                : const SizedBox.shrink(),
+          ),
         ],
       ),
     ),
@@ -1639,22 +2177,33 @@ final class _Flag extends StatelessWidget {
     required this.label,
     required this.value,
     required this.onChanged,
+    this.tooltip,
   });
   final String label;
   final bool value;
   final ValueChanged<bool>? onChanged;
+  final String? tooltip;
   @override
-  Widget build(BuildContext context) => SizedBox(
-    width: 112,
-    child: CheckboxListTile(
-      contentPadding: EdgeInsets.zero,
-      dense: true,
-      controlAffinity: ListTileControlAffinity.leading,
-      title: Text(label, style: const TextStyle(fontSize: 11)),
-      value: value,
-      onChanged: onChanged == null
-          ? null
-          : (value) => onChanged!(value ?? false),
+  Widget build(BuildContext context) => Tooltip(
+    message: tooltip ?? '',
+    child: SizedBox(
+      width: 154,
+      child: CheckboxListTile(
+        contentPadding: EdgeInsets.zero,
+        dense: true,
+        controlAffinity: ListTileControlAffinity.leading,
+        title: Text(
+          label,
+          maxLines: 1,
+          softWrap: false,
+          overflow: TextOverflow.visible,
+          style: const TextStyle(fontSize: 12),
+        ),
+        value: value,
+        onChanged: onChanged == null
+            ? null
+            : (value) => onChanged!(value ?? false),
+      ),
     ),
   );
 }

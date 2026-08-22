@@ -1,5 +1,17 @@
 # Проверка итерации 3
 
+## Проверка восьмишагового onboarding
+
+- `dotnet test SkladKomforta.sln --no-restore` — успешно: 36 unit-тестов и
+  9 API integration-тестов;
+- `dart analyze` — замечаний нет;
+- `flutter test` — успешно: 9 тестов;
+- API пересобран через Docker, `/health/live` и `/health/ready` отвечают `200`,
+  `RestartCount` равен нулю;
+- отдельные тесты фиксируют JSON-совместимость старого черновика без массива
+  зависимостей, корректную relation-связь и отказы для неизвестной категории
+  или обычного поля назначения.
+
 ## Автоматические проверки
 
 - `dotnet build SkladKomforta.sln --no-restore` — успешно, 0 предупреждений;

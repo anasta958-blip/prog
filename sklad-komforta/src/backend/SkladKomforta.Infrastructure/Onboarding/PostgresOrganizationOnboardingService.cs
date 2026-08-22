@@ -63,14 +63,25 @@ internal sealed class PostgresOrganizationOnboardingService(
         var state = await ReadStateAsync(connection, cancellationToken);
         if (state.IsCompleted) return state;
 
-        var draft = state.Draft with { CurrentStep = 7 };
+        var draft = state.Draft with { CurrentStep = 8 };
         OnboardingValidator.Validate(draft, true);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
         await ClearMaterializedConfigurationAsync(connection, transaction, cancellationToken);
         await SaveProfileAsync(connection, transaction, userId, draft.Company, cancellationToken);
-        await SaveWorkflowsAsync(connection, transaction, draft.Workflows, cancellationToken);
-        await SaveCatalogAsync(connection, transaction, draft.Categories, cancellationToken);
+        var categoryIds = await SaveCatalogAsync(connection, transaction, draft.Categories, cancellationToken);
+        await SaveWorkflowsAsync(
+            connection,
+            transaction,
+            draft.Workflows,
+            categoryIds,
+            cancellationToken);
+        await SaveDependenciesAsync(
+            connection,
+            transaction,
+            draft.Dependencies ?? [],
+            categoryIds,
+            cancellationToken);
         await SaveFieldsAsync(connection, transaction, draft.Fields, cancellationToken);
         await SaveRolesAsync(connection, transaction, draft.Roles, cancellationToken);
         await SaveDictionariesAsync(connection, transaction, draft.Dictionaries, cancellationToken);
@@ -81,7 +92,7 @@ internal sealed class PostgresOrganizationOnboardingService(
             ("name", draft.Company.OrganizationName.Trim()),
             ("organization_id", tenantContext.OrganizationId));
         await ExecuteAsync(connection, transaction,
-            "UPDATE onboarding_draft SET current_step = 7, payload = CAST(@payload AS jsonb), updated_by = @user_id, updated_at = now() WHERE singleton",
+            "UPDATE onboarding_draft SET current_step = 8, payload = CAST(@payload AS jsonb), updated_by = @user_id, updated_at = now() WHERE singleton",
             cancellationToken,
             ("payload", JsonSerializer.Serialize(draft, JsonOptions)),
             ("user_id", userId));
@@ -118,7 +129,44 @@ internal sealed class PostgresOrganizationOnboardingService(
             ? CreateDefaultDraft(name)
             : JsonSerializer.Deserialize<OrganizationOnboardingDraft>(reader.GetString(2), JsonOptions)
               ?? CreateDefaultDraft(name);
+        draft = RemoveRetiredFields(draft);
         return new OrganizationOnboardingState(draft, completedAt.HasValue, completedAt);
+    }
+
+    /// <summary>Удаляет поля, исключённые из актуальной модели, из ранее сохранённых черновиков.</summary>
+    private static OrganizationOnboardingDraft RemoveRetiredFields(OrganizationOnboardingDraft draft)
+    {
+        const string retailPrice = "retail_price";
+        var categories = draft.Categories
+            .Select(category => category with
+            {
+                Fields = category.Fields
+                    .Where(field => field.FieldCode != retailPrice)
+                    .ToArray(),
+            })
+            .ToArray();
+        var workflows = draft.Workflows
+            .Select(workflow => workflow with
+            {
+                Categories = (workflow.Categories ?? [])
+                    .Select(category => category with
+                    {
+                        FieldCodes = category.FieldCodes
+                            .Where(code => code != retailPrice)
+                            .ToArray(),
+                    })
+                    .ToArray(),
+            })
+            .ToArray();
+
+        return draft with
+        {
+            Categories = categories,
+            Workflows = workflows,
+            Fields = draft.Fields
+                .Where(field => field.FieldCode != retailPrice)
+                .ToArray(),
+        };
     }
 
     /// <summary>Гарантирует, что onboarding меняет только директор организации.</summary>
@@ -168,7 +216,12 @@ internal sealed class PostgresOrganizationOnboardingService(
             ("ogrn", Db(profile.Ogrn)), ("address", Db(profile.Address)), ("phone", Db(profile.Phone)),
             ("email", Db(profile.Email)), ("user_id", userId));
 
-    private static async Task SaveWorkflowsAsync(DbConnection connection, DbTransaction transaction, IReadOnlyList<WorkflowDraft> workflows, CancellationToken token)
+    private static async Task SaveWorkflowsAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        IReadOnlyList<WorkflowDraft> workflows,
+        IReadOnlyDictionary<string, Guid> categoryIds,
+        CancellationToken token)
     {
         for (var workflowIndex = 0; workflowIndex < workflows.Count; workflowIndex++)
         {
@@ -191,15 +244,42 @@ internal sealed class PostgresOrganizationOnboardingService(
                 await ExecuteAsync(connection, transaction,
                     "INSERT INTO workflow_transitions (from_column_id, to_column_id) VALUES (@from, @to)", token,
                     ("from", columns[transition.FromClientId]), ("to", columns[transition.ToClientId]));
+
+            var workflowCategories = workflow.Categories ?? [];
+            for (var categoryIndex = 0; categoryIndex < workflowCategories.Count; categoryIndex++)
+            {
+                var category = workflowCategories[categoryIndex];
+                var categoryId = categoryIds[category.CategoryClientId];
+                await ExecuteAsync(connection, transaction, """
+                    INSERT INTO workflow_categories (workflow_id, category_id, sort_order)
+                    VALUES (@workflow_id, @category_id, @sort)
+                    """, token,
+                    ("workflow_id", workflowId), ("category_id", categoryId), ("sort", categoryIndex));
+
+                for (var fieldIndex = 0; fieldIndex < category.FieldCodes.Count; fieldIndex++)
+                    await ExecuteAsync(connection, transaction, """
+                        INSERT INTO workflow_category_fields
+                            (workflow_id, category_id, field_code, sort_order)
+                        VALUES (@workflow_id, @category_id, @field_code, @sort)
+                        """, token,
+                        ("workflow_id", workflowId), ("category_id", categoryId),
+                        ("field_code", category.FieldCodes[fieldIndex]), ("sort", fieldIndex));
+            }
         }
     }
 
-    private static async Task SaveCatalogAsync(DbConnection connection, DbTransaction transaction, IReadOnlyList<CatalogCategoryDraft> categories, CancellationToken token)
+    private static async Task<IReadOnlyDictionary<string, Guid>> SaveCatalogAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        IReadOnlyList<CatalogCategoryDraft> categories,
+        CancellationToken token)
     {
+        var categoryIds = new Dictionary<string, Guid>(StringComparer.Ordinal);
         for (var categoryIndex = 0; categoryIndex < categories.Count; categoryIndex++)
         {
             var category = categories[categoryIndex];
             var categoryId = Guid.NewGuid();
+            categoryIds.Add(category.ClientId, categoryId);
             await ExecuteAsync(connection, transaction,
                 "INSERT INTO catalog_categories (id, name, sort_order) VALUES (@id, @name, @sort)", token,
                 ("id", categoryId), ("name", category.Name.Trim()), ("sort", categoryIndex));
@@ -226,6 +306,31 @@ internal sealed class PostgresOrganizationOnboardingService(
                         "INSERT INTO catalog_groups (id, section_id, name, sort_order) VALUES (@id, @section_id, @name, @sort)", token,
                         ("id", Guid.NewGuid()), ("section_id", sectionId), ("name", section.Groups[groupIndex].Name.Trim()), ("sort", groupIndex));
             }
+        }
+        return categoryIds;
+    }
+
+    /// <summary>Материализует проверенные зависимости после создания категорий.</summary>
+    private static async Task SaveDependenciesAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        IReadOnlyList<CategoryDependencyDraft> dependencies,
+        IReadOnlyDictionary<string, Guid> categoryIds,
+        CancellationToken token)
+    {
+        for (var index = 0; index < dependencies.Count; index++)
+        {
+            var dependency = dependencies[index];
+            await ExecuteAsync(connection, transaction, """
+                INSERT INTO catalog_category_dependencies
+                    (id, source_category_id, target_category_id, target_field_code, sort_order)
+                VALUES (@id, @source_id, @target_id, @field_code, @sort)
+                """, token,
+                ("id", Guid.NewGuid()),
+                ("source_id", categoryIds[dependency.SourceCategoryClientId]),
+                ("target_id", categoryIds[dependency.TargetCategoryClientId]),
+                ("field_code", dependency.TargetFieldCode.Trim()),
+                ("sort", index));
         }
     }
 
@@ -286,15 +391,25 @@ internal sealed class PostgresOrganizationOnboardingService(
 
     private static OrganizationOnboardingDraft CreateDefaultDraft(string name)
     {
-        static WorkflowDraft Workflow(string code, string title, params string[] columns)
+        static WorkflowDraft Workflow(
+            string code,
+            string title,
+            IReadOnlyList<CatalogCategoryDraft> categories,
+            params string[] columns)
         {
             var items = columns.Select((column, index) => new WorkflowColumnDraft($"{code}-{index + 1}", column, "#4D8DFF")).ToArray();
             var transitions = items.Zip(items.Skip(1), (from, to) => new WorkflowTransitionDraft(from.ClientId, to.ClientId)).ToArray();
-            return new WorkflowDraft(code, title, items, transitions);
+            var workflowCategories = categories
+                .Select(category => new WorkflowCategoryDraft(
+                    category.ClientId,
+                    category.Fields.Where(field => field.IsVisible).Select(field => field.FieldCode).ToArray()))
+                .ToArray();
+            return new WorkflowDraft(code, title, items, transitions, workflowCategories);
         }
 
         var fields = DefaultFieldContexts
             .SelectMany(context => OnboardingFieldRegistry.DefaultCatalogFields()
+                .Where(field => field.FieldCode != "linked_services")
                 .Select(field => OnboardingFieldRegistry.CreateContextField(
                     context,
                     field.FieldCode,
@@ -302,24 +417,38 @@ internal sealed class PostgresOrganizationOnboardingService(
                     field.IsRequired)))
             .ToArray();
 
-        static CatalogCategoryDraft Category(string clientId, string title) =>
-            new(clientId, title, [], OnboardingFieldRegistry.DefaultCatalogFields().ToArray());
+        static CatalogCategoryDraft Category(string clientId, string title, bool supportsRelations) =>
+            new(
+                clientId,
+                title,
+                [],
+                OnboardingFieldRegistry.DefaultCatalogFields()
+                    .Where(field => supportsRelations || field.FieldCode != "linked_services")
+                    .ToArray());
+
+        var categories = new[]
+        {
+            Category("equipment", "Оборудование", true),
+            Category("materials", "Материалы", true),
+            Category("works", "Работы", false),
+        };
 
         return new OrganizationOnboardingDraft(
             1,
             new CompanyProfileDraft(name, null, null, null, null, null, null, null, null),
             [
-                Workflow("quote", "Коммерческие предложения", "Составить КП", "Согласовать", "Договор"),
-                Workflow("preliminary_quote", "Предварительные КП", "Составить ПКП", "ПКП согласовано"),
-                Workflow("order", "Комплектация объекта", "Составление", "Монтаж", "Завершено"),
+                Workflow("quote", "Коммерческие предложения", categories, "Составить КП", "Согласовать", "Договор"),
+                Workflow("preliminary_quote", "Предварительные КП", categories, "Составить ПКП", "ПКП согласовано"),
+                Workflow("order", "Комплектация объекта", categories, "Составление", "Монтаж", "Завершено"),
             ],
-            [
-                Category("equipment", "Оборудование"),
-                Category("materials", "Материалы"),
-            ],
+            categories,
             fields,
             [],
-            [new DictionaryDraft("units", "Единицы измерения", [new("шт"), new("м"), new("м²")])]);
+            [new DictionaryDraft("units", "Единицы измерения", [new("шт"), new("м"), new("м²")])],
+            [
+                new CategoryDependencyDraft("works-equipment", "works", "equipment", "linked_services"),
+                new CategoryDependencyDraft("works-materials", "works", "materials", "linked_services"),
+            ]);
     }
 
     private static object Db(string? value) => string.IsNullOrWhiteSpace(value) ? DBNull.Value : value.Trim();

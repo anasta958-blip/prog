@@ -33,5 +33,67 @@ void main() {
 
     expect(codes.toSet().length, codes.length);
     expect(onboardingFieldByCode['line_total']?.isCalculated, isTrue);
+    expect(onboardingFieldByCode['line_total']?.canBeRequired, isFalse);
+    expect(onboardingFieldByCode, isNot(contains('retail_price')));
+    expect(defaultCatalogFieldCodes, isNot(contains('markup_value')));
+    expect(defaultCatalogFieldCodes, isNot(contains('discount_value')));
+    expect(defaultCatalogFieldCodes, isNot(contains('line_total')));
+  });
+
+  test('старый черновик без зависимостей остаётся совместимым', () {
+    final source = OrganizationOnboardingDraft.initial().toJson()
+      ..remove('dependencies');
+
+    final restored = OrganizationOnboardingDraft.fromJson(source);
+
+    expect(restored.dependencies, isEmpty);
+  });
+
+  test('зависимость категорий сохраняет направление и relation-поле', () {
+    final dependency = CategoryDependencyDraft(
+      clientId: 'works-equipment',
+      sourceCategoryClientId: 'works',
+      targetCategoryClientId: 'equipment',
+      targetFieldCode: 'linked_services',
+    );
+
+    final restored = CategoryDependencyDraft.fromJson(dependency.toJson());
+
+    expect(restored.sourceCategoryClientId, 'works');
+    expect(restored.targetCategoryClientId, 'equipment');
+    expect(restored.targetFieldCode, 'linked_services');
+  });
+
+  test('старый канбан без категорий остаётся совместимым', () {
+    final source = WorkflowDraft(
+      code: 'quote',
+      name: 'КП',
+      columns: [],
+      transitions: [],
+    ).toJson()..remove('categories');
+
+    final restored = WorkflowDraft.fromJson(source);
+
+    expect(restored.categories, isEmpty);
+  });
+
+  test('канбан сохраняет категории и порядок полей карточки', () {
+    final source = WorkflowDraft(
+      code: 'quote',
+      name: 'КП',
+      columns: [],
+      transitions: [],
+      categories: [
+        WorkflowCategoryDraft(
+          categoryClientId: 'equipment',
+          fieldCodes: ['name', 'line_total'],
+        ),
+      ],
+    );
+
+    final restored = WorkflowDraft.fromJson(source.toJson());
+
+    expect(restored.categories.single.categoryClientId, 'equipment');
+    expect(restored.categories.single.fieldCodes, ['name', 'line_total']);
   });
 }

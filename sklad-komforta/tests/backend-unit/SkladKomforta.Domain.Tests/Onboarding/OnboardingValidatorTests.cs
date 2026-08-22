@@ -7,6 +7,20 @@ namespace SkladKomforta.Domain.Tests.Onboarding;
 public sealed class OnboardingValidatorTests
 {
     [Fact]
+    public void DefaultCatalogFieldsExcludeOptionalAdjustmentsAndRetiredRetailPrice()
+    {
+        var defaults = OnboardingFieldRegistry.DefaultCatalogFields()
+            .Select(field => field.FieldCode)
+            .ToArray();
+
+        Assert.DoesNotContain("retail_price", OnboardingFieldRegistry.All.Select(field => field.Code));
+        Assert.DoesNotContain("markup_value", defaults);
+        Assert.DoesNotContain("discount_value", defaults);
+        Assert.DoesNotContain("line_total", defaults);
+        Assert.Contains("base_price", defaults);
+    }
+
+    [Fact]
     public void DraftRejectsDuplicateCategoryNamesIgnoringCase()
     {
         var draft = ValidDraft() with
@@ -141,29 +155,150 @@ public sealed class OnboardingValidatorTests
         Assert.Equal("onboarding_field_dependency", exception.Code);
     }
 
+    [Fact]
+    public void DraftAcceptsDependencyStoredInRelationField()
+    {
+        var source = ValidDraft();
+        var draft = source with
+        {
+            Categories =
+            [
+                Category("equipment", "Оборудование", true),
+                Category("works", "Работы"),
+            ],
+            Dependencies =
+            [
+                new CategoryDependencyDraft("works-equipment", "works", "equipment", "linked_services"),
+            ],
+        };
+
+        var exception = Record.Exception(() =>
+            OnboardingValidator.Validate(draft, false));
+
+        Assert.Null(exception);
+    }
+
+    [Fact]
+    public void DraftRejectsDependencyWithUnknownCategory()
+    {
+        var source = ValidDraft();
+        var draft = source with
+        {
+            Dependencies =
+            [
+                new CategoryDependencyDraft("unknown-equipment", "unknown", "equipment", "linked_services"),
+            ],
+        };
+
+        var exception = Assert.Throws<IdentityException>(() =>
+            OnboardingValidator.Validate(draft, false));
+
+        Assert.Equal("onboarding_dependency_category_invalid", exception.Code);
+    }
+
+    [Fact]
+    public void DraftRejectsDependencyStoredInOrdinaryField()
+    {
+        var source = ValidDraft();
+        var draft = source with
+        {
+            Categories =
+            [
+                Category("equipment", "Оборудование"),
+                Category("works", "Работы"),
+            ],
+            Dependencies =
+            [
+                new CategoryDependencyDraft("works-equipment", "works", "equipment", "name"),
+            ],
+        };
+
+        var exception = Assert.Throws<IdentityException>(() =>
+            OnboardingValidator.Validate(draft, false));
+
+        Assert.Equal("onboarding_dependency_field_invalid", exception.Code);
+    }
+
+    [Fact]
+    public void DraftRejectsUnknownWorkflowCategory()
+    {
+        var source = ValidDraft();
+        var workflow = source.Workflows[0] with
+        {
+            Categories = [new WorkflowCategoryDraft("unknown", ["name"])],
+        };
+
+        var exception = Assert.Throws<IdentityException>(() =>
+            OnboardingValidator.Validate(source with { Workflows = [workflow] }, false));
+
+        Assert.Equal("onboarding_workflow_category_invalid", exception.Code);
+    }
+
+    [Fact]
+    public void DraftRejectsWorkflowFieldMissingFromCategory()
+    {
+        var source = ValidDraft();
+        var workflow = source.Workflows[0] with
+        {
+            Categories = [new WorkflowCategoryDraft("equipment", ["supplier"])],
+        };
+
+        var exception = Assert.Throws<IdentityException>(() =>
+            OnboardingValidator.Validate(source with { Workflows = [workflow] }, false));
+
+        Assert.Equal("onboarding_workflow_field_invalid", exception.Code);
+    }
+
+    [Fact]
+    public void DraftAcceptsCalculatedWorkflowFieldWithoutCatalogSelection()
+    {
+        var source = ValidDraft();
+        var category = new CatalogCategoryDraft(
+            "equipment",
+            "Оборудование",
+            [],
+            [new CatalogFieldDraft("name", true, true)]);
+        var workflow = source.Workflows[0] with
+        {
+            Categories = [new WorkflowCategoryDraft("equipment", ["name", "line_total"])],
+        };
+
+        var exception = Record.Exception(() => OnboardingValidator.Validate(
+            source with { Workflows = [workflow], Categories = [category] },
+            false));
+
+        Assert.Null(exception);
+    }
+
     private static OrganizationOnboardingDraft ValidDraft() => new(
-        7,
+        8,
         new CompanyProfileDraft("Склад Комфорта", "ООО", null, null, null, null, null, null, null),
         [
             new WorkflowDraft(
                 "quote",
                 "Коммерческие предложения",
                 [new WorkflowColumnDraft("quote-1", "Составить КП", "#4D8DFF")],
-                []),
+                [],
+                [new WorkflowCategoryDraft("equipment", ["name", "line_total"])]),
         ],
         [Category("equipment", "Оборудование")],
         [new EntityFieldDraft("quote", "name", "Наименование", "text", true, true)],
         [],
         [new DictionaryDraft("units", "Единицы измерения", [new DictionaryItemDraft("шт")])]);
 
-    private static CatalogCategoryDraft Category(string clientId, string name) => new(
-        clientId,
-        name,
-        [],
-        [
+    private static CatalogCategoryDraft Category(
+        string clientId,
+        string name,
+        bool includeRelation = false)
+    {
+        var fields = new List<CatalogFieldDraft>
+        {
             new CatalogFieldDraft("name", true, true),
             new CatalogFieldDraft("quantity", true, true),
             new CatalogFieldDraft("base_price", true, false),
             new CatalogFieldDraft("line_total", true, false),
-        ]);
+        };
+        if (includeRelation) fields.Add(new CatalogFieldDraft("linked_services", true, false));
+        return new CatalogCategoryDraft(clientId, name, [], fields);
+    }
 }

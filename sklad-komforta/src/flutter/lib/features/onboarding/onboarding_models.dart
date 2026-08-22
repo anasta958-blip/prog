@@ -86,11 +86,13 @@ final class WorkflowDraft {
     required this.name,
     required this.columns,
     required this.transitions,
-  });
+    List<WorkflowCategoryDraft>? categories,
+  }) : categories = categories ?? <WorkflowCategoryDraft>[];
   String code;
   String name;
   List<WorkflowColumnDraft> columns;
   List<WorkflowTransitionDraft> transitions;
+  List<WorkflowCategoryDraft> categories;
   factory WorkflowDraft.fromJson(Map<String, dynamic> json) => WorkflowDraft(
     code: json['code'] as String,
     name: json['name'] as String,
@@ -105,12 +107,42 @@ final class WorkflowDraft {
               WorkflowTransitionDraft.fromJson(item as Map<String, dynamic>),
         )
         .toList(),
+    categories: ((json['categories'] as List<dynamic>?) ?? const [])
+        .map(
+          (item) =>
+              WorkflowCategoryDraft.fromJson(item as Map<String, dynamic>),
+        )
+        .toList(),
   );
   Map<String, dynamic> toJson() => {
     'code': code,
     'name': name,
     'columns': columns.map((item) => item.toJson()).toList(),
     'transitions': transitions.map((item) => item.toJson()).toList(),
+    'categories': categories.map((item) => item.toJson()).toList(),
+  };
+}
+
+/// Категория, доступная в конкретном канбане, и поля её карточки.
+final class WorkflowCategoryDraft {
+  WorkflowCategoryDraft({
+    required this.categoryClientId,
+    required this.fieldCodes,
+  });
+
+  String categoryClientId;
+  List<String> fieldCodes;
+
+  factory WorkflowCategoryDraft.fromJson(Map<String, dynamic> json) =>
+      WorkflowCategoryDraft(
+        categoryClientId: json['categoryClientId'] as String,
+        fieldCodes: ((json['fieldCodes'] as List<dynamic>?) ?? const [])
+            .cast<String>(),
+      );
+
+  Map<String, dynamic> toJson() => {
+    'categoryClientId': categoryClientId,
+    'fieldCodes': fieldCodes,
   };
 }
 
@@ -207,6 +239,36 @@ final class CatalogCategoryDraft {
   };
 }
 
+/// Настраиваемая связь между позициями двух категорий каталога.
+final class CategoryDependencyDraft {
+  CategoryDependencyDraft({
+    required this.clientId,
+    required this.sourceCategoryClientId,
+    required this.targetCategoryClientId,
+    required this.targetFieldCode,
+  });
+
+  String clientId;
+  String sourceCategoryClientId;
+  String targetCategoryClientId;
+  String targetFieldCode;
+
+  factory CategoryDependencyDraft.fromJson(Map<String, dynamic> json) =>
+      CategoryDependencyDraft(
+        clientId: json['clientId'] as String,
+        sourceCategoryClientId: json['sourceCategoryClientId'] as String,
+        targetCategoryClientId: json['targetCategoryClientId'] as String,
+        targetFieldCode: json['targetFieldCode'] as String,
+      );
+
+  Map<String, dynamic> toJson() => {
+    'clientId': clientId,
+    'sourceCategoryClientId': sourceCategoryClientId,
+    'targetCategoryClientId': targetCategoryClientId,
+    'targetFieldCode': targetFieldCode,
+  };
+}
+
 /// Одно поле строки товара в конкретном бизнес-контексте.
 final class EntityFieldDraft {
   EntityFieldDraft({
@@ -296,7 +358,7 @@ final class DictionaryDraft {
   };
 }
 
-/// Полный изменяемый черновик всех семи шагов onboarding.
+/// Полный изменяемый черновик всех восьми шагов onboarding.
 final class OrganizationOnboardingDraft {
   OrganizationOnboardingDraft({
     required this.currentStep,
@@ -306,6 +368,7 @@ final class OrganizationOnboardingDraft {
     required this.fields,
     required this.roles,
     required this.dictionaries,
+    required this.dependencies,
   });
   int currentStep;
   CompanyProfileDraft company;
@@ -314,6 +377,7 @@ final class OrganizationOnboardingDraft {
   List<EntityFieldDraft> fields;
   List<OnboardingRoleDraft> roles;
   List<DictionaryDraft> dictionaries;
+  List<CategoryDependencyDraft> dependencies;
 
   /// Создаёт локальную стартовую конфигурацию до появления tenant-схемы.
   factory OrganizationOnboardingDraft.initial() => OrganizationOnboardingDraft(
@@ -324,6 +388,7 @@ final class OrganizationOnboardingDraft {
     fields: [],
     roles: [],
     dictionaries: [],
+    dependencies: [],
   );
 
   factory OrganizationOnboardingDraft.fromJson(
@@ -352,6 +417,12 @@ final class OrganizationOnboardingDraft {
     dictionaries: (json['dictionaries'] as List<dynamic>)
         .map((item) => DictionaryDraft.fromJson(item as Map<String, dynamic>))
         .toList(),
+    dependencies: ((json['dependencies'] as List<dynamic>?) ?? const [])
+        .map(
+          (item) =>
+              CategoryDependencyDraft.fromJson(item as Map<String, dynamic>),
+        )
+        .toList(),
   );
 
   Map<String, dynamic> toJson() => {
@@ -362,5 +433,6 @@ final class OrganizationOnboardingDraft {
     'fields': fields.map((item) => item.toJson()).toList(),
     'roles': roles.map((item) => item.toJson()).toList(),
     'dictionaries': dictionaries.map((item) => item.toJson()).toList(),
+    'dependencies': dependencies.map((item) => item.toJson()).toList(),
   };
 }

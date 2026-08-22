@@ -6,9 +6,10 @@ import 'package:sklad_komforta_app/core/network/http_client_factory.dart'
 
 /// Ошибка API со стабильным кодом и безопасным сообщением сервера.
 final class AuthApiException implements Exception {
-  const AuthApiException(this.code, this.message);
+  const AuthApiException(this.code, this.message, [this.statusCode]);
   final String code;
   final String message;
+  final int? statusCode;
   @override
   String toString() => message;
 }
@@ -78,6 +79,13 @@ final class AuthApi implements AuthGateway {
 
   dynamic _unwrap(http.Response response) {
     final decodedBody = utf8.decode(response.bodyBytes);
+    if (response.statusCode == 401 && decodedBody.trim().isEmpty) {
+      throw const AuthApiException(
+        'session_expired',
+        'Сессия истекла. Войдите снова.',
+        401,
+      );
+    }
     final Map<String, dynamic> envelope;
     try {
       envelope = jsonDecode(decodedBody) as Map<String, dynamic>;
@@ -85,11 +93,13 @@ final class AuthApi implements AuthGateway {
       throw AuthApiException(
         'invalid_server_response',
         'Сервер вернул некорректный ответ (HTTP ${response.statusCode}).',
+        response.statusCode,
       );
     } on TypeError {
       throw AuthApiException(
         'invalid_server_response',
         'Сервер вернул ответ неизвестного формата (HTTP ${response.statusCode}).',
+        response.statusCode,
       );
     }
     if (envelope['ok'] != true) {
@@ -97,6 +107,7 @@ final class AuthApi implements AuthGateway {
       throw AuthApiException(
         error?['code'] as String? ?? 'request_failed',
         error?['message'] as String? ?? 'Не удалось выполнить запрос.',
+        response.statusCode,
       );
     }
     return envelope['data'];

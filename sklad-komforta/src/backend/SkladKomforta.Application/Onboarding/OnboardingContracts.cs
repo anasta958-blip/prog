@@ -18,12 +18,18 @@ public sealed record WorkflowColumnDraft(string ClientId, string Name, string Co
 /// <summary>Разрешённый переход между двумя клиентскими идентификаторами столбцов.</summary>
 public sealed record WorkflowTransitionDraft(string FromClientId, string ToClientId);
 
+/// <summary>Категория канбана и упорядоченные поля, отображаемые в её карточке.</summary>
+public sealed record WorkflowCategoryDraft(
+    string CategoryClientId,
+    IReadOnlyList<string> FieldCodes);
+
 /// <summary>Канбан вместе с упорядоченными столбцами и разрешёнными переходами.</summary>
 public sealed record WorkflowDraft(
     string Code,
     string Name,
     IReadOnlyList<WorkflowColumnDraft> Columns,
-    IReadOnlyList<WorkflowTransitionDraft> Transitions);
+    IReadOnlyList<WorkflowTransitionDraft> Transitions,
+    IReadOnlyList<WorkflowCategoryDraft>? Categories = null);
 
 /// <summary>Группа товаров внутри раздела каталога.</summary>
 public sealed record CatalogGroupDraft(string Name);
@@ -40,6 +46,16 @@ public sealed record CatalogCategoryDraft(
     string Name,
     IReadOnlyList<CatalogSectionDraft> Sections,
     IReadOnlyList<CatalogFieldDraft> Fields);
+
+/// <summary>
+/// Разрешает связывать позицию исходной категории с позицией целевой категории.
+/// Связь записывается в выбранное relation-поле целевой карточки.
+/// </summary>
+public sealed record CategoryDependencyDraft(
+    string ClientId,
+    string SourceCategoryClientId,
+    string TargetCategoryClientId,
+    string TargetFieldCode);
 
 /// <summary>Видимость, обязательность и порядок одного поля в заданном контексте.</summary>
 public sealed record EntityFieldDraft(
@@ -60,7 +76,7 @@ public sealed record DictionaryItemDraft(string Value);
 public sealed record DictionaryDraft(string Code, string Name, IReadOnlyList<DictionaryItemDraft> Items);
 
 /// <summary>
-/// Полный серверный черновик семишаговой настройки. Клиент всегда отправляет
+/// Полный серверный черновик восьмишаговой настройки. Клиент всегда отправляет
 /// агрегат целиком, поэтому сервер может валидировать согласованность связей.
 /// </summary>
 public sealed record OrganizationOnboardingDraft(
@@ -70,7 +86,8 @@ public sealed record OrganizationOnboardingDraft(
     IReadOnlyList<CatalogCategoryDraft> Categories,
     IReadOnlyList<EntityFieldDraft> Fields,
     IReadOnlyList<OnboardingRoleDraft> Roles,
-    IReadOnlyList<DictionaryDraft> Dictionaries);
+    IReadOnlyList<DictionaryDraft> Dictionaries,
+    IReadOnlyList<CategoryDependencyDraft>? Dependencies = null);
 
 /// <summary>Состояние onboarding и признак окончательной активации организации.</summary>
 public sealed record OrganizationOnboardingState(

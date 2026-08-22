@@ -1,4 +1,5 @@
 using SkladKomforta.Application.Identity;
+using System.Diagnostics.CodeAnalysis;
 using System.Net.Mail;
 
 namespace SkladKomforta.Application.Onboarding;
@@ -12,8 +13,8 @@ public static class OnboardingValidator
     /// </summary>
     public static void Validate(OrganizationOnboardingDraft draft, bool forActivation)
     {
-        if (draft.CurrentStep is < 1 or > 7)
-            Fail("onboarding_step_invalid", "Номер шага должен быть от 1 до 7.");
+        if (draft.CurrentStep is < 1 or > 8)
+            Fail("onboarding_step_invalid", "Номер шага должен быть от 1 до 8.");
 
         RequireText(draft.Company.OrganizationName, 2, 200, "Название организации");
         ValidateDigits(draft.Company.Inn, [10, 12], "ИНН должен содержать 10 или 12 цифр.");
@@ -62,6 +63,9 @@ public static class OnboardingValidator
             }
         }
 
+        ValidateWorkflowCategories(draft.Workflows, draft.Categories);
+        ValidateDependencies(draft.Categories, draft.Dependencies ?? []);
+
         ValidateUnique(draft.Fields.Select(item => $"{item.ContextCode}:{item.FieldCode}"), "Коды полей");
         foreach (var field in draft.Fields)
         {
@@ -87,8 +91,85 @@ public static class OnboardingValidator
 
         if (forActivation &&
             (draft.Workflows.Count == 0 || draft.Workflows.Any(item => item.Columns.Count == 0) ||
-             draft.Categories.Count == 0 || draft.Fields.Count == 0 || draft.Dictionaries.Count == 0))
+             draft.Categories.Count == 0 ||
+             draft.Workflows.Any(item => item.Categories is not { Count: > 0 } ||
+                 item.Categories.Any(category => category.FieldCodes.Count == 0)) ||
+             draft.Dictionaries.Count == 0))
             Fail("onboarding_incomplete", "Заполните канбаны, каталог, поля и справочники перед активацией.");
+    }
+
+    /// <summary>
+    /// Проверяет привязку категорий к канбанам. Обычное поле должно быть настроено
+    /// в карточке категории; расчётное поле доступно независимо от этого списка.
+    /// </summary>
+    private static void ValidateWorkflowCategories(
+        IReadOnlyList<WorkflowDraft> workflows,
+        IReadOnlyList<CatalogCategoryDraft> categories)
+    {
+        var categoriesById = categories.ToDictionary(item => item.ClientId, StringComparer.Ordinal);
+        foreach (var workflow in workflows)
+        {
+            var selections = workflow.Categories ?? [];
+            ValidateUnique(
+                selections.Select(item => item.CategoryClientId),
+                $"Категории канбана «{workflow.Name}»");
+
+            foreach (var selection in selections)
+            {
+                if (!categoriesById.TryGetValue(selection.CategoryClientId, out var category))
+                    Fail("onboarding_workflow_category_invalid",
+                        $"Канбан «{workflow.Name}» ссылается на неизвестную категорию.");
+
+                ValidateUnique(
+                    selection.FieldCodes,
+                    $"Поля категории «{category.Name}» в канбане «{workflow.Name}»");
+                var categoryFields = category.Fields
+                    .Select(item => item.FieldCode)
+                    .ToHashSet(StringComparer.Ordinal);
+                foreach (var fieldCode in selection.FieldCodes)
+                {
+                    var definition = OnboardingFieldRegistry.Get(fieldCode);
+                    if (!definition.IsCalculated && !categoryFields.Contains(definition.Code))
+                        Fail("onboarding_workflow_field_invalid",
+                            $"Поле «{definition.Label}» не настроено в категории «{category.Name}».");
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Проверяет направление зависимости и гарантирует, что результат можно
+    /// записать только в реально выбранное relation-поле целевой категории.
+    /// </summary>
+    private static void ValidateDependencies(
+        IReadOnlyList<CatalogCategoryDraft> categories,
+        IReadOnlyList<CategoryDependencyDraft> dependencies)
+    {
+        ValidateUnique(dependencies.Select(item => item.ClientId), "Идентификаторы зависимостей");
+        ValidateUnique(
+            dependencies.Select(item =>
+                $"{item.SourceCategoryClientId}:{item.TargetCategoryClientId}:{item.TargetFieldCode}"),
+            "Зависимости категорий");
+
+        var categoriesById = categories.ToDictionary(item => item.ClientId, StringComparer.Ordinal);
+        foreach (var dependency in dependencies)
+        {
+            RequireText(dependency.ClientId, 1, 100, "Идентификатор зависимости");
+            if (!categoriesById.TryGetValue(dependency.SourceCategoryClientId, out var source))
+                Fail("onboarding_dependency_category_invalid", "Зависимость ссылается на неизвестную категорию.");
+            if (!categoriesById.TryGetValue(dependency.TargetCategoryClientId, out var target))
+                Fail("onboarding_dependency_category_invalid", "Зависимость ссылается на неизвестную категорию.");
+            if (source.ClientId == target.ClientId)
+                Fail("onboarding_dependency_self_reference", "Категорию нельзя привязать саму к себе.");
+
+            var targetField = target.Fields.FirstOrDefault(item => item.FieldCode == dependency.TargetFieldCode);
+            if (targetField is null)
+                Fail("onboarding_dependency_field_invalid",
+                    $"В категории «{target.Name}» отсутствует поле для выбранной зависимости.");
+            if (OnboardingFieldRegistry.Get(targetField.FieldCode).FieldType != "relation")
+                Fail("onboarding_dependency_field_invalid",
+                    $"Поле «{OnboardingFieldRegistry.Get(targetField.FieldCode).Label}» не хранит связи.");
+        }
     }
 
     private static void ValidateFieldSelection(IReadOnlyList<CatalogFieldDraft> fields, string owner)
@@ -165,6 +246,7 @@ public static class OnboardingValidator
         }
     }
 
+    [DoesNotReturn]
     private static void Fail(string code, string message) =>
         throw new IdentityException(400, code, message);
 }

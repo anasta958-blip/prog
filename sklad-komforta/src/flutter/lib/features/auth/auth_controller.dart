@@ -166,14 +166,18 @@ final class AuthController extends ChangeNotifier {
         if (!organizationProvisioned) {
           final company = draft.company;
           final data =
-              await _api.post('/identity/organization', {
-                    'name': draft.company.organizationName,
-                  }, accessToken: accessToken)
+              await _withValidAccessToken(
+                    (token) => _api.post('/identity/organization', {
+                      'name': draft.company.organizationName,
+                    }, accessToken: token),
+                  )
                   as Map<String, dynamic>;
           accessToken = data['accessToken'] as String;
           organizationProvisioned = true;
           final initialState =
-              await _api.get('/onboarding/', accessToken!)
+              await _withValidAccessToken(
+                    (token) => _api.get('/onboarding/', token),
+                  )
                   as Map<String, dynamic>;
           draftToSave =
               OrganizationOnboardingDraft.fromJson(
@@ -183,10 +187,12 @@ final class AuthController extends ChangeNotifier {
                 ..currentStep = draft.currentStep;
         }
         final data =
-            await _api.post(
-                  '/onboarding/draft',
-                  draftToSave.toJson(),
-                  accessToken: accessToken,
+            await _withValidAccessToken(
+                  (token) => _api.post(
+                    '/onboarding/draft',
+                    draftToSave.toJson(),
+                    accessToken: token,
+                  ),
                 )
                 as Map<String, dynamic>;
         onboardingDraft = OrganizationOnboardingDraft.fromJson(
@@ -199,7 +205,8 @@ final class AuthController extends ChangeNotifier {
   Future<void> loadOnboarding() async {
     if (accessToken == null) return;
     final data =
-        await _api.get('/onboarding/', accessToken!) as Map<String, dynamic>;
+        await _withValidAccessToken((token) => _api.get('/onboarding/', token))
+            as Map<String, dynamic>;
     onboardingDraft = OrganizationOnboardingDraft.fromJson(
       data['draft'] as Map<String, dynamic>,
     );
@@ -213,7 +220,10 @@ final class AuthController extends ChangeNotifier {
 
   /// Материализует проверенный черновик и завершает первичную настройку.
   Future<void> activateOrganization() => _run(() async {
-    await _api.post('/onboarding/activate', const {}, accessToken: accessToken);
+    await _withValidAccessToken(
+      (token) =>
+          _api.post('/onboarding/activate', const {}, accessToken: token),
+    );
     stage = AuthStage.ready;
     await loadSessions();
   });
@@ -222,28 +232,37 @@ final class AuthController extends ChangeNotifier {
   Future<void> loadSessions() async {
     if (accessToken == null) return;
     final data =
-        await _api.get('/identity/sessions', accessToken!) as List<dynamic>;
+        await _withValidAccessToken(
+              (token) => _api.get('/identity/sessions', token),
+            )
+            as List<dynamic>;
     sessions = data.cast<Map<String, dynamic>>();
   }
 
   /// Отзывает выбранное устройство и обновляет список без выхода текущего.
   Future<void> revokeSession(String sessionId) => _run(() async {
     if (accessToken == null) return;
-    await _api.delete('/identity/sessions/$sessionId', accessToken!);
+    await _withValidAccessToken(
+      (token) => _api.delete('/identity/sessions/$sessionId', token),
+    );
     await loadSessions();
   });
 
   /// Отзывает все устройства, кроме текущего, и обновляет список.
   Future<void> revokeOtherSessions() => _run(() async {
     if (accessToken == null) return;
-    await _api.delete('/identity/sessions', accessToken!);
+    await _withValidAccessToken(
+      (token) => _api.delete('/identity/sessions', token),
+    );
     await loadSessions();
   });
 
   /// Завершает текущую серверную сессию и очищает нативный refresh-токен.
   Future<void> logout() => _run(() async {
     if (accessToken != null) {
-      await _api.post('/identity/logout', const {}, accessToken: accessToken);
+      await _withValidAccessToken(
+        (token) => _api.post('/identity/logout', const {}, accessToken: token),
+      );
     }
     await _tokens.clear();
     accessToken = null;
@@ -256,6 +275,38 @@ final class AuthController extends ChangeNotifier {
     await _tokens.writeRefreshToken(data['refreshToken'] as String?);
   }
 
+  /// Повторяет защищённый запрос один раз после ротации истёкшего access token.
+  /// Refresh-токен остаётся в secure storage, а Web передаёт HttpOnly cookie.
+  Future<dynamic> _withValidAccessToken(
+    Future<dynamic> Function(String accessToken) request,
+  ) async {
+    final currentToken = accessToken;
+    if (currentToken == null) {
+      throw const AuthApiException(
+        'session_expired',
+        'Сессия истекла. Войдите снова.',
+        401,
+      );
+    }
+    try {
+      return await request(currentToken);
+    } on AuthApiException catch (exception) {
+      if (exception.statusCode != 401) rethrow;
+      await _refreshAccessToken();
+      return request(accessToken!);
+    }
+  }
+
+  /// Ротирует refresh-сессию без изменения текущего экрана приложения.
+  Future<void> _refreshAccessToken() async {
+    final refresh = await _tokens.readRefreshToken();
+    final data =
+        await _api.post('/auth/refresh', {'refreshToken': refresh ?? ''})
+            as Map<String, dynamic>;
+    await _acceptTokens(data);
+    organizationProvisioned = data['organizationId'] != null;
+  }
+
   Future<void> _run(Future<void> Function() action) async {
     if (busy) return;
     busy = true;
@@ -264,7 +315,15 @@ final class AuthController extends ChangeNotifier {
     try {
       await action();
     } on AuthApiException catch (exception) {
-      error = exception.message;
+      if (exception.statusCode == 401) {
+        await _tokens.clear();
+        accessToken = null;
+        sessions = const [];
+        stage = AuthStage.login;
+        error = 'Сессия истекла. Войдите снова.';
+      } else {
+        error = exception.message;
+      }
     } catch (_) {
       error = 'Не удалось связаться с сервером. Проверьте подключение.';
     } finally {

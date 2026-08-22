@@ -5,7 +5,7 @@ final class OnboardingFieldDefinition {
     required this.label,
     required this.fieldType,
     required this.group,
-    this.canBeRequired = false,
+    this.canBeRequired = true,
     this.isCalculated = false,
   });
 
@@ -83,12 +83,6 @@ const onboardingFieldDefinitions = <OnboardingFieldDefinition>[
     group: 'Цены и расчёты',
   ),
   OnboardingFieldDefinition(
-    code: 'retail_price',
-    label: 'Розничная цена',
-    fieldType: 'money',
-    group: 'Цены и расчёты',
-  ),
-  OnboardingFieldDefinition(
     code: 'price_type',
     label: 'Тип цены',
     fieldType: 'enum',
@@ -117,6 +111,7 @@ const onboardingFieldDefinitions = <OnboardingFieldDefinition>[
     label: 'Сумма',
     fieldType: 'calculated_money',
     group: 'Цены и расчёты',
+    canBeRequired: false,
     isCalculated: true,
   ),
   OnboardingFieldDefinition(
@@ -133,7 +128,7 @@ const onboardingFieldDefinitions = <OnboardingFieldDefinition>[
   ),
   OnboardingFieldDefinition(
     code: 'linked_services',
-    label: 'Привязанные работы',
+    label: 'Связанные позиции',
     fieldType: 'relation',
     group: 'Служебные',
   ),
@@ -166,10 +161,7 @@ const defaultCatalogFieldCodes = <String>[
   'supplier',
   'purchase_price',
   'minimal_price',
-  'retail_price',
-  'markup_value',
   'base_price',
-  'discount_value',
-  'line_total',
   'excluded_from_calc',
+  'linked_services',
 ];

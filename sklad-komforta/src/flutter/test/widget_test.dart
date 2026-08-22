@@ -5,6 +5,7 @@ import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/core/security/token_store.dart';
 import 'package:sklad_komforta_app/features/auth/auth_api.dart';
 import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
+import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
 
 void main() {
   const config = AppConfig(
@@ -128,7 +129,46 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('onboarding использует выбранный семишаговый вариант 2', (
+  test('истёкший access token обновляется перед повтором запроса', () async {
+    final api = _RefreshingAuthGateway();
+    final tokens = _MemoryTokenRepository()..value = 'refresh-token';
+    final controller = AuthController(config, api: api, tokens: tokens)
+      ..accessToken = 'expired-access-token'
+      ..stage = AuthStage.ready;
+
+    await controller.loadSessions();
+
+    expect(api.sessionRequestTokens, [
+      'expired-access-token',
+      'renewed-access-token',
+    ]);
+    expect(controller.accessToken, 'renewed-access-token');
+    expect(tokens.value, 'rotated-refresh-token');
+
+    controller.dispose();
+  });
+
+  test(
+    'недействительная refresh-сессия возвращает пользователя на вход',
+    () async {
+      final api = _RefreshingAuthGateway(refreshFails: true);
+      final tokens = _MemoryTokenRepository()..value = 'invalid-refresh-token';
+      final controller = AuthController(config, api: api, tokens: tokens)
+        ..accessToken = 'expired-access-token'
+        ..stage = AuthStage.ready;
+
+      await controller.revokeOtherSessions();
+
+      expect(controller.stage, AuthStage.login);
+      expect(controller.accessToken, isNull);
+      expect(tokens.value, isNull);
+      expect(controller.error, 'Сессия истекла. Войдите снова.');
+
+      controller.dispose();
+    },
+  );
+
+  testWidgets('onboarding использует выбранный восьмишаговый вариант 2', (
     tester,
   ) async {
     tester.view.devicePixelRatio = 1;
@@ -154,6 +194,251 @@ void main() {
     expect(find.text('1. Компания'), findsWidgets);
     expect(find.text('Предварительный просмотр'), findsOneWidget);
     expect(find.text('Сохранить и продолжить'), findsOneWidget);
+    expect(find.text('5. Зависимости'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets('список типа компании открывается под полем', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    final controller = AuthController(
+      config,
+      api: _OfflineAuthGateway(),
+      tokens: _MemoryTokenRepository(),
+    );
+    controller.stage = AuthStage.organization;
+
+    await tester.pumpWidget(
+      SkladKomfortaApp(
+        config: config,
+        authController: controller,
+        initializeAuthController: false,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final dropdown = find.byType(DropdownMenu<String>);
+    final fieldBounds = tester.getRect(dropdown);
+    await tester.tap(dropdown);
+    await tester.pumpAndSettle();
+
+    final menuItemBounds = tester.getRect(
+      find.widgetWithText(MenuItemButton, 'ИП'),
+    );
+    expect(menuItemBounds.top, greaterThanOrEqualTo(fieldBounds.bottom));
+
+    controller.dispose();
+  });
+
+  testWidgets('настроенный канбан сворачивается без показа технического кода', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    final controller = AuthController(
+      config,
+      api: _OfflineAuthGateway(),
+      tokens: _MemoryTokenRepository(),
+    );
+    controller.stage = AuthStage.organization;
+    controller.onboardingDraft = OrganizationOnboardingDraft.initial()
+      ..currentStep = 2
+      ..workflows.add(
+        WorkflowDraft(
+          code: 'workflow_1',
+          name: 'Коммерческие предложения',
+          columns: [],
+          transitions: [],
+        ),
+      );
+
+    await tester.pumpWidget(
+      SkladKomfortaApp(
+        config: config,
+        authController: controller,
+        initializeAuthController: false,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Название канбана'), findsOneWidget);
+    expect(find.text('Код'), findsNothing);
+
+    await tester.tap(find.bySemanticsLabel('Свернуть канбан'));
+    await tester.pumpAndSettle();
+    expect(find.text('Название канбана'), findsNothing);
+
+    await tester.tap(find.bySemanticsLabel('Развернуть канбан'));
+    await tester.pumpAndSettle();
+    expect(find.text('Название канбана'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets(
+    'настроенная категория каталога сворачивается без потери данных',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1400, 900);
+      addTearDown(tester.view.reset);
+      final controller = AuthController(
+        config,
+        api: _OfflineAuthGateway(),
+        tokens: _MemoryTokenRepository(),
+      );
+      final category = CatalogCategoryDraft(
+        clientId: 'equipment',
+        name: 'Оборудование',
+        sections: [
+          CatalogSectionDraft(
+            name: 'Вентиляция',
+            groups: [CatalogGroupDraft('Приточные установки')],
+          ),
+        ],
+        fields: [],
+      );
+      controller.stage = AuthStage.organization;
+      controller.onboardingDraft = OrganizationOnboardingDraft.initial()
+        ..currentStep = 3
+        ..categories.add(category);
+
+      await tester.pumpWidget(
+        SkladKomfortaApp(
+          config: config,
+          authController: controller,
+          initializeAuthController: false,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Категория'), findsOneWidget);
+      await tester.tap(find.bySemanticsLabel('Свернуть категорию'));
+      await tester.pumpAndSettle();
+      expect(find.text('Категория'), findsNothing);
+      expect(
+        category.sections.single.groups.single.name,
+        'Приточные установки',
+      );
+
+      await tester.tap(find.bySemanticsLabel('Развернуть категорию'));
+      await tester.pumpAndSettle();
+      expect(find.text('Категория'), findsOneWidget);
+
+      await tester.tap(find.bySemanticsLabel('Развернуть раздел'));
+      await tester.pumpAndSettle();
+      expect(find.text('Название раздела'), findsOneWidget);
+      expect(find.text('Группа'), findsOneWidget);
+
+      await tester.tap(find.bySemanticsLabel('Свернуть раздел'));
+      await tester.pumpAndSettle();
+      expect(find.text('Название раздела'), findsNothing);
+      expect(
+        category.sections.single.groups.single.name,
+        'Приточные установки',
+      );
+
+      controller.dispose();
+    },
+  );
+
+  testWidgets('поля связывают категорию с конкретным канбаном', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 1100);
+    addTearDown(tester.view.reset);
+    final controller = AuthController(
+      config,
+      api: _OfflineAuthGateway(),
+      tokens: _MemoryTokenRepository(),
+    );
+    final category = CatalogCategoryDraft(
+      clientId: 'equipment',
+      name: 'Оборудование',
+      sections: [],
+      fields: [
+        CatalogFieldDraft(fieldCode: 'name', isVisible: true, isRequired: true),
+      ],
+    );
+    final workflow = WorkflowDraft(
+      code: 'quote',
+      name: 'Коммерческие предложения',
+      columns: [],
+      transitions: [],
+    );
+    controller.stage = AuthStage.organization;
+    controller.onboardingDraft = OrganizationOnboardingDraft.initial()
+      ..currentStep = 4
+      ..categories.add(category)
+      ..workflows.add(workflow);
+
+    await tester.pumpWidget(
+      SkladKomfortaApp(
+        config: config,
+        authController: controller,
+        initializeAuthController: false,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Поля карточек категорий'), findsOneWidget);
+    expect(find.text('Поля в канбанах'), findsOneWidget);
+    await tester.ensureVisible(
+      find.text('Использовать категорию в этом канбане'),
+    );
+    await tester.tap(
+      find.ancestor(
+        of: find.text('Использовать категорию в этом канбане'),
+        matching: find.byType(CheckboxListTile),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(workflow.categories.single.categoryClientId, 'equipment');
+    expect(workflow.categories.single.fieldCodes, ['name']);
+    expect(find.text('Расчётное поле'), findsOneWidget);
+
+    await tester.tap(find.bySemanticsLabel('Свернуть поля категории'));
+    await tester.pumpAndSettle();
+    expect(find.bySemanticsLabel('Развернуть поля категории'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets('код нового справочника генерируется и не показывается', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    final controller = AuthController(
+      config,
+      api: _OfflineAuthGateway(),
+      tokens: _MemoryTokenRepository(),
+    );
+    controller.stage = AuthStage.organization;
+    controller.onboardingDraft = OrganizationOnboardingDraft.initial()
+      ..currentStep = 7
+      ..dictionaries.add(
+        DictionaryDraft(code: 'dictionary_2', name: 'Поставщики', items: []),
+      );
+
+    await tester.pumpWidget(
+      SkladKomfortaApp(
+        config: config,
+        authController: controller,
+        initializeAuthController: false,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Код'), findsNothing);
+    await tester.tap(find.text('Добавить справочник'));
+    await tester.pumpAndSettle();
+
+    expect(controller.onboardingDraft!.dictionaries.last.code, 'dictionary_1');
+    expect(find.text('Код'), findsNothing);
 
     controller.dispose();
   });
@@ -216,6 +501,60 @@ final class _RecordingAuthGateway implements AuthGateway {
   @override
   Future<dynamic> delete(String path, String accessToken) =>
       throw const AuthApiException('unexpected_request', 'Неожиданный DELETE.');
+
+  @override
+  void close() {}
+}
+
+/// Имитирует истёкший access token и успешную либо отклонённую refresh-ротацию.
+final class _RefreshingAuthGateway implements AuthGateway {
+  _RefreshingAuthGateway({this.refreshFails = false});
+
+  final bool refreshFails;
+  final List<String> sessionRequestTokens = <String>[];
+
+  @override
+  Future<dynamic> get(String path, String accessToken) async {
+    if (path != '/identity/sessions') {
+      throw const AuthApiException('unexpected_request', 'Неожиданный GET.');
+    }
+    sessionRequestTokens.add(accessToken);
+    if (accessToken == 'expired-access-token') {
+      throw const AuthApiException('session_expired', 'Сессия истекла.', 401);
+    }
+    return <dynamic>[];
+  }
+
+  @override
+  Future<dynamic> post(
+    String path,
+    Map<String, dynamic> body, {
+    String? accessToken,
+  }) async {
+    if (path != '/auth/refresh') {
+      throw const AuthApiException('unexpected_request', 'Неожиданный POST.');
+    }
+    if (refreshFails) {
+      throw const AuthApiException(
+        'session_invalid',
+        'Сессия недействительна.',
+        401,
+      );
+    }
+    return <String, dynamic>{
+      'accessToken': 'renewed-access-token',
+      'refreshToken': 'rotated-refresh-token',
+      'organizationId': 'organization-id',
+    };
+  }
+
+  @override
+  Future<dynamic> delete(String path, String accessToken) async {
+    if (path != '/identity/sessions') {
+      throw const AuthApiException('unexpected_request', 'Неожиданный DELETE.');
+    }
+    throw const AuthApiException('session_expired', 'Сессия истекла.', 401);
+  }
 
   @override
   void close() {}
