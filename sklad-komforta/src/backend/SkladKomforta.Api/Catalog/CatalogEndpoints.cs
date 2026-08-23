@@ -29,6 +29,55 @@ internal static class CatalogEndpoints
                 Results.Ok(ApiResponse.Success(await service.GetItemsAsync(
                     new CatalogItemQuery(categoryId, sectionId, status, search, page ?? 1, pageSize ?? 50), token))))
             .RequireTenantPermission("catalog.view");
+        catalog.MapGet("/template.xlsx", async (
+                Guid? categoryId,
+                ICatalogSpreadsheetService service,
+                CancellationToken token) =>
+            {
+                var file = await service.CreateTemplateAsync(categoryId, token);
+                return Results.File(file.Content, file.ContentType, file.FileName);
+            })
+            .RequireTenantPermission("catalog.view");
+        catalog.MapGet("/export.xlsx", async (
+                Guid? categoryId,
+                Guid? sectionId,
+                string? status,
+                string? search,
+                ICatalogSpreadsheetService service,
+                CancellationToken token) =>
+            {
+                var file = await service.ExportAsync(
+                    new CatalogItemQuery(categoryId, sectionId, status, search), token);
+                return Results.File(file.Content, file.ContentType, file.FileName);
+            })
+            .RequireTenantPermission("catalog.view");
+        catalog.MapPost("/import.xlsx", async (
+                HttpContext context,
+                ICatalogSpreadsheetService service,
+                CancellationToken token) =>
+            {
+                const long maxFileSize = 10 * 1024 * 1024;
+                if (!context.Request.HasFormContentType)
+                    throw new IdentityException(400, "catalog_import_file_missing", "Передайте XLSX-файл в поле file.");
+                var form = await context.Request.ReadFormAsync(token);
+                var file = form.Files.GetFile("file");
+                if (file is null || file.Length == 0 || file.Length > maxFileSize ||
+                    !file.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
+                    throw new IdentityException(400, "catalog_import_file_invalid", "Выберите XLSX-файл размером не более 10 МБ.");
+                await using var stream = file.OpenReadStream();
+                return Results.Ok(ApiResponse.Success(await service.ImportAsync(
+                    UserId(context.User), stream, token)));
+            })
+            .DisableAntiforgery()
+            .RequireTenantPermission("catalog.manage");
+        catalog.MapPost("/items/bulk", async (
+                HttpContext context,
+                CatalogBulkRequest request,
+                ICatalogService service,
+                CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.ApplyBulkAsync(
+                    UserId(context.User), request, token))))
+            .RequireTenantPermission("catalog.manage");
         catalog.MapGet("/items/{itemId:guid}", async (
                 Guid itemId,
                 ICatalogService service,

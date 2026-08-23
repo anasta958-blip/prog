@@ -119,6 +119,33 @@ public sealed record SaveCatalogItemRelationRequest(
     Guid DependencyId,
     Guid SourceItemId);
 
+/// <summary>Готовый XLSX-файл, возвращаемый HTTP endpoint-ом без промежуточного файла на сервере.</summary>
+public sealed record CatalogSpreadsheetFile(
+    string FileName,
+    string ContentType,
+    byte[] Content);
+
+/// <summary>Результат атомарного импорта проверенной книги каталога.</summary>
+public sealed record CatalogImportResult(
+    int TotalRows,
+    int Created,
+    int Updated);
+
+/// <summary>Одна строка XLSX вместе с координатой для понятной ошибки импорта.</summary>
+public sealed record CatalogImportRow(
+    string SheetName,
+    int RowNumber,
+    SaveCatalogItemRequest Item);
+
+/// <summary>Доступные массовые изменения выбранных карточек.</summary>
+public sealed record CatalogBulkRequest(
+    IReadOnlyList<Guid> ItemIds,
+    string Action,
+    string? Status = null);
+
+/// <summary>Количество запрошенных и фактически изменённых карточек.</summary>
+public sealed record CatalogBulkResult(int Requested, int Affected);
+
 /// <summary>Фильтры серверной страницы каталога.</summary>
 public sealed record CatalogItemQuery(
     Guid? CategoryId,
@@ -154,4 +181,15 @@ public interface ICatalogService
     Task<IReadOnlyList<CatalogItemRelationSummary>> GetRelationsAsync(Guid itemId, CancellationToken cancellationToken);
     Task<IReadOnlyList<CatalogRelationCandidate>> SearchRelationCandidatesAsync(Guid dependencyId, string? search, int limit, CancellationToken cancellationToken);
     Task<IReadOnlyList<CatalogItemRelationSummary>> ReplaceRelationsAsync(Guid actorUserId, Guid itemId, IReadOnlyList<SaveCatalogItemRelationRequest> relations, CancellationToken cancellationToken);
+    Task<IReadOnlyList<CatalogItemSummary>> GetItemsForExportAsync(CatalogItemQuery query, CancellationToken cancellationToken);
+    Task<CatalogImportResult> ImportItemsAsync(Guid actorUserId, IReadOnlyList<CatalogImportRow> rows, CancellationToken cancellationToken);
+    Task<CatalogBulkResult> ApplyBulkAsync(Guid actorUserId, CatalogBulkRequest request, CancellationToken cancellationToken);
+}
+
+/// <summary>Преобразует tenant-каталог в пользовательские XLSX-книги и обратно.</summary>
+public interface ICatalogSpreadsheetService
+{
+    Task<CatalogSpreadsheetFile> CreateTemplateAsync(Guid? categoryId, CancellationToken cancellationToken);
+    Task<CatalogSpreadsheetFile> ExportAsync(CatalogItemQuery query, CancellationToken cancellationToken);
+    Task<CatalogImportResult> ImportAsync(Guid actorUserId, Stream content, CancellationToken cancellationToken);
 }

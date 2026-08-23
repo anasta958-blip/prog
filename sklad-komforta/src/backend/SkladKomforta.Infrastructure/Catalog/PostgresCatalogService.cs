@@ -500,6 +500,191 @@ internal sealed class PostgresCatalogService(
         return after;
     }
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<CatalogItemSummary>> GetItemsForExportAsync(
+        CatalogItemQuery query,
+        CancellationToken cancellationToken)
+    {
+        var status = NormalizeStatus(query.Status, true);
+        var search = query.Search?.Trim() ?? string.Empty;
+        await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT item.id, item.category_id, item.section_id, item.group_id,
+                   item.name, item.marking, item.status, item.values,
+                   item.created_by, item.created_at, item.updated_by, item.updated_at
+            FROM catalog_items AS item
+            WHERE item.deleted_at IS NULL
+              AND (@category_id IS NULL OR item.category_id = @category_id)
+              AND (@section_id IS NULL OR item.section_id = @section_id)
+              AND (@status = '' OR item.status = @status)
+              AND (@search = '' OR item.name ILIKE '%' || @search || '%'
+                   OR item.marking ILIKE '%' || @search || '%')
+            ORDER BY item.category_id, item.updated_at DESC, item.id
+            """;
+        AddGuidParameter(command, "category_id", query.CategoryId);
+        AddGuidParameter(command, "section_id", query.SectionId);
+        AddParameter(command, "status", status ?? string.Empty);
+        AddParameter(command, "search", search);
+        var result = new List<CatalogItemSummary>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) result.Add(ReadItem(reader));
+        return result;
+    }
+
+    /// <inheritdoc />
+    public async Task<CatalogImportResult> ImportItemsAsync(
+        Guid actorUserId,
+        IReadOnlyList<CatalogImportRow> rows,
+        CancellationToken cancellationToken)
+    {
+        if (rows.Count > 10_000)
+            throw Invalid("catalog_import_too_large", "За один раз можно импортировать не более 10 000 строк.");
+        if (rows.Count == 0) return new CatalogImportResult(0, 0, 0);
+
+        await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var created = 0;
+        var updated = 0;
+        foreach (var row in rows)
+        {
+            try
+            {
+                var normalized = await ValidateAsync(connection, transaction, row.Item, cancellationToken);
+                var existingId = await FindImportIdentityAsync(connection, transaction, normalized, cancellationToken);
+                if (existingId is null)
+                {
+                    var itemId = Guid.NewGuid();
+                    await using var insert = connection.CreateCommand();
+                    insert.Transaction = transaction;
+                    insert.CommandText = """
+                        INSERT INTO catalog_items
+                            (id, category_id, section_id, group_id, name, marking, status,
+                             values, created_by, updated_by)
+                        VALUES
+                            (@id, @category_id, @section_id, @group_id, @name, @marking,
+                             @status, CAST(@values AS jsonb), @actor, @actor)
+                        """;
+                    AddItemParameters(insert, itemId, actorUserId, normalized);
+                    await ExecuteItemWriteAsync(insert, cancellationToken);
+                    var after = await ReadItemAsync(connection, transaction, itemId, cancellationToken);
+                    await WriteAuditAsync(connection, transaction, actorUserId, itemId, "import_created", null, after, cancellationToken);
+                    created++;
+                    continue;
+                }
+
+                var before = await ReadItemAsync(connection, transaction, existingId.Value, cancellationToken);
+                await using var update = connection.CreateCommand();
+                update.Transaction = transaction;
+                update.CommandText = """
+                    UPDATE catalog_items
+                    SET category_id = @category_id, section_id = @section_id,
+                        group_id = @group_id, name = @name, marking = @marking,
+                        status = @status, values = CAST(@values AS jsonb),
+                        updated_by = @actor, updated_at = now()
+                    WHERE id = @id AND deleted_at IS NULL
+                    """;
+                AddItemParameters(update, existingId.Value, actorUserId, normalized);
+                await ExecuteItemWriteAsync(update, cancellationToken);
+                var afterUpdate = await ReadItemAsync(connection, transaction, existingId.Value, cancellationToken);
+                await WriteAuditAsync(connection, transaction, actorUserId, existingId.Value, "import_updated", before, afterUpdate, cancellationToken);
+                updated++;
+            }
+            catch (IdentityException exception)
+            {
+                throw new IdentityException(
+                    400,
+                    "catalog_import_row_invalid",
+                    $"Лист «{row.SheetName}», строка {row.RowNumber}: {exception.Message}");
+            }
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        return new CatalogImportResult(rows.Count, created, updated);
+    }
+
+    /// <inheritdoc />
+    public async Task<CatalogBulkResult> ApplyBulkAsync(
+        Guid actorUserId,
+        CatalogBulkRequest request,
+        CancellationToken cancellationToken)
+    {
+        var ids = request.ItemIds.Distinct().ToArray();
+        if (ids.Length is < 1 or > 500)
+            throw Invalid("catalog_bulk_size_invalid", "Выберите от 1 до 500 карточек.");
+        var action = request.Action.Trim().ToLowerInvariant();
+        var status = action == "set_status" ? NormalizeStatus(request.Status, false) : null;
+        if (action is not ("set_status" or "delete"))
+            throw Invalid("catalog_bulk_action_invalid", "Неизвестная массовая операция.");
+
+        await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var before = new List<CatalogItemSummary>(ids.Length);
+        foreach (var id in ids)
+            before.Add(await ReadItemAsync(connection, transaction, id, cancellationToken));
+
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = action == "delete"
+            ? """
+                UPDATE catalog_items
+                SET deleted_at = now(), deleted_by = @actor,
+                    delete_reason = 'Массовое удаление пользователем',
+                    updated_by = @actor, updated_at = now()
+                WHERE id = ANY(@ids) AND deleted_at IS NULL
+                """
+            : """
+                UPDATE catalog_items
+                SET status = @status, updated_by = @actor, updated_at = now()
+                WHERE id = ANY(@ids) AND deleted_at IS NULL
+                """;
+        AddParameter(command, "actor", actorUserId);
+        AddParameter(command, "ids", ids);
+        if (status is not null) AddParameter(command, "status", status);
+        var affected = await command.ExecuteNonQueryAsync(cancellationToken);
+
+        foreach (var item in before)
+        {
+            var after = action == "delete"
+                ? null
+                : await ReadItemAsync(connection, transaction, item.Id, cancellationToken);
+            await WriteAuditAsync(
+                connection,
+                transaction,
+                actorUserId,
+                item.Id,
+                action == "delete" ? "bulk_deleted" : "bulk_status_changed",
+                item,
+                after,
+                cancellationToken);
+        }
+        await transaction.CommitAsync(cancellationToken);
+        return new CatalogBulkResult(ids.Length, affected);
+    }
+
+    private static async Task<Guid?> FindImportIdentityAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        NormalizedItem item,
+        CancellationToken token)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT id
+            FROM catalog_items
+            WHERE deleted_at IS NULL
+              AND group_id IS NOT DISTINCT FROM @group_id
+              AND normalized_name = lower(regexp_replace(btrim(@name), '\s+', ' ', 'g'))
+              AND normalized_marking = lower(regexp_replace(btrim(@marking), '\s+', ' ', 'g'))
+            LIMIT 1
+            """;
+        AddGuidParameter(command, "group_id", item.GroupId);
+        AddParameter(command, "name", item.Name);
+        AddParameter(command, "marking", item.Marking);
+        return await command.ExecuteScalarAsync(token) is Guid id ? id : null;
+    }
+
     private static async Task<IReadOnlyList<CatalogCategorySummary>> ReadCategoriesAsync(
         DbConnection connection,
         CancellationToken token)

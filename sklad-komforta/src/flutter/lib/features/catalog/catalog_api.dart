@@ -64,9 +64,39 @@ abstract interface class CatalogRelationGateway {
   });
 }
 
+/// XLSX и массовые операции вынесены из CRUD-контракта для независимого тестирования.
+abstract interface class CatalogTransferGateway {
+  Future<CatalogSpreadsheetDownload> downloadTemplate({
+    required String accessToken,
+    String? categoryId,
+  });
+  Future<CatalogSpreadsheetDownload> exportCatalog({
+    required String accessToken,
+    String? categoryId,
+    String? sectionId,
+    String? status,
+    String? search,
+  });
+  Future<CatalogImportResult> importCatalog({
+    required String accessToken,
+    required String fileName,
+    required Uint8List bytes,
+  });
+  Future<CatalogBulkResult> applyBulk({
+    required String accessToken,
+    required List<String> itemIds,
+    required String action,
+    String? status,
+  });
+}
+
 /// HTTP-реализация каталога с единым серверным конвертом `{ok,data,error}`.
 final class CatalogApi
-    implements CatalogGateway, CatalogImageGateway, CatalogRelationGateway {
+    implements
+        CatalogGateway,
+        CatalogImageGateway,
+        CatalogRelationGateway,
+        CatalogTransferGateway {
   CatalogApi(this._config) : _client = createPlatformHttpClient();
 
   final AppConfig _config;
@@ -289,6 +319,126 @@ final class CatalogApi
           (item) => CatalogItemRelation.fromJson(item as Map<String, dynamic>),
         )
         .toList(growable: false);
+  }
+
+  @override
+  Future<CatalogSpreadsheetDownload> downloadTemplate({
+    required String accessToken,
+    String? categoryId,
+  }) {
+    final query = <String, String>{};
+    if (categoryId case final value?) query['categoryId'] = value;
+    return _download(
+      '/catalog/template.xlsx',
+      accessToken,
+      query: query,
+      fallbackName: 'Шаблон каталога.xlsx',
+    );
+  }
+
+  @override
+  Future<CatalogSpreadsheetDownload> exportCatalog({
+    required String accessToken,
+    String? categoryId,
+    String? sectionId,
+    String? status,
+    String? search,
+  }) {
+    final query = <String, String>{};
+    final selectedCategoryId = categoryId;
+    final selectedSectionId = sectionId;
+    final selectedStatus = status;
+    final searchValue = search?.trim();
+    if (selectedCategoryId != null) query['categoryId'] = selectedCategoryId;
+    if (selectedSectionId != null) query['sectionId'] = selectedSectionId;
+    if (selectedStatus != null && selectedStatus.isNotEmpty) {
+      query['status'] = selectedStatus;
+    }
+    if (searchValue != null && searchValue.isNotEmpty) {
+      query['search'] = searchValue;
+    }
+    return _download(
+      '/catalog/export.xlsx',
+      accessToken,
+      query: query,
+      fallbackName: 'Каталог.xlsx',
+    );
+  }
+
+  @override
+  Future<CatalogImportResult> importCatalog({
+    required String accessToken,
+    required String fileName,
+    required Uint8List bytes,
+  }) async {
+    final request = http.MultipartRequest(
+      'POST',
+      Uri.parse('${_config.apiBaseUrl}/catalog/import.xlsx'),
+    )..headers['Authorization'] = 'Bearer $accessToken';
+    request.files.add(
+      http.MultipartFile.fromBytes('file', bytes, filename: fileName),
+    );
+    final response = await http.Response.fromStream(
+      await _client.send(request),
+    );
+    final data = decodeApiResponse(response);
+    return CatalogImportResult.fromJson(data as Map<String, dynamic>);
+  }
+
+  @override
+  Future<CatalogBulkResult> applyBulk({
+    required String accessToken,
+    required List<String> itemIds,
+    required String action,
+    String? status,
+  }) async {
+    final body = <String, dynamic>{'itemIds': itemIds, 'action': action};
+    final selectedStatus = status;
+    if (selectedStatus != null) body['status'] = selectedStatus;
+    final data = await _send(
+      'POST',
+      '/catalog/items/bulk',
+      accessToken,
+      body: body,
+    );
+    return CatalogBulkResult.fromJson(data as Map<String, dynamic>);
+  }
+
+  Future<CatalogSpreadsheetDownload> _download(
+    String path,
+    String accessToken, {
+    required String fallbackName,
+    Map<String, String>? query,
+  }) async {
+    final uri = Uri.parse(
+      '${_config.apiBaseUrl}$path',
+    ).replace(queryParameters: query == null || query.isEmpty ? null : query);
+    final response = await _client.get(
+      uri,
+      headers: {'Authorization': 'Bearer $accessToken'},
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      decodeApiResponse(response);
+    }
+    return CatalogSpreadsheetDownload(
+      fileName:
+          _downloadName(response.headers['content-disposition']) ??
+          fallbackName,
+      bytes: response.bodyBytes,
+    );
+  }
+
+  static String? _downloadName(String? disposition) {
+    if (disposition == null) return null;
+    final encoded = RegExp(
+      r"filename\*=UTF-8''([^;]+)",
+      caseSensitive: false,
+    ).firstMatch(disposition)?.group(1);
+    if (encoded != null) return Uri.decodeComponent(encoded);
+    return RegExp(
+      r'filename="?([^";]+)',
+      caseSensitive: false,
+    ).firstMatch(disposition)?.group(1);
   }
 
   Future<dynamic> _send(

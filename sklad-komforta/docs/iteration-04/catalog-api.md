@@ -80,3 +80,17 @@ JPEG, PNG и WebP размером до 10 МБ, не более восьми и
 Тело замены является массивом объектов `dependencyId` и `sourceItemId`.
 Количество не передаётся и не хранится. Чтение и поиск требуют `catalog.view`,
 изменение — `catalog.manage`.
+
+# XLSX и массовые операции
+
+- `GET /api/v1/catalog/template.xlsx` — актуальный шаблон всего каталога;
+- `GET /api/v1/catalog/template.xlsx?categoryId={uuid}` — шаблон категории;
+- `GET /api/v1/catalog/export.xlsx` — полный экспорт с необязательными
+  `categoryId`, `sectionId`, `status` и `search`;
+- `POST /api/v1/catalog/import.xlsx` — импорт `.xlsx` до 10 МБ из multipart-поля
+  `file`;
+- `POST /api/v1/catalog/items/bulk` — массовая операция над 1–500 UUID.
+
+Шаблон и экспорт требуют `catalog.view`, импорт и массовые изменения —
+`catalog.manage`. Массовое тело содержит `itemIds`, действие `set_status` или
+`delete`, а для статуса также `status`. Экспорт не использует пагинацию списка.

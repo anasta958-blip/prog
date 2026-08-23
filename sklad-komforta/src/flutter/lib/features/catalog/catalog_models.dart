@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 /// Настроенное поле карточки товара одной категории.
 final class CatalogField {
   const CatalogField({
@@ -372,6 +374,51 @@ final class CatalogItemRelation {
     'dependencyId': dependencyId,
     'sourceItemId': sourceItemId,
   };
+}
+
+/// Бинарный XLSX вместе с именем, предложенным backend-ом.
+final class CatalogSpreadsheetDownload {
+  const CatalogSpreadsheetDownload({
+    required this.fileName,
+    required this.bytes,
+  });
+
+  final String fileName;
+  final Uint8List bytes;
+}
+
+/// Сводка атомарного импорта каталога.
+final class CatalogImportResult {
+  const CatalogImportResult({
+    required this.totalRows,
+    required this.created,
+    required this.updated,
+  });
+
+  final int totalRows;
+  final int created;
+  final int updated;
+
+  factory CatalogImportResult.fromJson(Map<String, dynamic> json) =>
+      CatalogImportResult(
+        totalRows: json['totalRows'] as int,
+        created: json['created'] as int,
+        updated: json['updated'] as int,
+      );
+}
+
+/// Результат массовой операции над выбранными UUID карточек.
+final class CatalogBulkResult {
+  const CatalogBulkResult({required this.requested, required this.affected});
+
+  final int requested;
+  final int affected;
+
+  factory CatalogBulkResult.fromJson(Map<String, dynamic> json) =>
+      CatalogBulkResult(
+        requested: json['requested'] as int,
+        affected: json['affected'] as int,
+      );
 }
 
 /// Полное редактируемое состояние карточки для POST и PUT.

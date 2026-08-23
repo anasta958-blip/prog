@@ -84,6 +84,26 @@ public sealed class ApiBootstrapTests : IClassFixture<ApiFactory>
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
+    [Theory]
+    [InlineData("/api/v1/catalog/template.xlsx")]
+    [InlineData("/api/v1/catalog/export.xlsx")]
+    public async Task CatalogSpreadsheetDownloadsRequireAccessToken(string path)
+    {
+        var response = await _client.GetAsync(path);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task CatalogBulkEndpointRequiresAccessToken()
+    {
+        var response = await _client.PostAsJsonAsync(
+            "/api/v1/catalog/items/bulk",
+            new { itemIds = new[] { Guid.NewGuid() }, action = "delete" });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
     [Fact]
     public async Task CompanyEndpointRequiresAccessToken()
     {

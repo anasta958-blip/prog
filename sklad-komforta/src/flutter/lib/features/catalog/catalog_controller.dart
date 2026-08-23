@@ -36,15 +36,21 @@ final class CatalogController extends ChangeNotifier {
   bool saving = false;
   bool imagesLoading = false;
   bool relationsLoading = false;
+  bool transferBusy = false;
   String? error;
+  String? transferMessage;
   String? imagesError;
   String? relationsError;
   List<CatalogItemImage> images = const [];
   List<CatalogItemRelation> relations = const [];
+  final Set<String> selectedIds = <String>{};
 
   List<CatalogItem> get items => result?.items ?? const [];
   int get total => result?.total ?? 0;
   int get pageCount => result?.pageCount ?? 1;
+  bool get hasSelection => selectedIds.isNotEmpty;
+  bool get currentPageSelected =>
+      items.isNotEmpty && items.every((item) => selectedIds.contains(item.id));
 
   CatalogCategory? get selectedCategory {
     for (final category in configuration?.categories ?? const []) {
@@ -81,6 +87,7 @@ final class CatalogController extends ChangeNotifier {
     categoryId = value;
     sectionId = null;
     page = 1;
+    clearSelection(notify: false);
     await refresh();
   }
 
@@ -88,6 +95,7 @@ final class CatalogController extends ChangeNotifier {
     if (sectionId == value) return;
     sectionId = value;
     page = 1;
+    clearSelection(notify: false);
     await refresh();
   }
 
@@ -96,11 +104,13 @@ final class CatalogController extends ChangeNotifier {
     if (status == normalized) return;
     status = normalized;
     page = 1;
+    clearSelection(notify: false);
     await refresh();
   }
 
   /// Откладывает сетевой поиск, чтобы ввод не создавал запрос на каждый символ.
   void updateSearch(String value) {
+    if (search != value) clearSelection(notify: false);
     search = value;
     _searchTimer?.cancel();
     _searchTimer = Timer(const Duration(milliseconds: 350), () {
@@ -458,6 +468,150 @@ final class CatalogController extends ChangeNotifier {
       return false;
     } finally {
       saving = false;
+      notifyListeners();
+    }
+  }
+
+  void toggleSelection(String itemId) {
+    if (!selectedIds.add(itemId)) selectedIds.remove(itemId);
+    notifyListeners();
+  }
+
+  void toggleCurrentPage() {
+    if (currentPageSelected) {
+      selectedIds.removeAll(items.map((item) => item.id));
+    } else {
+      selectedIds.addAll(items.map((item) => item.id));
+    }
+    notifyListeners();
+  }
+
+  void clearSelection({bool notify = true}) {
+    if (selectedIds.isEmpty) return;
+    selectedIds.clear();
+    if (notify) notifyListeners();
+  }
+
+  Future<CatalogSpreadsheetDownload?> downloadTemplate() =>
+      _downloadSpreadsheet(
+        (api, token) =>
+            api.downloadTemplate(accessToken: token, categoryId: categoryId),
+      );
+
+  Future<CatalogSpreadsheetDownload?> exportCatalog() => _downloadSpreadsheet(
+    (api, token) => api.exportCatalog(
+      accessToken: token,
+      categoryId: categoryId,
+      sectionId: sectionId,
+      status: status,
+      search: search,
+    ),
+  );
+
+  Future<CatalogSpreadsheetDownload?> _downloadSpreadsheet(
+    Future<CatalogSpreadsheetDownload> Function(
+      CatalogTransferGateway api,
+      String token,
+    )
+    request,
+  ) async {
+    final transferApi = _api is CatalogTransferGateway
+        ? _api as CatalogTransferGateway
+        : null;
+    if (transferApi == null || transferBusy) return null;
+    transferBusy = true;
+    transferMessage = null;
+    error = null;
+    notifyListeners();
+    try {
+      return await _authorized((token) => request(transferApi, token));
+    } on AuthApiException catch (exception) {
+      error = exception.message;
+      return null;
+    } on Object {
+      error = 'Не удалось получить XLSX-файл.';
+      return null;
+    } finally {
+      transferBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> importCatalog({
+    required String fileName,
+    required Uint8List bytes,
+  }) async {
+    final transferApi = _api is CatalogTransferGateway
+        ? _api as CatalogTransferGateway
+        : null;
+    if (transferApi == null || transferBusy) return false;
+    transferBusy = true;
+    transferMessage = null;
+    error = null;
+    notifyListeners();
+    try {
+      final imported = await _authorized(
+        (token) => transferApi.importCatalog(
+          accessToken: token,
+          fileName: fileName,
+          bytes: bytes,
+        ),
+      );
+      page = 1;
+      clearSelection(notify: false);
+      await _loadPage();
+      transferMessage =
+          'Импортировано строк: ${imported.totalRows}. '
+          'Создано: ${imported.created}, обновлено: ${imported.updated}.';
+      return true;
+    } on AuthApiException catch (exception) {
+      error = exception.message;
+      return false;
+    } on Object {
+      error = 'Не удалось импортировать XLSX-файл.';
+      return false;
+    } finally {
+      transferBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> applyBulk({required String action, String? status}) async {
+    final transferApi = _api is CatalogTransferGateway
+        ? _api as CatalogTransferGateway
+        : null;
+    if (transferApi == null || transferBusy || selectedIds.isEmpty) {
+      return false;
+    }
+    transferBusy = true;
+    transferMessage = null;
+    error = null;
+    notifyListeners();
+    try {
+      final result = await _authorized(
+        (token) => transferApi.applyBulk(
+          accessToken: token,
+          itemIds: selectedIds.toList(growable: false),
+          action: action,
+          status: status,
+        ),
+      );
+      clearSelection(notify: false);
+      await _loadPage();
+      if (items.isEmpty && page > 1) {
+        page--;
+        await _loadPage();
+      }
+      transferMessage = 'Изменено карточек: ${result.affected}.';
+      return true;
+    } on AuthApiException catch (exception) {
+      error = exception.message;
+      return false;
+    } on Object {
+      error = 'Не удалось выполнить массовую операцию.';
+      return false;
+    } finally {
+      transferBusy = false;
       notifyListeners();
     }
   }

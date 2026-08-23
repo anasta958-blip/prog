@@ -3,9 +3,9 @@
 ## Автоматические проверки
 
 - `dotnet build SkladKomforta.sln --no-restore` — успешно, без предупреждений;
-- `dotnet test SkladKomforta.sln --no-restore` — 52 unit и 13 API integration;
+- `dotnet test SkladKomforta.sln --no-restore` — 52 unit и 18 API integration;
 - API после Docker rebuild возвращает `Healthy` на `/health/ready`.
-- `flutter test` — 28 тестов, все успешно;
+- `flutter test` — 30 тестов, все успешно;
 - `flutter analyze` — замечаний нет.
 - `flutter build windows --debug` — успешно;
 - `flutter build web --release` — успешно, включая WebAssembly dry run.
@@ -26,7 +26,10 @@ Flutter-тесты отдельно фиксируют загрузку конф
 если у нижней границы экрана для меню недостаточно места. Integration-тест
 подтверждает, что профиль компании не читается без JWT.
 
+XLSX-тест проверяет русские заголовки, числовой тип цены, обратный импорт и
+понятную ошибку для каталога без настроенных категорий. Flutter-тесты фиксируют
+массовую передачу выбранных UUID и обновление страницы после импорта.
+
 ## Ограничение этапа
 
-Импорт/экспорт и массовые операции намеренно оставлены следующим подэтапом.
 Использование сохранённых связей для автодобавления относится к этапу КП/ПКП.

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
 import 'package:intl/intl.dart';
@@ -116,7 +117,11 @@ class _CatalogPageState extends State<CatalogPage> {
         children: [
           _Header(
             loading: controller.loading,
+            transferBusy: controller.transferBusy,
             onRefresh: controller.reloadConfiguration,
+            onTemplate: _downloadTemplate,
+            onImport: _importCatalog,
+            onExport: _exportCatalog,
             onCreate: () =>
                 _openEditor(controller.createDraft(), null, persistentEditor),
           ),
@@ -151,6 +156,10 @@ class _CatalogPageState extends State<CatalogPage> {
           ),
           const SizedBox(height: 12),
           _Filters(controller: controller),
+          if (controller.hasSelection) ...[
+            const SizedBox(height: 12),
+            _BulkToolbar(controller: controller, onDelete: _bulkDelete),
+          ],
           const SizedBox(height: 14),
           Row(
             children: [
@@ -171,6 +180,10 @@ class _CatalogPageState extends State<CatalogPage> {
           if (controller.error != null) ...[
             const SizedBox(height: 10),
             _InlineError(controller.error!),
+          ],
+          if (controller.transferMessage != null) ...[
+            const SizedBox(height: 10),
+            _InlineSuccess(controller.transferMessage!),
           ],
           const SizedBox(height: 12),
           Expanded(
@@ -210,6 +223,11 @@ class _CatalogPageState extends State<CatalogPage> {
                             item: item,
                             category: _category(item.categoryId),
                             selected: editingItemId == item.id,
+                            selectedForBulk: controller.selectedIds.contains(
+                              item.id,
+                            ),
+                            onToggleSelection: () =>
+                                controller.toggleSelection(item.id),
                             onTap: () => _openEditor(
                               CatalogItemDraft.fromItem(item),
                               item.id,
@@ -375,6 +393,70 @@ class _CatalogPageState extends State<CatalogPage> {
     return deleted;
   }
 
+  Future<void> _downloadTemplate() async {
+    final file = await widget.controller.downloadTemplate();
+    if (file != null) await _saveSpreadsheet(file);
+  }
+
+  Future<void> _exportCatalog() async {
+    final file = await widget.controller.exportCatalog();
+    if (file != null) await _saveSpreadsheet(file);
+  }
+
+  Future<void> _saveSpreadsheet(CatalogSpreadsheetDownload file) async {
+    try {
+      await FilePicker.saveFile(
+        dialogTitle: 'Сохранить XLSX',
+        fileName: file.fileName,
+        type: FileType.custom,
+        allowedExtensions: const ['xlsx'],
+        bytes: file.bytes,
+      );
+    } on Object {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось сохранить XLSX-файл.')),
+      );
+    }
+  }
+
+  Future<void> _importCatalog() async {
+    final file = await FilePicker.pickFile(
+      type: FileType.custom,
+      allowedExtensions: const ['xlsx'],
+    );
+    if (file == null) return;
+    final bytes = await file.readAsBytes();
+    await widget.controller.importCatalog(fileName: file.name, bytes: bytes);
+  }
+
+  Future<void> _bulkDelete() async {
+    final count = widget.controller.selectedIds.length;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Удалить выбранные карточки?'),
+        content: Text('$count карточек будут перемещены в архив каталога.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFD94F5C),
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await widget.controller.applyBulk(action: 'delete');
+    }
+  }
+
   void _closeEditor() {
     widget.controller.selectItem(null);
     setState(() {
@@ -387,11 +469,19 @@ class _CatalogPageState extends State<CatalogPage> {
 final class _Header extends StatelessWidget {
   const _Header({
     required this.loading,
+    required this.transferBusy,
     required this.onRefresh,
+    required this.onTemplate,
+    required this.onImport,
+    required this.onExport,
     required this.onCreate,
   });
   final bool loading;
+  final bool transferBusy;
   final VoidCallback onRefresh;
+  final VoidCallback onTemplate;
+  final VoidCallback onImport;
+  final VoidCallback onExport;
   final VoidCallback onCreate;
   @override
   Widget build(BuildContext context) => Wrap(
@@ -414,15 +504,31 @@ final class _Header extends StatelessWidget {
           ),
         ],
       ),
-      Row(
-        mainAxisSize: MainAxisSize.min,
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           IconButton(
             tooltip: 'Обновить',
             onPressed: loading ? null : onRefresh,
             icon: const Icon(Icons.refresh),
           ),
-          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            onPressed: transferBusy ? null : onTemplate,
+            icon: const Icon(Icons.description_outlined),
+            label: const Text('Шаблон'),
+          ),
+          OutlinedButton.icon(
+            onPressed: transferBusy ? null : onImport,
+            icon: const Icon(Icons.upload_file_outlined),
+            label: const Text('Импорт'),
+          ),
+          OutlinedButton.icon(
+            onPressed: transferBusy ? null : onExport,
+            icon: const Icon(Icons.download_outlined),
+            label: const Text('Экспорт'),
+          ),
           FilledButton.icon(
             key: const Key('catalog-create'),
             onPressed: onCreate,
@@ -500,16 +606,88 @@ final class _Filters extends StatelessWidget {
   }
 }
 
+final class _BulkToolbar extends StatelessWidget {
+  const _BulkToolbar({required this.controller, required this.onDelete});
+
+  final CatalogController controller;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: const Color(0xFF14243A),
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: const Color(0xFF31547E)),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Checkbox(
+            value: controller.currentPageSelected,
+            onChanged: controller.transferBusy
+                ? null
+                : (_) => controller.toggleCurrentPage(),
+          ),
+          Text(
+            'Выбрано: ${controller.selectedIds.length}',
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+          OutlinedButton(
+            onPressed: controller.transferBusy
+                ? null
+                : () => controller.applyBulk(
+                    action: 'set_status',
+                    status: 'approved',
+                  ),
+            child: const Text('Согласовать'),
+          ),
+          OutlinedButton(
+            onPressed: controller.transferBusy
+                ? null
+                : () => controller.applyBulk(
+                    action: 'set_status',
+                    status: 'pending',
+                  ),
+            child: const Text('Снять согласование'),
+          ),
+          OutlinedButton.icon(
+            onPressed: controller.transferBusy ? null : onDelete,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFFFF809D),
+            ),
+            icon: const Icon(Icons.delete_outline),
+            label: const Text('Удалить'),
+          ),
+          TextButton(
+            onPressed: controller.transferBusy
+                ? null
+                : controller.clearSelection,
+            child: const Text('Снять выбор'),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
 final class _ProductCard extends StatelessWidget {
   const _ProductCard({
     required this.item,
     required this.category,
     required this.selected,
+    required this.selectedForBulk,
+    required this.onToggleSelection,
     required this.onTap,
   });
   final CatalogItem item;
   final CatalogCategory? category;
   final bool selected;
+  final bool selectedForBulk;
+  final VoidCallback onToggleSelection;
   final VoidCallback onTap;
   @override
   Widget build(BuildContext context) {
@@ -540,26 +718,47 @@ final class _ProductCard extends StatelessWidget {
                     color: const Color(0xFF0E1621),
                     borderRadius: BorderRadius.circular(11),
                   ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(11),
-                    child: item.thumbnailUrl == null
-                        ? _ProductImageFallback(category: category)
-                        : Image.network(
-                            item.thumbnailUrl!,
-                            width: double.infinity,
-                            height: double.infinity,
-                            fit: BoxFit.contain,
-                            errorBuilder: (context, error, stackTrace) =>
-                                _ProductImageFallback(category: category),
-                            loadingBuilder: (context, child, progress) =>
-                                progress == null
-                                ? child
-                                : const Center(
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  ),
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(11),
+                          child: item.thumbnailUrl == null
+                              ? _ProductImageFallback(category: category)
+                              : Image.network(
+                                  item.thumbnailUrl!,
+                                  width: double.infinity,
+                                  height: double.infinity,
+                                  fit: BoxFit.contain,
+                                  errorBuilder: (context, error, stackTrace) =>
+                                      _ProductImageFallback(category: category),
+                                  loadingBuilder: (context, child, progress) =>
+                                      progress == null
+                                      ? child
+                                      : const Center(
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        ),
+                                ),
+                        ),
+                      ),
+                      Positioned(
+                        top: 7,
+                        right: 7,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: const Color(0xDD0B131E),
+                            borderRadius: BorderRadius.circular(7),
                           ),
+                          child: Checkbox(
+                            value: selectedForBulk,
+                            onChanged: (_) => onToggleSelection(),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -698,6 +897,31 @@ final class _InlineError extends StatelessWidget {
       child: Row(
         children: [
           const Icon(Icons.error_outline, color: Color(0xFFFF809D)),
+          const SizedBox(width: 8),
+          Expanded(child: Text(message)),
+        ],
+      ),
+    ),
+  );
+}
+
+final class _InlineSuccess extends StatelessWidget {
+  const _InlineSuccess(this.message);
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: const Color(0xFF123122),
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: const Color(0xFF286E48)),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.all(10),
+      child: Row(
+        children: [
+          const Icon(Icons.check_circle_outline, color: Color(0xFF6DD998)),
           const SizedBox(width: 8),
           Expanded(child: Text(message)),
         ],

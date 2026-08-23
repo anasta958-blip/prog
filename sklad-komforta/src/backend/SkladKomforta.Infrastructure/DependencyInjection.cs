@@ -132,6 +132,7 @@ public static class DependencyInjection
         services.AddScoped<SkladKomforta.Application.Authorization.IRoleAdministrationService, PostgresRoleAdministrationService>();
         services.AddScoped<SkladKomforta.Application.Onboarding.IOrganizationOnboardingService, PostgresOrganizationOnboardingService>();
         services.AddScoped<SkladKomforta.Application.Catalog.ICatalogService, PostgresCatalogService>();
+        services.AddScoped<SkladKomforta.Application.Catalog.ICatalogSpreadsheetService, CatalogSpreadsheetService>();
         services.AddScoped<SkladKomforta.Application.Company.ICompanyService, Company.PostgresCompanyService>();
 
         return services;

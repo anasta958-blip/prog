@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/core/security/token_store.dart';
@@ -155,6 +157,46 @@ void main() {
     controller.dispose();
     auth.dispose();
   });
+
+  test('массовая операция отправляет выбранные UUID и очищает выбор', () async {
+    final catalogApi = _MemoryCatalogGateway();
+    final auth = _authorizedController(config);
+    final controller = CatalogController(config, auth, api: catalogApi);
+    await controller.initialize();
+
+    controller.toggleSelection(controller.items.single.id);
+    final applied = await controller.applyBulk(
+      action: 'set_status',
+      status: 'approved',
+    );
+
+    expect(applied, isTrue);
+    expect(catalogApi.bulkIds, [controller.items.single.id]);
+    expect(catalogApi.bulkAction, 'set_status');
+    expect(controller.selectedIds, isEmpty);
+
+    controller.dispose();
+    auth.dispose();
+  });
+
+  test('импорт XLSX обновляет страницу и показывает сводку', () async {
+    final catalogApi = _MemoryCatalogGateway();
+    final auth = _authorizedController(config);
+    final controller = CatalogController(config, auth, api: catalogApi);
+    await controller.initialize();
+
+    final imported = await controller.importCatalog(
+      fileName: 'catalog.xlsx',
+      bytes: Uint8List.fromList([1, 2, 3]),
+    );
+
+    expect(imported, isTrue);
+    expect(catalogApi.importedFileName, 'catalog.xlsx');
+    expect(controller.transferMessage, contains('Создано: 2'));
+
+    controller.dispose();
+    auth.dispose();
+  });
 }
 
 AuthController _authorizedController(AppConfig config) => AuthController(
@@ -229,7 +271,7 @@ CatalogItem _item({
 );
 
 final class _MemoryCatalogGateway
-    implements CatalogGateway, CatalogRelationGateway {
+    implements CatalogGateway, CatalogRelationGateway, CatalogTransferGateway {
   final items = <CatalogItem>[_item()];
   CatalogConfiguration configuration = CatalogConfiguration(
     categories: [_category],
@@ -241,6 +283,9 @@ final class _MemoryCatalogGateway
   String? lastSearch;
   CatalogItemDraft? createdDraft;
   List<CatalogItemRelation> savedRelations = const [];
+  List<String> bulkIds = const [];
+  String? bulkAction;
+  String? importedFileName;
 
   @override
   Future<CatalogConfiguration> getConfiguration(String accessToken) async {
@@ -315,6 +360,50 @@ final class _MemoryCatalogGateway
   }) async {
     savedRelations = List.unmodifiable(relations);
     return savedRelations;
+  }
+
+  @override
+  Future<CatalogBulkResult> applyBulk({
+    required String accessToken,
+    required List<String> itemIds,
+    required String action,
+    String? status,
+  }) async {
+    bulkIds = List.unmodifiable(itemIds);
+    bulkAction = action;
+    return CatalogBulkResult(
+      requested: itemIds.length,
+      affected: itemIds.length,
+    );
+  }
+
+  @override
+  Future<CatalogSpreadsheetDownload> downloadTemplate({
+    required String accessToken,
+    String? categoryId,
+  }) async => CatalogSpreadsheetDownload(
+    fileName: 'template.xlsx',
+    bytes: Uint8List(0),
+  );
+
+  @override
+  Future<CatalogSpreadsheetDownload> exportCatalog({
+    required String accessToken,
+    String? categoryId,
+    String? sectionId,
+    String? status,
+    String? search,
+  }) async =>
+      CatalogSpreadsheetDownload(fileName: 'catalog.xlsx', bytes: Uint8List(0));
+
+  @override
+  Future<CatalogImportResult> importCatalog({
+    required String accessToken,
+    required String fileName,
+    required Uint8List bytes,
+  }) async {
+    importedFileName = fileName;
+    return const CatalogImportResult(totalRows: 3, created: 2, updated: 1);
   }
 
   @override
