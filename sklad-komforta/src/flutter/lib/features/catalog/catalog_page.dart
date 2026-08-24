@@ -202,6 +202,7 @@ class _CatalogPageState extends State<CatalogPage> {
                 : LayoutBuilder(
                     builder: (context, constraints) {
                       final columns = switch (constraints.maxWidth) {
+                        >= 1500 => 6,
                         >= 1250 => 5,
                         >= 970 => 4,
                         >= 700 => 3,
@@ -214,7 +215,7 @@ class _CatalogPageState extends State<CatalogPage> {
                           crossAxisCount: columns,
                           crossAxisSpacing: 12,
                           mainAxisSpacing: 12,
-                          childAspectRatio: columns == 1 ? 1.55 : 0.76,
+                          childAspectRatio: columns == 1 ? 1.55 : 0.82,
                         ),
                         itemCount: controller.items.length,
                         itemBuilder: (context, index) {

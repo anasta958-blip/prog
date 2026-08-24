@@ -445,57 +445,11 @@ internal sealed class PostgresCatalogService(
         IReadOnlyList<SaveCatalogItemRelationRequest> relations,
         CancellationToken cancellationToken)
     {
-        if (relations
-            .Select(item => (item.DependencyId, item.SourceItemId))
-            .Distinct()
-            .Count() != relations.Count)
-            throw Invalid("catalog_relation_duplicate", "Одна карточка не может быть привязана дважды.");
-
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         var target = await ReadItemAsync(connection, transaction, itemId, cancellationToken);
-        var before = await ReadRelationsAsync(connection, transaction, itemId, cancellationToken);
-
-        for (var index = 0; index < relations.Count; index++)
-            await ValidateRelationAsync(
-                connection,
-                transaction,
-                target.CategoryId,
-                relations[index],
-                cancellationToken);
-
-        await using (var delete = connection.CreateCommand())
-        {
-            delete.Transaction = transaction;
-            delete.CommandText = "DELETE FROM catalog_item_relations WHERE target_item_id = @target_item_id";
-            AddParameter(delete, "target_item_id", itemId);
-            await delete.ExecuteNonQueryAsync(cancellationToken);
-        }
-
-        for (var index = 0; index < relations.Count; index++)
-        {
-            var relation = relations[index];
-            await using var insert = connection.CreateCommand();
-            insert.Transaction = transaction;
-            insert.CommandText = """
-                INSERT INTO catalog_item_relations
-                    (dependency_id, target_item_id, source_item_id, sort_order,
-                     created_by, updated_by)
-                VALUES
-                    (@dependency_id, @target_item_id, @source_item_id, @sort_order,
-                     @actor, @actor)
-                """;
-            AddParameter(insert, "dependency_id", relation.DependencyId);
-            AddParameter(insert, "target_item_id", itemId);
-            AddParameter(insert, "source_item_id", relation.SourceItemId);
-            AddParameter(insert, "sort_order", index);
-            AddParameter(insert, "actor", actorUserId);
-            await insert.ExecuteNonQueryAsync(cancellationToken);
-        }
-
-        var after = await ReadRelationsAsync(connection, transaction, itemId, cancellationToken);
-        await WriteRelationAuditAsync(
-            connection, transaction, actorUserId, itemId, before, after, cancellationToken);
+        var after = await ReplaceRelationsInTransactionAsync(
+            connection, transaction, actorUserId, target, relations, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return after;
     }
@@ -533,6 +487,46 @@ internal sealed class PostgresCatalogService(
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<Guid, IReadOnlyList<CatalogItemRelationSummary>>> GetRelationsForExportAsync(
+        IReadOnlyList<Guid> itemIds,
+        CancellationToken cancellationToken)
+    {
+        var ids = itemIds.Distinct().ToArray();
+        if (ids.Length == 0)
+            return new Dictionary<Guid, IReadOnlyList<CatalogItemRelationSummary>>();
+
+        await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT relation.target_item_id, relation.dependency_id, source.id,
+                   source.name, source.marking, relation.sort_order
+            FROM catalog_item_relations AS relation
+            JOIN catalog_items AS source
+              ON source.id = relation.source_item_id AND source.deleted_at IS NULL
+            WHERE relation.target_item_id = ANY(@item_ids)
+            ORDER BY relation.target_item_id, relation.sort_order, relation.id
+            """;
+        AddParameter(command, "item_ids", ids);
+        var grouped = new Dictionary<Guid, List<CatalogItemRelationSummary>>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var targetId = reader.GetGuid(0);
+            if (!grouped.TryGetValue(targetId, out var relations))
+            {
+                relations = [];
+                grouped[targetId] = relations;
+            }
+            relations.Add(new CatalogItemRelationSummary(
+                reader.GetGuid(1), reader.GetGuid(2), reader.GetString(3),
+                reader.GetString(4), reader.GetInt32(5)));
+        }
+        return grouped.ToDictionary(
+            pair => pair.Key,
+            pair => (IReadOnlyList<CatalogItemRelationSummary>)pair.Value);
+    }
+
+    /// <inheritdoc />
     public async Task<CatalogImportResult> ImportItemsAsync(
         Guid actorUserId,
         IReadOnlyList<CatalogImportRow> rows,
@@ -541,18 +535,26 @@ internal sealed class PostgresCatalogService(
         if (rows.Count > 10_000)
             throw Invalid("catalog_import_too_large", "За один раз можно импортировать не более 10 000 строк.");
         if (rows.Count == 0) return new CatalogImportResult(0, 0, 0);
+        var duplicateId = rows
+            .Where(row => row.ItemId.HasValue)
+            .GroupBy(row => row.ItemId!.Value)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicateId is not null)
+            throw Invalid(
+                "catalog_import_id_duplicate",
+                $"ID {duplicateId.Key} указан в файле несколько раз.");
 
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         var created = 0;
         var updated = 0;
+        var savedRows = new List<(CatalogImportRow Row, CatalogItemSummary Item)>(rows.Count);
         foreach (var row in rows)
         {
             try
             {
                 var normalized = await ValidateAsync(connection, transaction, row.Item, cancellationToken);
-                var existingId = await FindImportIdentityAsync(connection, transaction, normalized, cancellationToken);
-                if (existingId is null)
+                if (row.ItemId is null)
                 {
                     var itemId = Guid.NewGuid();
                     await using var insert = connection.CreateCommand();
@@ -569,11 +571,12 @@ internal sealed class PostgresCatalogService(
                     await ExecuteItemWriteAsync(insert, cancellationToken);
                     var after = await ReadItemAsync(connection, transaction, itemId, cancellationToken);
                     await WriteAuditAsync(connection, transaction, actorUserId, itemId, "import_created", null, after, cancellationToken);
+                    savedRows.Add((row, after));
                     created++;
                     continue;
                 }
 
-                var before = await ReadItemAsync(connection, transaction, existingId.Value, cancellationToken);
+                var before = await ReadItemAsync(connection, transaction, row.ItemId.Value, cancellationToken);
                 await using var update = connection.CreateCommand();
                 update.Transaction = transaction;
                 update.CommandText = """
@@ -584,10 +587,11 @@ internal sealed class PostgresCatalogService(
                         updated_by = @actor, updated_at = now()
                     WHERE id = @id AND deleted_at IS NULL
                     """;
-                AddItemParameters(update, existingId.Value, actorUserId, normalized);
+                AddItemParameters(update, row.ItemId.Value, actorUserId, normalized);
                 await ExecuteItemWriteAsync(update, cancellationToken);
-                var afterUpdate = await ReadItemAsync(connection, transaction, existingId.Value, cancellationToken);
-                await WriteAuditAsync(connection, transaction, actorUserId, existingId.Value, "import_updated", before, afterUpdate, cancellationToken);
+                var afterUpdate = await ReadItemAsync(connection, transaction, row.ItemId.Value, cancellationToken);
+                await WriteAuditAsync(connection, transaction, actorUserId, row.ItemId.Value, "import_updated", before, afterUpdate, cancellationToken);
+                savedRows.Add((row, afterUpdate));
                 updated++;
             }
             catch (IdentityException exception)
@@ -596,6 +600,27 @@ internal sealed class PostgresCatalogService(
                     400,
                     "catalog_import_row_invalid",
                     $"Лист «{row.SheetName}», строка {row.RowNumber}: {exception.Message}");
+            }
+        }
+
+        foreach (var saved in savedRows)
+        {
+            try
+            {
+                await ReplaceRelationsInTransactionAsync(
+                    connection,
+                    transaction,
+                    actorUserId,
+                    saved.Item,
+                    saved.Row.Relations,
+                    cancellationToken);
+            }
+            catch (IdentityException exception)
+            {
+                throw new IdentityException(
+                    400,
+                    "catalog_import_row_invalid",
+                    $"Лист «{saved.Row.SheetName}», строка {saved.Row.RowNumber}: {exception.Message}");
             }
         }
 
@@ -660,29 +685,6 @@ internal sealed class PostgresCatalogService(
         }
         await transaction.CommitAsync(cancellationToken);
         return new CatalogBulkResult(ids.Length, affected);
-    }
-
-    private static async Task<Guid?> FindImportIdentityAsync(
-        DbConnection connection,
-        DbTransaction transaction,
-        NormalizedItem item,
-        CancellationToken token)
-    {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            SELECT id
-            FROM catalog_items
-            WHERE deleted_at IS NULL
-              AND group_id IS NOT DISTINCT FROM @group_id
-              AND normalized_name = lower(regexp_replace(btrim(@name), '\s+', ' ', 'g'))
-              AND normalized_marking = lower(regexp_replace(btrim(@marking), '\s+', ' ', 'g'))
-            LIMIT 1
-            """;
-        AddGuidParameter(command, "group_id", item.GroupId);
-        AddParameter(command, "name", item.Name);
-        AddParameter(command, "marking", item.Marking);
-        return await command.ExecuteScalarAsync(token) is Guid id ? id : null;
     }
 
     private static async Task<IReadOnlyList<CatalogCategorySummary>> ReadCategoriesAsync(
@@ -998,6 +1000,68 @@ internal sealed class PostgresCatalogService(
         AddParameter(command, "action", action);
         await command.ExecuteNonQueryAsync(token);
     }
+
+    private static async Task<IReadOnlyList<CatalogItemRelationSummary>> ReplaceRelationsInTransactionAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        Guid actorUserId,
+        CatalogItemSummary target,
+        IReadOnlyList<SaveCatalogItemRelationRequest> relations,
+        CancellationToken token)
+    {
+        if (relations
+            .Select(item => (item.DependencyId, item.SourceItemId))
+            .Distinct()
+            .Count() != relations.Count)
+            throw Invalid("catalog_relation_duplicate", "Одна карточка не может быть привязана дважды.");
+
+        var before = await ReadRelationsAsync(connection, transaction, target.Id, token);
+        for (var index = 0; index < relations.Count; index++)
+            await ValidateRelationAsync(
+                connection, transaction, target.CategoryId, relations[index], token);
+
+        await using (var delete = connection.CreateCommand())
+        {
+            delete.Transaction = transaction;
+            delete.CommandText = "DELETE FROM catalog_item_relations WHERE target_item_id = @target_item_id";
+            AddParameter(delete, "target_item_id", target.Id);
+            await delete.ExecuteNonQueryAsync(token);
+        }
+
+        for (var index = 0; index < relations.Count; index++)
+        {
+            var relation = relations[index];
+            await using var insert = connection.CreateCommand();
+            insert.Transaction = transaction;
+            insert.CommandText = """
+                INSERT INTO catalog_item_relations
+                    (dependency_id, target_item_id, source_item_id, sort_order,
+                     created_by, updated_by)
+                VALUES
+                    (@dependency_id, @target_item_id, @source_item_id, @sort_order,
+                     @actor, @actor)
+                """;
+            AddParameter(insert, "dependency_id", relation.DependencyId);
+            AddParameter(insert, "target_item_id", target.Id);
+            AddParameter(insert, "source_item_id", relation.SourceItemId);
+            AddParameter(insert, "sort_order", index);
+            AddParameter(insert, "actor", actorUserId);
+            await insert.ExecuteNonQueryAsync(token);
+        }
+
+        var after = await ReadRelationsAsync(connection, transaction, target.Id, token);
+        if (!RelationsEqual(before, after))
+            await WriteRelationAuditAsync(
+                connection, transaction, actorUserId, target.Id, before, after, token);
+        return after;
+    }
+
+    private static bool RelationsEqual(
+        IReadOnlyList<CatalogItemRelationSummary> left,
+        IReadOnlyList<CatalogItemRelationSummary> right) =>
+        left.Count == right.Count && left.Zip(right).All(pair =>
+            pair.First.DependencyId == pair.Second.DependencyId &&
+            pair.First.SourceItemId == pair.Second.SourceItemId);
 
     private static async Task<IReadOnlyList<CatalogItemRelationSummary>> ReadRelationsAsync(
         DbConnection connection,

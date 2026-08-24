@@ -16,8 +16,9 @@ internal sealed class CatalogSpreadsheetService(ICatalogService catalog) : ICata
 {
     private const string ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
     private const string MetaSheetName = "_catalog_meta";
+    private const string ListsSheetName = "_catalog_lists";
     private const string WorkbookMarker = "SKLAD_KOMFORTA_CATALOG";
-    private const int FormatVersion = 1;
+    private const int FormatVersion = 2;
     private const int FirstDataRow = 3;
 
     /// <inheritdoc />
@@ -27,7 +28,11 @@ internal sealed class CatalogSpreadsheetService(ICatalogService catalog) : ICata
     {
         var configuration = await catalog.GetConfigurationAsync(cancellationToken);
         var categories = SelectCategories(configuration, categoryId);
-        using var workbook = BuildWorkbook(configuration, categories, []);
+        using var workbook = BuildWorkbook(
+            configuration,
+            categories,
+            [],
+            new Dictionary<Guid, IReadOnlyList<CatalogItemRelationSummary>>());
         return ToFile(workbook, "Шаблон каталога.xlsx");
     }
 
@@ -39,7 +44,9 @@ internal sealed class CatalogSpreadsheetService(ICatalogService catalog) : ICata
         var configuration = await catalog.GetConfigurationAsync(cancellationToken);
         var categories = SelectCategories(configuration, query.CategoryId);
         var items = await catalog.GetItemsForExportAsync(query, cancellationToken);
-        using var workbook = BuildWorkbook(configuration, categories, items.ToArray());
+        var relations = await catalog.GetRelationsForExportAsync(
+            items.Select(item => item.Id).ToArray(), cancellationToken);
+        using var workbook = BuildWorkbook(configuration, categories, items.ToArray(), relations);
         return ToFile(workbook, $"Каталог {DateTimeOffset.Now:yyyy-MM-dd HH-mm}.xlsx");
     }
 
@@ -70,16 +77,23 @@ internal sealed class CatalogSpreadsheetService(ICatalogService catalog) : ICata
     private static XLWorkbook BuildWorkbook(
         CatalogConfiguration configuration,
         IReadOnlyList<CatalogCategorySummary> categories,
-        CatalogItemSummary[] items)
+        CatalogItemSummary[] items,
+        IReadOnlyDictionary<Guid, IReadOnlyList<CatalogItemRelationSummary>> relations)
     {
         var workbook = new XLWorkbook();
         var meta = workbook.Worksheets.Add(MetaSheetName);
+        var lists = workbook.Worksheets.Add(ListsSheetName);
         meta.Cell(1, 1).Value = WorkbookMarker;
         meta.Cell(1, 2).Value = FormatVersion;
         meta.Cell(2, 1).Value = "sheet";
         meta.Cell(2, 2).Value = "category_id";
 
-        var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { MetaSheetName };
+        var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            MetaSheetName,
+            ListsSheetName,
+        };
+        var validationListIndex = 0;
         for (var index = 0; index < categories.Count; index++)
         {
             var category = categories[index];
@@ -87,20 +101,31 @@ internal sealed class CatalogSpreadsheetService(ICatalogService catalog) : ICata
             meta.Cell(index + 3, 1).Value = sheetName;
             meta.Cell(index + 3, 2).Value = category.Id.ToString();
             var sheetItems = items.Where(item => item.CategoryId == category.Id).ToArray();
-            BuildCategorySheet(workbook.Worksheets.Add(sheetName), configuration, category, sheetItems);
+            BuildCategorySheet(
+                workbook.Worksheets.Add(sheetName),
+                lists,
+                configuration,
+                category,
+                sheetItems,
+                relations,
+                ref validationListIndex);
         }
 
         meta.Visibility = XLWorksheetVisibility.VeryHidden;
+        lists.Visibility = XLWorksheetVisibility.VeryHidden;
         return workbook;
     }
 
     private static void BuildCategorySheet(
         IXLWorksheet sheet,
+        IXLWorksheet lists,
         CatalogConfiguration configuration,
         CatalogCategorySummary category,
-        CatalogItemSummary[] items)
+        CatalogItemSummary[] items,
+        IReadOnlyDictionary<Guid, IReadOnlyList<CatalogItemRelationSummary>> relations,
+        ref int validationListIndex)
     {
-        var columns = BuildColumns(category);
+        var columns = BuildColumns(configuration, category);
         for (var column = 0; column < columns.Count; column++)
         {
             sheet.Cell(1, column + 1).Value = columns[column].Label;
@@ -114,10 +139,22 @@ internal sealed class CatalogSpreadsheetService(ICatalogService catalog) : ICata
         sheet.SheetView.FreezeRows(2);
 
         for (var rowIndex = 0; rowIndex < items.Length; rowIndex++)
-            WriteItem(sheet.Row(FirstDataRow + rowIndex), category, items[rowIndex], columns);
+            WriteItem(
+                sheet.Row(FirstDataRow + rowIndex),
+                category,
+                items[rowIndex],
+                columns,
+                relations);
 
         var validationLastRow = Math.Max(FirstDataRow + items.Length + 200, 500);
-        AddValidations(sheet, configuration, category, columns, validationLastRow);
+        AddValidations(
+            sheet,
+            lists,
+            configuration,
+            category,
+            columns,
+            validationLastRow,
+            ref validationListIndex);
         var lastColumn = columns.Count;
         sheet.Range(1, 1, Math.Max(FirstDataRow, FirstDataRow + items.Length - 1), lastColumn)
             .Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
@@ -132,9 +169,11 @@ internal sealed class CatalogSpreadsheetService(ICatalogService catalog) : ICata
         }
     }
 
-    private static List<SheetColumn> BuildColumns(CatalogCategorySummary category)
+    private static List<SheetColumn> BuildColumns(
+        CatalogConfiguration configuration,
+        CatalogCategorySummary category)
     {
-        var result = new List<SheetColumn>();
+        var result = new List<SheetColumn> { new("id", "ID", "id") };
         if (category.Sections.Count > 0) result.Add(new("section", "Раздел", "text"));
         if (category.Sections.SelectMany(section => section.Groups).Any())
             result.Add(new("group", "Группа", "text"));
@@ -142,10 +181,18 @@ internal sealed class CatalogSpreadsheetService(ICatalogService catalog) : ICata
         result.Add(new("marking", "Маркировка / размер", "text"));
         result.Add(new("status", "Статус", "enum"));
         result.AddRange(category.Fields
-            .Where(field => field.IsVisible && field.FieldType is not ("relation" or "calculated_money") &&
+            .Where(field => field.IsVisible && field.FieldType != "calculated_money" &&
                             field.Code is not ("group" or "name" or "marking"))
             .OrderBy(field => field.SortOrder)
-            .Select(field => new SheetColumn(field.Code, field.Label, field.FieldType)));
+            .Select(field => new SheetColumn(
+                field.Code,
+                field.FieldType == "relation"
+                    ? $"{field.Label} (ID через ;)"
+                    : field.Label,
+                field.FieldType,
+                field.FieldType == "relation"
+                    ? ResolveDependency(configuration, category.Id, field.Code).Id
+                    : null)));
         return result;
     }
 
@@ -153,7 +200,8 @@ internal sealed class CatalogSpreadsheetService(ICatalogService catalog) : ICata
         IXLRow row,
         CatalogCategorySummary category,
         CatalogItemSummary item,
-        IReadOnlyList<SheetColumn> columns)
+        IReadOnlyList<SheetColumn> columns,
+        IReadOnlyDictionary<Guid, IReadOnlyList<CatalogItemRelationSummary>> relations)
     {
         var section = category.Sections.FirstOrDefault(value => value.Id == item.SectionId);
         var group = section?.Groups.FirstOrDefault(value => value.Id == item.GroupId);
@@ -163,13 +211,25 @@ internal sealed class CatalogSpreadsheetService(ICatalogService catalog) : ICata
             var cell = row.Cell(index + 1);
             switch (column.Code)
             {
+                case "id": cell.Value = item.Id.ToString(); break;
                 case "section": cell.Value = section?.Name ?? string.Empty; break;
                 case "group": cell.Value = group?.Name ?? string.Empty; break;
                 case "name": cell.Value = item.Name; break;
                 case "marking": cell.Value = item.Marking; break;
                 case "status": cell.Value = item.Status == "approved" ? "Согласовано" : "Не согласовано"; break;
                 default:
-                    if (item.Values.TryGetValue(column.Code, out var value)) WriteJsonValue(cell, value);
+                    if (column.FieldType == "relation" && column.DependencyId.HasValue)
+                    {
+                        cell.Value = relations.TryGetValue(item.Id, out var itemRelations)
+                            ? string.Join("; ", itemRelations
+                                .Where(relation => relation.DependencyId == column.DependencyId.Value)
+                                .Select(relation => relation.SourceItemId))
+                            : string.Empty;
+                    }
+                    else if (item.Values.TryGetValue(column.Code, out var value))
+                    {
+                        WriteJsonValue(cell, value);
+                    }
                     break;
             }
         }
@@ -188,26 +248,47 @@ internal sealed class CatalogSpreadsheetService(ICatalogService catalog) : ICata
 
     private static void AddValidations(
         IXLWorksheet sheet,
+        IXLWorksheet lists,
         CatalogConfiguration configuration,
         CatalogCategorySummary category,
         IReadOnlyList<SheetColumn> columns,
-        int lastRow)
+        int lastRow,
+        ref int validationListIndex)
     {
         for (var index = 0; index < columns.Count; index++)
         {
             var column = columns[index];
             var range = sheet.Range(FirstDataRow, index + 1, lastRow, index + 1);
-            IReadOnlyList<string>? allowed = column.Code switch
+            string[]? allowed = column.Code switch
             {
                 "section" => category.Sections.Select(item => item.Name).ToArray(),
                 "group" => category.Sections.SelectMany(item => item.Groups).Select(item => item.Name).Distinct().ToArray(),
                 "status" => ["Согласовано", "Не согласовано"],
                 _ => DictionaryValues(configuration, category, column.Code),
             };
-            if (allowed is { Count: > 0 } && string.Join(',', allowed).Length <= 240)
-                range.CreateDataValidation().List(string.Join(',', allowed.Select(EscapeValidationValue)), true);
+            if (allowed is not { Length: > 0 }) continue;
+
+            validationListIndex++;
+            var listColumn = validationListIndex;
+            for (var row = 0; row < allowed.Length; row++)
+                lists.Cell(row + 1, listColumn).Value = allowed[row];
+            var listRange = lists.Range(1, listColumn, allowed.Length, listColumn);
+            var rangeName = $"catalog_list_{validationListIndex}";
+            sheet.Workbook.DefinedNames.Add(rangeName, listRange);
+            range.CreateDataValidation().List(rangeName, true);
         }
     }
+
+    private static CatalogDependencySummary ResolveDependency(
+        CatalogConfiguration configuration,
+        Guid targetCategoryId,
+        string targetFieldCode) =>
+        configuration.Dependencies.SingleOrDefault(dependency =>
+            dependency.TargetCategoryId == targetCategoryId &&
+            dependency.TargetFieldCode == targetFieldCode)
+        ?? throw Invalid(
+            "catalog_dependency_invalid",
+            $"Для поля связи «{targetFieldCode}» не настроена зависимость категорий.");
 
     private static string[]? DictionaryValues(
         CatalogConfiguration configuration,
@@ -258,8 +339,10 @@ internal sealed class CatalogSpreadsheetService(ICatalogService catalog) : ICata
             .ToDictionary(column => sheet.Cell(2, column).GetString().Trim(), column => column, StringComparer.Ordinal);
         if (!codes.ContainsKey("name"))
             throw Invalid("catalog_import_template_invalid", $"Лист «{sheet.Name}» не содержит колонку наименования.");
-        var allowedCodes = BuildColumns(category).Select(item => item.Code).ToHashSet(StringComparer.Ordinal);
-        if (codes.Keys.Any(code => string.IsNullOrWhiteSpace(code) || !allowedCodes.Contains(code)))
+        var columns = BuildColumns(configuration, category);
+        var allowedCodes = columns.Select(item => item.Code).ToHashSet(StringComparer.Ordinal);
+        if (codes.Count != allowedCodes.Count ||
+            codes.Keys.Any(code => string.IsNullOrWhiteSpace(code) || !allowedCodes.Contains(code)))
             throw Invalid("catalog_import_template_invalid", $"Структура колонок листа «{sheet.Name}» изменена.");
 
         var lastRow = sheet.LastRowUsed()?.RowNumber() ?? 2;
@@ -273,6 +356,7 @@ internal sealed class CatalogSpreadsheetService(ICatalogService catalog) : ICata
             }
             var section = ResolveSection(category, CellText(sheet, rowNumber, codes, "section"), sheet.Name, rowNumber);
             var group = ResolveGroup(section, CellText(sheet, rowNumber, codes, "group"), sheet.Name, rowNumber);
+            var itemId = ParseOptionalId(CellText(sheet, rowNumber, codes, "id"), sheet.Name, rowNumber);
             var values = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
             foreach (var field in category.Fields.Where(field =>
                          field.Code is not ("group" or "name" or "marking") &&
@@ -283,9 +367,19 @@ internal sealed class CatalogSpreadsheetService(ICatalogService catalog) : ICata
                 if (cell.IsEmpty()) continue;
                 values[field.Code] = ParseValue(cell, field, configuration, sheet.Name, rowNumber);
             }
+            var relations = columns
+                .Where(column => column.FieldType == "relation" && column.DependencyId.HasValue)
+                .SelectMany(column => ParseRelationIds(
+                    CellText(sheet, rowNumber, codes, column.Code),
+                    column.DependencyId!.Value,
+                    column.Label,
+                    sheet.Name,
+                    rowNumber))
+                .ToArray();
             output.Add(new CatalogImportRow(
                 sheet.Name,
                 rowNumber,
+                itemId,
                 new SaveCatalogItemRequest(
                     category.Id,
                     section?.Id,
@@ -293,8 +387,42 @@ internal sealed class CatalogSpreadsheetService(ICatalogService catalog) : ICata
                     name,
                     CellText(sheet, rowNumber, codes, "marking"),
                     ParseStatus(CellText(sheet, rowNumber, codes, "status"), sheet.Name, rowNumber),
-                    values)));
+                    values),
+                relations));
         }
+    }
+
+    private static Guid? ParseOptionalId(
+        string value,
+        string sheetName,
+        int rowNumber)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        return Guid.TryParse(value, out var itemId)
+            ? itemId
+            : throw Invalid(
+                "catalog_import_id_invalid",
+                $"Лист «{sheetName}», строка {rowNumber}: ID карточки имеет неверный формат.");
+    }
+
+    private static List<SaveCatalogItemRelationRequest> ParseRelationIds(
+        string value,
+        Guid dependencyId,
+        string fieldLabel,
+        string sheetName,
+        int rowNumber)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return [];
+        var result = new List<SaveCatalogItemRelationRequest>();
+        foreach (var token in value.Split([';', ',', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (!Guid.TryParse(token, out var sourceItemId))
+                throw Invalid(
+                    "catalog_import_relation_invalid",
+                    $"Лист «{sheetName}», строка {rowNumber}, поле «{fieldLabel}»: укажите UUID связанных карточек через точку с запятой.");
+            result.Add(new SaveCatalogItemRelationRequest(dependencyId, sourceItemId));
+        }
+        return result;
     }
 
     private static JsonElement ParseValue(
@@ -411,9 +539,11 @@ internal sealed class CatalogSpreadsheetService(ICatalogService catalog) : ICata
         return candidate;
     }
 
-    private static string EscapeValidationValue(string value) => value.Replace(",", " ").Trim();
-
     private static IdentityException Invalid(string code, string message) => new(400, code, message);
 
-    private sealed record SheetColumn(string Code, string Label, string FieldType);
+    private sealed record SheetColumn(
+        string Code,
+        string Label,
+        string FieldType,
+        Guid? DependencyId = null);
 }

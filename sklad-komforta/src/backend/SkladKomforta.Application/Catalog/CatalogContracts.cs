@@ -135,7 +135,9 @@ public sealed record CatalogImportResult(
 public sealed record CatalogImportRow(
     string SheetName,
     int RowNumber,
-    SaveCatalogItemRequest Item);
+    Guid? ItemId,
+    SaveCatalogItemRequest Item,
+    IReadOnlyList<SaveCatalogItemRelationRequest> Relations);
 
 /// <summary>Доступные массовые изменения выбранных карточек.</summary>
 public sealed record CatalogBulkRequest(
@@ -182,6 +184,9 @@ public interface ICatalogService
     Task<IReadOnlyList<CatalogRelationCandidate>> SearchRelationCandidatesAsync(Guid dependencyId, string? search, int limit, CancellationToken cancellationToken);
     Task<IReadOnlyList<CatalogItemRelationSummary>> ReplaceRelationsAsync(Guid actorUserId, Guid itemId, IReadOnlyList<SaveCatalogItemRelationRequest> relations, CancellationToken cancellationToken);
     Task<IReadOnlyList<CatalogItemSummary>> GetItemsForExportAsync(CatalogItemQuery query, CancellationToken cancellationToken);
+    Task<IReadOnlyDictionary<Guid, IReadOnlyList<CatalogItemRelationSummary>>> GetRelationsForExportAsync(
+        IReadOnlyList<Guid> itemIds,
+        CancellationToken cancellationToken);
     Task<CatalogImportResult> ImportItemsAsync(Guid actorUserId, IReadOnlyList<CatalogImportRow> rows, CancellationToken cancellationToken);
     Task<CatalogBulkResult> ApplyBulkAsync(Guid actorUserId, CatalogBulkRequest request, CancellationToken cancellationToken);
 }
