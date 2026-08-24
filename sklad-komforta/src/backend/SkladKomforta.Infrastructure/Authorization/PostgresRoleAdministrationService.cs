@@ -1,5 +1,6 @@
 using System.Data.Common;
 using System.Globalization;
+using System.Text.Json;
 using Npgsql;
 using SkladKomforta.Application.Abstractions.Persistence;
 using SkladKomforta.Application.Abstractions.Tenancy;
@@ -13,6 +14,8 @@ internal sealed class PostgresRoleAdministrationService(
     IDatabaseConnectionFactory connectionFactory,
     ITenantContext tenantContext) : IRoleAdministrationService
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
     /// <inheritdoc />
     public async Task<IReadOnlyList<PermissionSummary>> GetPermissionsAsync(CancellationToken cancellationToken)
     {
@@ -41,33 +44,32 @@ internal sealed class PostgresRoleAdministrationService(
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT member.id, member.user_id, users.display_name, member.is_director, member_role.role_id
+            SELECT member.id, member.user_id, users.display_name, member.is_director,
+                   member_role.role_id, reporting.supervisor_membership_id
             FROM public.organization_members AS member
             JOIN public.users AS users ON users.id = member.user_id
             LEFT JOIN member_roles AS member_role ON member_role.membership_id = member.id
+            LEFT JOIN member_reporting AS reporting ON reporting.membership_id = member.id
             WHERE member.organization_id = @organization_id
               AND member.is_active AND member.deleted_at IS NULL
               AND users.is_active AND users.deleted_at IS NULL
             ORDER BY users.display_name, member_role.role_id
             """;
         AddParameter(command, "organization_id", tenantContext.OrganizationId);
-        var members = new Dictionary<Guid, MutableMember>();
+        var members = new List<MemberAccessSummary>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            var id = reader.GetGuid(0);
-            if (!members.TryGetValue(id, out var member))
-            {
-                member = new MutableMember(id, reader.GetGuid(1), reader.GetString(2), reader.GetBoolean(3));
-                members.Add(id, member);
-            }
-            if (!reader.IsDBNull(4)) member.RoleIds.Add(reader.GetGuid(4));
+            members.Add(new MemberAccessSummary(
+                reader.GetGuid(0), reader.GetGuid(1), reader.GetString(2), reader.GetBoolean(3),
+                reader.IsDBNull(4) ? null : reader.GetGuid(4),
+                reader.IsDBNull(5) ? null : reader.GetGuid(5)));
         }
-        return members.Values.Select(member => member.ToSummary()).ToArray();
+        return members;
     }
 
     /// <inheritdoc />
-    public async Task<RoleSummary> CreateRoleAsync(SaveRoleRequest request, CancellationToken cancellationToken)
+    public async Task<RoleSummary> CreateRoleAsync(Guid actorUserId, SaveRoleRequest request, CancellationToken cancellationToken)
     {
         var name = ValidateName(request.Name);
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
@@ -82,15 +84,19 @@ internal sealed class PostgresRoleAdministrationService(
             await ExecuteWithConflictMappingAsync(command, cancellationToken);
         }
         await ReplacePermissionsAsync(connection, transaction, id, request.PermissionCodes, cancellationToken);
+        await ReplaceSubordinateRolesAsync(connection, transaction, id, request.SubordinateRoleIds, cancellationToken);
+        await WriteAuditAsync(connection, transaction, actorUserId, "role", id, "created", null, request, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return (await ReadRolesAsync(connection, id, cancellationToken)).Single();
     }
 
     /// <inheritdoc />
-    public async Task<RoleSummary> UpdateRoleAsync(Guid roleId, SaveRoleRequest request, CancellationToken cancellationToken)
+    public async Task<RoleSummary> UpdateRoleAsync(Guid actorUserId, Guid roleId, SaveRoleRequest request, CancellationToken cancellationToken)
     {
         var name = ValidateName(request.Name);
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
+        var before = (await ReadRolesAsync(connection, roleId, cancellationToken)).SingleOrDefault()
+            ?? throw new IdentityException(404, "role_not_found", "Роль не найдена.");
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         await using (var command = connection.CreateCommand())
         {
@@ -102,28 +108,52 @@ internal sealed class PostgresRoleAdministrationService(
                 throw new IdentityException(409, "system_role_readonly", "Системную роль нельзя изменять.");
         }
         await ReplacePermissionsAsync(connection, transaction, roleId, request.PermissionCodes, cancellationToken);
+        await ReplaceSubordinateRolesAsync(connection, transaction, roleId, request.SubordinateRoleIds, cancellationToken);
+        await WriteAuditAsync(connection, transaction, actorUserId, "role", roleId, "updated", before, request, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return (await ReadRolesAsync(connection, roleId, cancellationToken)).Single();
     }
 
     /// <inheritdoc />
-    public async Task DeleteRoleAsync(Guid roleId, CancellationToken cancellationToken)
+    public async Task DeleteRoleAsync(Guid actorUserId, Guid roleId, CancellationToken cancellationToken)
     {
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
+        var before = (await ReadRolesAsync(connection, roleId, cancellationToken)).SingleOrDefault()
+            ?? throw new IdentityException(404, "role_not_found", "Роль не найдена.");
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using (var usage = connection.CreateCommand())
+        {
+            usage.Transaction = transaction;
+            usage.CommandText = "SELECT EXISTS (SELECT 1 FROM member_roles WHERE role_id = @id)";
+            AddParameter(usage, "id", roleId);
+            if (await usage.ExecuteScalarAsync(cancellationToken) is true)
+                throw new IdentityException(409, "role_in_use", "Нельзя удалить роль, назначенную сотрудникам.");
+        }
+        await using (var hierarchy = connection.CreateCommand())
+        {
+            hierarchy.Transaction = transaction;
+            hierarchy.CommandText = "DELETE FROM role_subordination WHERE supervisor_role_id = @id OR subordinate_role_id = @id";
+            AddParameter(hierarchy, "id", roleId);
+            await hierarchy.ExecuteNonQueryAsync(cancellationToken);
+        }
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = "UPDATE roles SET deleted_at = now(), updated_at = now() WHERE id = @id AND NOT is_system AND deleted_at IS NULL";
         AddParameter(command, "id", roleId);
         if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
             throw new IdentityException(409, "system_role_readonly", "Системную роль нельзя удалить.");
+        await WriteAuditAsync(connection, transaction, actorUserId, "role", roleId, "deleted", before, null, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     /// <inheritdoc />
-    public async Task AssignMemberRolesAsync(Guid membershipId, AssignMemberRolesRequest request, CancellationToken cancellationToken)
+    public async Task AssignMemberAccessAsync(Guid actorUserId, Guid membershipId, AssignMemberAccessRequest request, CancellationToken cancellationToken)
     {
-        var roleIds = request.RoleIds.Distinct().ToArray();
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-        await EnsureMemberAndRolesExistAsync(connection, transaction, membershipId, roleIds, cancellationToken);
+        var before = (await GetMembersAsync(cancellationToken)).SingleOrDefault(member => member.MembershipId == membershipId);
+        await EnsureMemberAndRolesExistAsync(connection, transaction, membershipId, [request.RoleId], cancellationToken);
+        await EnsureReportingIsValidAsync(connection, transaction, membershipId, request.RoleId, request.SupervisorMembershipId, cancellationToken);
         await using (var delete = connection.CreateCommand())
         {
             delete.Transaction = transaction;
@@ -131,15 +161,26 @@ internal sealed class PostgresRoleAdministrationService(
             AddParameter(delete, "membership_id", membershipId);
             await delete.ExecuteNonQueryAsync(cancellationToken);
         }
-        foreach (var roleId in roleIds)
+        await using (var insert = connection.CreateCommand())
         {
-            await using var insert = connection.CreateCommand();
             insert.Transaction = transaction;
             insert.CommandText = "INSERT INTO member_roles (membership_id, role_id) VALUES (@membership_id, @role_id)";
             AddParameter(insert, "membership_id", membershipId);
-            AddParameter(insert, "role_id", roleId);
+            AddParameter(insert, "role_id", request.RoleId);
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
+        await using (var reporting = connection.CreateCommand())
+        {
+            reporting.Transaction = transaction;
+            reporting.CommandText = request.SupervisorMembershipId.HasValue
+                ? "INSERT INTO member_reporting (membership_id, supervisor_membership_id) VALUES (@membership_id, @supervisor_id) ON CONFLICT (membership_id) DO UPDATE SET supervisor_membership_id = EXCLUDED.supervisor_membership_id"
+                : "DELETE FROM member_reporting WHERE membership_id = @membership_id";
+            AddParameter(reporting, "membership_id", membershipId);
+            if (request.SupervisorMembershipId.HasValue)
+                AddParameter(reporting, "supervisor_id", request.SupervisorMembershipId.Value);
+            await reporting.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await WriteAuditAsync(connection, transaction, actorUserId, "employee_access", membershipId, "updated", before, request, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -148,10 +189,11 @@ internal sealed class PostgresRoleAdministrationService(
         await using var command = connection.CreateCommand();
         var roleFilter = roleId.HasValue ? "AND role.id = @role_id" : string.Empty;
         command.CommandText = $"""
-            SELECT role.id, role.name, role.is_system, permission.code
+            SELECT role.id, role.name, role.is_system, permission.code, hierarchy.subordinate_role_id
             FROM roles AS role
             LEFT JOIN role_permissions AS role_permission ON role_permission.role_id = role.id
             LEFT JOIN permissions AS permission ON permission.id = role_permission.permission_id
+            LEFT JOIN role_subordination AS hierarchy ON hierarchy.supervisor_role_id = role.id
             WHERE role.deleted_at IS NULL
             {roleFilter}
             ORDER BY role.is_system DESC, role.name, permission.code
@@ -167,9 +209,107 @@ internal sealed class PostgresRoleAdministrationService(
                 role = new MutableRole(id, reader.GetString(1), reader.GetBoolean(2));
                 roles.Add(id, role);
             }
-            if (!reader.IsDBNull(3)) role.PermissionCodes.Add(reader.GetString(3));
+            if (!reader.IsDBNull(3) && !role.PermissionCodes.Contains(reader.GetString(3))) role.PermissionCodes.Add(reader.GetString(3));
+            if (!reader.IsDBNull(4) && !role.SubordinateRoleIds.Contains(reader.GetGuid(4))) role.SubordinateRoleIds.Add(reader.GetGuid(4));
         }
         return roles.Values.Select(role => role.ToSummary()).ToArray();
+    }
+
+    private static async Task ReplaceSubordinateRolesAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        Guid roleId,
+        IReadOnlyList<Guid> requestedRoleIds,
+        CancellationToken token)
+    {
+        var subordinateIds = requestedRoleIds.Distinct().ToArray();
+        if (subordinateIds.Contains(roleId))
+            throw new IdentityException(400, "role_hierarchy_invalid", "Роль не может подчиняться сама себе.");
+        await using (var validate = connection.CreateCommand())
+        {
+            validate.Transaction = transaction;
+            validate.CommandText = "SELECT count(*) FROM roles WHERE id = ANY(@ids) AND NOT is_system AND deleted_at IS NULL";
+            AddParameter(validate, "ids", subordinateIds);
+            if (Convert.ToInt32(await validate.ExecuteScalarAsync(token), CultureInfo.InvariantCulture) != subordinateIds.Length)
+                throw new IdentityException(400, "role_invalid", "Подчинёнными могут быть только пользовательские роли.");
+        }
+        await using (var delete = connection.CreateCommand())
+        {
+            delete.Transaction = transaction;
+            delete.CommandText = "DELETE FROM role_subordination WHERE supervisor_role_id = @role_id";
+            AddParameter(delete, "role_id", roleId);
+            await delete.ExecuteNonQueryAsync(token);
+        }
+        foreach (var subordinateId in subordinateIds)
+        {
+            await using var cycle = connection.CreateCommand();
+            cycle.Transaction = transaction;
+            cycle.CommandText = """
+                WITH RECURSIVE descendants(id) AS (
+                    SELECT subordinate_role_id FROM role_subordination WHERE supervisor_role_id = @subordinate_id
+                    UNION
+                    SELECT relation.subordinate_role_id
+                    FROM role_subordination AS relation
+                    JOIN descendants ON descendants.id = relation.supervisor_role_id
+                )
+                SELECT EXISTS (SELECT 1 FROM descendants WHERE id = @role_id)
+                """;
+            AddParameter(cycle, "subordinate_id", subordinateId);
+            AddParameter(cycle, "role_id", roleId);
+            if (await cycle.ExecuteScalarAsync(token) is true)
+                throw new IdentityException(409, "role_hierarchy_cycle", "Иерархия ролей не может содержать цикл.");
+            await using var insert = connection.CreateCommand();
+            insert.Transaction = transaction;
+            insert.CommandText = "INSERT INTO role_subordination (supervisor_role_id, subordinate_role_id) VALUES (@role_id, @subordinate_id)";
+            AddParameter(insert, "role_id", roleId);
+            AddParameter(insert, "subordinate_id", subordinateId);
+            await insert.ExecuteNonQueryAsync(token);
+        }
+    }
+
+    private async Task EnsureReportingIsValidAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        Guid membershipId,
+        Guid roleId,
+        Guid? supervisorMembershipId,
+        CancellationToken token)
+    {
+        if (!supervisorMembershipId.HasValue) return;
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT EXISTS (
+                SELECT 1
+                FROM public.organization_members AS supervisor
+                JOIN member_roles AS supervisor_role ON supervisor_role.membership_id = supervisor.id
+                JOIN role_subordination AS relation
+                  ON relation.supervisor_role_id = supervisor_role.role_id
+                 AND relation.subordinate_role_id = @role_id
+                WHERE supervisor.id = @supervisor_id
+                  AND supervisor.organization_id = @organization_id
+                  AND supervisor.is_active AND supervisor.deleted_at IS NULL
+            ), EXISTS (
+                WITH RECURSIVE ancestors(id) AS (
+                    SELECT supervisor_membership_id FROM member_reporting WHERE membership_id = @supervisor_id
+                    UNION
+                    SELECT relation.supervisor_membership_id
+                    FROM member_reporting AS relation
+                    JOIN ancestors ON ancestors.id = relation.membership_id
+                )
+                SELECT 1 FROM ancestors WHERE id = @membership_id
+            )
+            """;
+        AddParameter(command, "role_id", roleId);
+        AddParameter(command, "supervisor_id", supervisorMembershipId.Value);
+        AddParameter(command, "organization_id", tenantContext.OrganizationId);
+        AddParameter(command, "membership_id", membershipId);
+        await using var reader = await command.ExecuteReaderAsync(token);
+        await reader.ReadAsync(token);
+        if (!reader.GetBoolean(0))
+            throw new IdentityException(409, "supervisor_role_invalid", "Роль руководителя не может управлять выбранной ролью сотрудника.");
+        if (reader.GetBoolean(1))
+            throw new IdentityException(409, "employee_hierarchy_cycle", "Структура сотрудников не может содержать цикл.");
     }
 
     private static async Task ReplacePermissionsAsync(DbConnection connection, DbTransaction transaction, Guid roleId, IReadOnlyList<string> requestedCodes, CancellationToken token)
@@ -238,6 +378,28 @@ internal sealed class PostgresRoleAdministrationService(
         }
     }
 
+    private static async Task WriteAuditAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        Guid actorUserId,
+        string entityType,
+        Guid entityId,
+        string action,
+        object? before,
+        object? after,
+        CancellationToken token)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "INSERT INTO audit_log (actor_user_id, entity_type, entity_id, action, diff) VALUES (@actor, @type, @id, @action, CAST(@diff AS jsonb))";
+        AddParameter(command, "actor", actorUserId);
+        AddParameter(command, "type", entityType);
+        AddParameter(command, "id", entityId);
+        AddParameter(command, "action", action);
+        AddParameter(command, "diff", JsonSerializer.Serialize(new { before, after }, JsonOptions));
+        await command.ExecuteNonQueryAsync(token);
+    }
+
     private static void AddParameter(DbCommand command, string name, object value)
     {
         var parameter = command.CreateParameter();
@@ -249,12 +411,7 @@ internal sealed class PostgresRoleAdministrationService(
     private sealed class MutableRole(Guid id, string name, bool isSystem)
     {
         public List<string> PermissionCodes { get; } = [];
-        public RoleSummary ToSummary() => new(id, name, isSystem, PermissionCodes);
-    }
-
-    private sealed class MutableMember(Guid membershipId, Guid userId, string displayName, bool isDirector)
-    {
-        public List<Guid> RoleIds { get; } = [];
-        public MemberAccessSummary ToSummary() => new(membershipId, userId, displayName, isDirector, RoleIds);
+        public List<Guid> SubordinateRoleIds { get; } = [];
+        public RoleSummary ToSummary() => new(id, name, isSystem, PermissionCodes, SubordinateRoleIds);
     }
 }

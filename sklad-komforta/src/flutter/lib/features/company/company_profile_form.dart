@@ -33,7 +33,6 @@ final class CompanyProfileForm extends StatelessWidget {
           options: const [
             AppSelectOption(value: 'ООО', label: 'ООО'),
             AppSelectOption(value: 'ИП', label: 'ИП'),
-            AppSelectOption(value: 'АО', label: 'АО'),
           ],
           enabled: enabled,
           onChanged: (value) {

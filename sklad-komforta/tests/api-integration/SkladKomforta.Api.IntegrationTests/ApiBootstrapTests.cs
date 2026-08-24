@@ -112,6 +112,19 @@ public sealed class ApiBootstrapTests : IClassFixture<ApiFactory>
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
+    [Theory]
+    [InlineData("/api/v1/company/lifecycle")]
+    [InlineData("/api/v1/company/legal-entities")]
+    [InlineData("/api/v1/company/clients")]
+    [InlineData("/api/v1/company/employees")]
+    [InlineData("/api/v1/company/audit")]
+    public async Task CompanyWorkspaceEndpointsRequireAccessToken(string path)
+    {
+        var response = await _client.GetAsync(path);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
     [Fact]
     public async Task LogoutEndpointRequiresAccessToken()
     {

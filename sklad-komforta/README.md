@@ -12,6 +12,9 @@
   schema-per-tenant и настраиваемые роли организации.
 - Итерация 4: реализованы tenant-схема карточек, защищённый REST API и выбранный
   карточный Flutter-каталог с динамическим редактором.
+- Итерация 5: пространство «Компания» разделено на настройки организации,
+  клиентов, сотрудников со структурой и права доступа; добавлен единый срок
+  активности tenant-а.
 
 ## Документы первой итерации
 
@@ -52,6 +55,14 @@
 - [Flutter-клиент](docs/iteration-04/flutter-client.md)
 - [Утверждённый вариант 2](docs/iteration-04/catalog-ui-variant-2.png)
 - [Проверки этапа](docs/iteration-04/verification.md)
+
+## Документы пятой итерации
+
+- [Обзор пространства «Компания»](docs/iteration-05/README.md)
+- [Модель и миграции](docs/iteration-05/company-model.md)
+- [REST API и безопасность](docs/iteration-05/company-api.md)
+- [Flutter-клиент](docs/iteration-05/flutter-client.md)
+- [Проверки](docs/iteration-05/verification.md)
 
 ## Инструменты аудита
 

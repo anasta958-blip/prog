@@ -70,6 +70,9 @@ final class _OrganizationOnboardingPageState
     '#8B5CF6',
     '#06B6D4',
   ];
+  // Реквизиты юридических лиц редактируются в отдельной вкладке «Компания».
+  // Здесь остаётся только рабочая конфигурация без второго источника данных.
+  static const _settingsStepIndexes = [1, 2, 3, 4, 6];
   late OrganizationOnboardingDraft draft;
   late int step;
   final _companyFormKey = GlobalKey<FormState>();
@@ -98,7 +101,9 @@ final class _OrganizationOnboardingPageState
         widget.controller.onboardingDraft ??
         OrganizationOnboardingDraft.initial();
     _collapseConfiguredBlocks();
-    step = _settingsMode ? 0 : draft.currentStep.clamp(1, 8) - 1;
+    step = _settingsMode
+        ? _settingsStepIndexes.first
+        : draft.currentStep.clamp(1, 8) - 1;
   }
 
   @override
@@ -195,8 +200,11 @@ final class _OrganizationOnboardingPageState
             final wide = constraints.maxWidth >= 1050;
             return Column(
               children: [
-                _Header(wide: wide, settingsMode: _settingsMode),
-                _Progress(step: step, wide: wide, onSelect: _selectStep),
+                if (!_settingsMode)
+                  _Header(wide: wide, settingsMode: _settingsMode),
+                _settingsMode
+                    ? _SettingsTabs(step: step, onSelect: _selectStep)
+                    : _Progress(step: step, wide: wide, onSelect: _selectStep),
                 Expanded(
                   child: SingleChildScrollView(
                     padding: EdgeInsets.fromLTRB(
@@ -258,7 +266,9 @@ final class _OrganizationOnboardingPageState
             const SizedBox(width: 14),
             Expanded(
               child: Text(
-                '${step + 1}. ${_steps[step].$1}',
+                _settingsMode
+                    ? _steps[step].$1
+                    : '${step + 1}. ${_steps[step].$1}',
                 style: const TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.w700,
@@ -276,7 +286,7 @@ final class _OrganizationOnboardingPageState
         const SizedBox(height: 24),
         Row(
           children: [
-            if (step > 0)
+            if (!_settingsMode && step > 0)
               OutlinedButton.icon(
                 onPressed: _busy ? null : () => setState(() => step--),
                 icon: const Icon(Icons.arrow_back),
@@ -288,10 +298,10 @@ final class _OrganizationOnboardingPageState
               child: FilledButton.icon(
                 onPressed: _busy
                     ? null
+                    : _settingsMode
+                    ? _saveSettings
                     : step == 7
-                    ? _settingsMode
-                          ? _saveSettings
-                          : widget.controller.activateOrganization
+                    ? widget.controller.activateOrganization
                     : _saveAndContinue,
                 icon: _busy
                     ? const SizedBox.square(
@@ -299,15 +309,15 @@ final class _OrganizationOnboardingPageState
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : Icon(
-                        step == 7
-                            ? Icons.verified_outlined
+                        _settingsMode || step == 7
+                            ? Icons.save_outlined
                             : Icons.arrow_forward,
                       ),
                 label: Text(
-                  step == 7
-                      ? _settingsMode
-                            ? 'Сохранить изменения'
-                            : 'Активировать организацию'
+                  _settingsMode
+                      ? 'Сохранить изменения'
+                      : step == 7
+                      ? 'Активировать организацию'
                       : 'Сохранить и продолжить',
                 ),
               ),
@@ -1677,6 +1687,52 @@ final class _Header extends StatelessWidget {
           ),
         ),
       ],
+    ),
+  );
+}
+
+/// Горизонтальные вкладки рабочего редактора без семантики обязательных шагов.
+final class _SettingsTabs extends StatelessWidget {
+  const _SettingsTabs({required this.step, required this.onSelect});
+  final int step;
+  final ValueChanged<int> onSelect;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.fromLTRB(24, 10, 24, 12),
+    decoration: const BoxDecoration(
+      color: Color(0xFF0D151F),
+      border: Border(bottom: BorderSide(color: Color(0xFF25364C))),
+    ),
+    child: LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minWidth: constraints.maxWidth),
+          child: Center(
+            child: SegmentedButton<int>(
+              segments: [
+                for (final index
+                    in _OrganizationOnboardingPageState._settingsStepIndexes)
+                  ButtonSegment<int>(
+                    value: index,
+                    icon: Icon(
+                      _OrganizationOnboardingPageState._steps[index].$2,
+                      size: 17,
+                    ),
+                    label: Text(
+                      _OrganizationOnboardingPageState._steps[index].$1,
+                    ),
+                  ),
+              ],
+              selected: {step},
+              showSelectedIcon: false,
+              onSelectionChanged: (values) => onSelect(values.first),
+            ),
+          ),
+        ),
+      ),
     ),
   );
 }

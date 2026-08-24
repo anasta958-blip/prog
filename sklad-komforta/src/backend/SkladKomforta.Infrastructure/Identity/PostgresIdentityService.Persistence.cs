@@ -147,17 +147,28 @@ internal sealed partial class PostgresIdentityService
     {
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using var command = new NpgsqlCommand(
-            "SELECT organization_id FROM public.organization_members WHERE user_id = @id AND is_active AND deleted_at IS NULL ORDER BY created_at LIMIT 2",
+            """
+            SELECT member.organization_id,
+                   member.is_active AND organization.is_active
+                   AND organization.active_until > now() AS access_active
+            FROM public.organization_members AS member
+            JOIN public.organizations AS organization ON organization.id = member.organization_id
+            WHERE member.user_id = @id AND member.deleted_at IS NULL
+              AND organization.deleted_at IS NULL
+            ORDER BY member.created_at LIMIT 2
+            """,
             connection);
         command.Parameters.AddWithValue("id", userId);
-        var organizations = new List<Guid>(2);
+        var organizations = new List<(Guid Id, bool Active)>(2);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            organizations.Add(reader.GetGuid(0));
+            organizations.Add((reader.GetGuid(0), reader.GetBoolean(1)));
         }
 
-        return organizations.Count == 1 ? organizations[0] : null;
+        if (organizations.Count == 1 && !organizations[0].Active)
+            throw Failure(403, "organization_expired", "Срок действия организации истёк. Обратитесь к администратору сервиса.");
+        return organizations.Count == 1 ? organizations[0].Id : null;
     }
 
     /// <summary>Создаёт долговечную refresh-сессию, сохраняя только хеш токена.</summary>
@@ -207,9 +218,13 @@ internal sealed partial class PostgresIdentityService
                    u.display_name
             FROM public.refresh_sessions AS s
             JOIN public.users AS u ON u.id = s.user_id
+            LEFT JOIN public.organizations AS organization ON organization.id = s.organization_id
             WHERE s.token_hash = @hash AND s.revoked_at IS NULL AND s.expires_at > now()
               AND u.is_active AND u.deleted_at IS NULL
-            FOR UPDATE
+              AND (s.organization_id IS NULL OR (
+                    organization.is_active AND organization.deleted_at IS NULL
+                    AND organization.active_until > now()))
+            FOR UPDATE OF s
             """;
         await using var command = new NpgsqlCommand(select, connection, transaction);
         command.Parameters.AddWithValue("hash", IdentitySecurity.HashToken(request.RefreshToken));

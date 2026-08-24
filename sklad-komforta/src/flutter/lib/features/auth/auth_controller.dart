@@ -37,6 +37,7 @@ final class AuthController extends ChangeNotifier {
   bool busy = false;
   bool organizationProvisioned = false;
   OrganizationOnboardingDraft? onboardingDraft;
+  Future<void>? _refreshInFlight;
 
   /// Восстанавливает нативную сессию из secure storage или Web-сессию из cookie.
   Future<void> initialize() async {
@@ -53,8 +54,15 @@ final class AuthController extends ChangeNotifier {
         onboardingDraft = OrganizationOnboardingDraft.initial();
         stage = AuthStage.organization;
       }
+    } on AuthApiException catch (exception) {
+      if (exception.statusCode == 401) {
+        await _tokens.clear();
+      } else {
+        error = exception.message;
+      }
+      stage = AuthStage.login;
     } catch (_) {
-      await _tokens.clear();
+      error = 'Не удалось связаться с сервером. Повторите попытку позже.';
       stage = AuthStage.login;
     }
     notifyListeners();
@@ -293,7 +301,9 @@ final class AuthController extends ChangeNotifier {
       return await request(currentToken);
     } on AuthApiException catch (exception) {
       if (exception.statusCode != 401) rethrow;
-      await _refreshAccessToken();
+      if (accessToken == currentToken) {
+        await _refreshAccessToken();
+      }
       return request(accessToken!);
     }
   }
@@ -319,7 +329,21 @@ final class AuthController extends ChangeNotifier {
   }
 
   /// Ротирует refresh-сессию без изменения текущего экрана приложения.
-  Future<void> _refreshAccessToken() async {
+  Future<void> _refreshAccessToken() {
+    final activeRefresh = _refreshInFlight;
+    if (activeRefresh != null) return activeRefresh;
+
+    final refresh = _performRefresh();
+    _refreshInFlight = refresh;
+    return refresh.whenComplete(() {
+      if (identical(_refreshInFlight, refresh)) {
+        _refreshInFlight = null;
+      }
+    });
+  }
+
+  /// Выполняет единственную фактическую ротацию refresh-токена.
+  Future<void> _performRefresh() async {
     final refresh = await _tokens.readRefreshToken();
     final data =
         await _api.post('/auth/refresh', {'refreshToken': refresh ?? ''})

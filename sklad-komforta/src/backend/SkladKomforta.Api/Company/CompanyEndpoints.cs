@@ -37,6 +37,61 @@ internal static class CompanyEndpoints
                 Results.Ok(ApiResponse.Success(await service.UpdateConfigurationAsync(
                     UserId(context.User), draft, token))))
             .RequireTenantPermission("company.manage");
+
+        company.MapGet("/lifecycle", async (ICompanyWorkspaceService service, CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.GetLifecycleAsync(token))))
+            .RequireTenantPermission("company.view");
+        company.MapGet("/audit", async (int? limit, ICompanyWorkspaceService service, CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.GetAuditAsync(limit ?? 200, token))))
+            .RequireTenantPermission("company.audit.view");
+
+        company.MapGet("/legal-entities", async (ICompanyWorkspaceService service, CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.GetLegalEntitiesAsync(token))))
+            .RequireTenantPermission("company.legal_entities.view");
+        company.MapPost("/legal-entities", async (HttpContext context, SaveLegalEntityRequest request, ICompanyWorkspaceService service, CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.CreateLegalEntityAsync(UserId(context.User), request, token))))
+            .RequireTenantPermission("company.legal_entities.manage");
+        company.MapPut("/legal-entities/{id:guid}", async (HttpContext context, Guid id, SaveLegalEntityRequest request, ICompanyWorkspaceService service, CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.UpdateLegalEntityAsync(UserId(context.User), id, request, token))))
+            .RequireTenantPermission("company.legal_entities.manage");
+        company.MapDelete("/legal-entities/{id:guid}", async (HttpContext context, Guid id, ICompanyWorkspaceService service, CancellationToken token) =>
+            {
+                await service.DeleteLegalEntityAsync(UserId(context.User), id, token);
+                return Results.Ok(ApiResponse.Success(new { deleted = true }));
+            })
+            .RequireTenantPermission("company.legal_entities.manage");
+
+        company.MapGet("/clients", async (ICompanyWorkspaceService service, CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.GetClientsAsync(token))))
+            .RequireTenantPermission("company.clients.view");
+        company.MapPost("/clients", async (HttpContext context, SaveCompanyClientRequest request, ICompanyWorkspaceService service, CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.CreateClientAsync(UserId(context.User), request, token))))
+            .RequireTenantPermission("company.clients.manage");
+        company.MapPut("/clients/{id:guid}", async (HttpContext context, Guid id, SaveCompanyClientRequest request, ICompanyWorkspaceService service, CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.UpdateClientAsync(UserId(context.User), id, request, token))))
+            .RequireTenantPermission("company.clients.manage");
+        company.MapDelete("/clients/{id:guid}", async (HttpContext context, Guid id, ICompanyWorkspaceService service, CancellationToken token) =>
+            {
+                await service.DeleteClientAsync(UserId(context.User), id, token);
+                return Results.Ok(ApiResponse.Success(new { deleted = true }));
+            })
+            .RequireTenantPermission("company.clients.manage");
+
+        company.MapGet("/employees", async (ICompanyWorkspaceService service, CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.GetEmployeesAsync(token))))
+            .RequireTenantPermission("company.employees.view");
+        company.MapPost("/employees", async (HttpContext context, CreateEmployeeRequest request, ICompanyWorkspaceService service, CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.CreateEmployeeAsync(UserId(context.User), request, token))))
+            .RequireTenantPermission("company.employees.manage");
+        company.MapPut("/employees/{membershipId:guid}", async (HttpContext context, Guid membershipId, UpdateEmployeeRequest request, ICompanyWorkspaceService service, CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.UpdateEmployeeAsync(UserId(context.User), membershipId, request, token))))
+            .RequireTenantPermission("company.employees.manage");
+        company.MapDelete("/employees/{membershipId:guid}", async (HttpContext context, Guid membershipId, ICompanyWorkspaceService service, CancellationToken token) =>
+            {
+                await service.DeleteEmployeeAsync(UserId(context.User), membershipId, token);
+                return Results.Ok(ApiResponse.Success(new { deleted = true }));
+            })
+            .RequireTenantPermission("company.employees.manage");
         return endpoints;
     }
 

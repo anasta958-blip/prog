@@ -47,7 +47,8 @@ internal sealed class PostgresCompanyService(
             await SyncDependenciesAsync(
                 connection, transaction, normalized.Dependencies ?? [], categoryIds, cancellationToken);
             await SyncEntityFieldsAsync(connection, transaction, normalized.Fields, cancellationToken);
-            await SyncRolesAsync(connection, transaction, previous.Roles, normalized.Roles, cancellationToken);
+            // Роли после активации управляются отдельным разделом прав доступа.
+            // Повторное сохранение каталогов или канбанов не должно перетирать их.
 
             await ExecuteAsync(connection, transaction, """
                 UPDATE onboarding_draft
@@ -419,48 +420,6 @@ internal sealed class PostgresCompanyService(
                 ("type", field.FieldType.Trim()), ("visible", field.IsVisible),
                 ("required", field.IsRequired), ("sort", order),
                 ("dictionary_code", Db(field.DictionaryCode)));
-        }
-    }
-
-    private static async Task SyncRolesAsync(
-        DbConnection connection,
-        DbTransaction transaction,
-        IReadOnlyList<OnboardingRoleDraft> oldRoles,
-        IReadOnlyList<OnboardingRoleDraft> roles,
-        CancellationToken token)
-    {
-        var rows = await ReadOrderedRowsAsync(connection, transaction,
-            "SELECT id, name FROM roles WHERE NOT is_system AND deleted_at IS NULL ORDER BY created_at, id", token);
-        var matched = MatchByPreviousOrder(oldRoles.Select(item => item.Name), rows);
-        var retained = new HashSet<Guid>();
-        for (var index = 0; index < roles.Count; index++)
-        {
-            var role = roles[index];
-            var oldName = index < oldRoles.Count ? oldRoles[index].Name : role.Name;
-            var id = matched.GetValueOrDefault(oldName, Guid.NewGuid());
-            retained.Add(id);
-            await ExecuteAsync(connection, transaction, """
-                INSERT INTO roles (id, name, is_system) VALUES (@id, @name, false)
-                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, updated_at = now()
-                """, token, ("id", id), ("name", role.Name.Trim()));
-            await ExecuteAsync(connection, transaction,
-                "DELETE FROM role_permissions WHERE role_id = @id", token, ("id", id));
-            foreach (var permission in role.PermissionCodes.Distinct(StringComparer.Ordinal))
-                await ExecuteAsync(connection, transaction, """
-                    INSERT INTO role_permissions (role_id, permission_id)
-                    SELECT @id, id FROM permissions WHERE code = @code AND code <> 'system.full_access'
-                    """, token, ("id", id), ("code", permission));
-        }
-        foreach (var row in rows.Where(item => !retained.Contains(item.Id)))
-        {
-            await using var check = connection.CreateCommand();
-            check.Transaction = transaction;
-            check.CommandText = "SELECT EXISTS (SELECT 1 FROM member_roles WHERE role_id = @id)";
-            Add(check, "id", row.Id);
-            if (await check.ExecuteScalarAsync(token) is true)
-                throw new IdentityException(409, "organization_role_in_use",
-                    $"Роль «{row.Key}» назначена сотрудникам и не может быть удалена.");
-            await ExecuteAsync(connection, transaction, "DELETE FROM roles WHERE id = @id", token, ("id", row.Id));
         }
     }
 

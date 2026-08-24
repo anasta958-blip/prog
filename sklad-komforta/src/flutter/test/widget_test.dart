@@ -153,6 +153,45 @@ void main() {
     controller.dispose();
   });
 
+  test('параллельные запросы используют одну ротацию refresh-токена', () async {
+    final api = _RefreshingAuthGateway(
+      refreshDelay: const Duration(milliseconds: 20),
+    );
+    final tokens = _MemoryTokenRepository()..value = 'refresh-token';
+    final controller = AuthController(config, api: api, tokens: tokens)
+      ..accessToken = 'expired-access-token'
+      ..stage = AuthStage.ready;
+
+    await Future.wait([
+      controller.loadSessions(),
+      controller.loadSessions(),
+      controller.loadSessions(),
+    ]);
+
+    expect(api.refreshRequests, 1);
+    expect(controller.stage, AuthStage.ready);
+    expect(controller.accessToken, 'renewed-access-token');
+    expect(tokens.value, 'rotated-refresh-token');
+
+    controller.dispose();
+  });
+
+  test('сетевая ошибка при запуске не удаляет refresh-токен', () async {
+    final tokens = _MemoryTokenRepository()..value = 'refresh-token';
+    final controller = AuthController(
+      config,
+      api: _OfflineAuthGateway(),
+      tokens: tokens,
+    );
+
+    await controller.initialize();
+
+    expect(controller.stage, AuthStage.login);
+    expect(tokens.value, 'refresh-token');
+
+    controller.dispose();
+  });
+
   test(
     'недействительная refresh-сессия возвращает пользователя на вход',
     () async {
@@ -682,10 +721,15 @@ final class _RecordingAuthGateway implements AuthGateway {
 
 /// Имитирует истёкший access token и успешную либо отклонённую refresh-ротацию.
 final class _RefreshingAuthGateway implements AuthGateway {
-  _RefreshingAuthGateway({this.refreshFails = false});
+  _RefreshingAuthGateway({
+    this.refreshFails = false,
+    this.refreshDelay = Duration.zero,
+  });
 
   final bool refreshFails;
+  final Duration refreshDelay;
   final List<String> sessionRequestTokens = <String>[];
+  int refreshRequests = 0;
 
   @override
   Future<dynamic> get(String path, String accessToken) async {
@@ -707,6 +751,10 @@ final class _RefreshingAuthGateway implements AuthGateway {
   }) async {
     if (path != '/auth/refresh') {
       throw const AuthApiException('unexpected_request', 'Неожиданный POST.');
+    }
+    refreshRequests += 1;
+    if (refreshDelay > Duration.zero) {
+      await Future<void>.delayed(refreshDelay);
     }
     if (refreshFails) {
       throw const AuthApiException(

@@ -35,6 +35,7 @@ internal sealed class PostgresTenantAccessValidator(NpgsqlDataSource dataSource)
                   AND member.is_active
                   AND member.deleted_at IS NULL
                   AND organization.is_active
+                  AND organization.active_until > now()
                   AND organization.deleted_at IS NULL
                   AND session.revoked_at IS NULL
                   AND session.expires_at > now()

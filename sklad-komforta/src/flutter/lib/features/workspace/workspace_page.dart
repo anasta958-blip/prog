@@ -4,6 +4,7 @@ import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_controller.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_page.dart';
 import 'package:sklad_komforta_app/features/company/company_controller.dart';
+import 'package:sklad_komforta_app/features/company/company_models.dart';
 import 'package:sklad_komforta_app/features/company/company_page.dart';
 
 /// Главная оболочка авторизованной части приложения.
@@ -31,6 +32,8 @@ class _WorkspacePageState extends State<WorkspacePage> {
   late final CompanyController companyController;
   late final bool ownsCompanyController;
   int selectedIndex = 0;
+  CompanySection companySection = CompanySection.settings;
+  bool companyExpanded = false;
 
   @override
   void initState() {
@@ -60,7 +63,11 @@ class _WorkspacePageState extends State<WorkspacePage> {
         builder: (context, constraints) {
           final desktop = constraints.maxWidth >= 840;
           final content = switch (selectedIndex) {
-            1 => CompanyPage(controller: companyController),
+            1 => CompanyPage(
+              controller: companyController,
+              section: companySection,
+              onSectionRequested: _selectCompanySection,
+            ),
             2 => _SessionsPage(controller: widget.authController),
             _ => CatalogPage(controller: catalogController),
           };
@@ -72,7 +79,17 @@ class _WorkspacePageState extends State<WorkspacePage> {
               ),
               drawer: Drawer(
                 backgroundColor: const Color(0xFF101823),
-                child: SafeArea(child: _Navigation(onSelect: _select)),
+                child: SafeArea(
+                  child: _Navigation(
+                    selectedIndex: selectedIndex,
+                    companySection: companySection,
+                    companyExpanded: companyExpanded,
+                    lifecycle: companyController.lifecycle,
+                    onSelect: _select,
+                    onToggleCompany: _toggleCompany,
+                    onSelectCompanySection: _selectCompanySection,
+                  ),
+                ),
               ),
               body: content,
             );
@@ -88,7 +105,12 @@ class _WorkspacePageState extends State<WorkspacePage> {
                   ),
                   child: _Navigation(
                     selectedIndex: selectedIndex,
+                    companySection: companySection,
+                    companyExpanded: companyExpanded,
+                    lifecycle: companyController.lifecycle,
                     onSelect: _select,
+                    onToggleCompany: _toggleCompany,
+                    onSelectCompanySection: _selectCompanySection,
                   ),
                 ),
               ),
@@ -107,11 +129,46 @@ class _WorkspacePageState extends State<WorkspacePage> {
     if (index == 2) widget.authController.loadSessions();
     Navigator.maybePop(context);
   }
+
+  void _toggleCompany() {
+    setState(() {
+      if (selectedIndex != 1) {
+        selectedIndex = 1;
+        companyExpanded = true;
+      } else {
+        companyExpanded = !companyExpanded;
+      }
+    });
+    companyController.initialize();
+  }
+
+  void _selectCompanySection(CompanySection section) {
+    setState(() {
+      selectedIndex = 1;
+      companySection = section;
+      companyExpanded = true;
+    });
+    companyController.initialize();
+    Navigator.maybePop(context);
+  }
 }
 
 final class _Navigation extends StatelessWidget {
-  const _Navigation({required this.onSelect, this.selectedIndex = 0});
+  const _Navigation({
+    required this.onSelect,
+    required this.onToggleCompany,
+    required this.onSelectCompanySection,
+    required this.companySection,
+    required this.companyExpanded,
+    this.lifecycle,
+    this.selectedIndex = 0,
+  });
   final ValueChanged<int> onSelect;
+  final VoidCallback onToggleCompany;
+  final ValueChanged<CompanySection> onSelectCompanySection;
+  final CompanySection companySection;
+  final bool companyExpanded;
+  final OrganizationLifecycle? lifecycle;
   final int selectedIndex;
 
   @override
@@ -156,8 +213,38 @@ final class _Navigation extends StatelessWidget {
         icon: Icons.business_outlined,
         label: 'Компания',
         selected: selectedIndex == 1,
-        onTap: () => onSelect(1),
+        trailing: AnimatedRotation(
+          turns: companyExpanded ? .5 : 0,
+          duration: const Duration(milliseconds: 160),
+          child: const Icon(Icons.expand_more, size: 18),
+        ),
+        onTap: onToggleCompany,
       ),
+      if (companyExpanded)
+        for (final section in CompanySection.values)
+          _NavigationItem(
+            icon: section.icon,
+            label: section.label,
+            selected: selectedIndex == 1 && companySection == section,
+            indent: 24,
+            compact: true,
+            onTap: () => onSelectCompanySection(section),
+          ),
+      if (companyExpanded && lifecycle != null)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(48, 7, 18, 7),
+          child: Text(
+            lifecycle!.isFrozen
+                ? 'Организация заморожена'
+                : 'Активна до ${_shortDate(lifecycle!.activeUntil)}',
+            style: TextStyle(
+              color: lifecycle!.isFrozen
+                  ? const Color(0xFFFF809D)
+                  : const Color(0xFF7891B4),
+              fontSize: 10,
+            ),
+          ),
+        ),
       _NavigationItem(
         icon: Icons.devices_outlined,
         label: 'Активные устройства',
@@ -220,25 +307,41 @@ final class _NavigationItem extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onTap,
+    this.trailing,
+    this.indent = 0,
+    this.compact = false,
   });
   final IconData icon;
   final String label;
   final bool selected;
   final VoidCallback onTap;
+  final Widget? trailing;
+  final double indent;
+  final bool compact;
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+    padding: EdgeInsets.fromLTRB(
+      12 + indent,
+      compact ? 1 : 3,
+      12,
+      compact ? 1 : 3,
+    ),
     child: ListTile(
       dense: true,
+      visualDensity: compact ? const VisualDensity(vertical: -2) : null,
       selected: selected,
       selectedTileColor: const Color(0xFF17345A),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       leading: Icon(icon, size: 20),
       title: Text(label, style: const TextStyle(fontSize: 13)),
+      trailing: trailing,
       onTap: onTap,
     ),
   );
 }
+
+String _shortDate(DateTime value) =>
+    '${value.day.toString().padLeft(2, '0')}.${value.month.toString().padLeft(2, '0')}.${value.year}';
 
 final class _SessionsPage extends StatelessWidget {
   const _SessionsPage({required this.controller});
