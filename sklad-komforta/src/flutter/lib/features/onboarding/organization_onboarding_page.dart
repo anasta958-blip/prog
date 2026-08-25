@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/widgets/mobile_collapsible_navigation.dart';
 import 'package:flutter/services.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
 import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
@@ -1698,37 +1699,41 @@ final class _SettingsTabs extends StatelessWidget {
   final ValueChanged<int> onSelect;
 
   @override
-  Widget build(BuildContext context) => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.fromLTRB(24, 10, 24, 12),
-    decoration: const BoxDecoration(
-      color: Color(0xFF0D151F),
-      border: Border(bottom: BorderSide(color: Color(0xFF25364C))),
-    ),
-    child: LayoutBuilder(
-      builder: (context, constraints) => SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(minWidth: constraints.maxWidth),
-          child: Center(
-            child: SegmentedButton<int>(
-              segments: [
-                for (final index
-                    in _OrganizationOnboardingPageState._settingsStepIndexes)
-                  ButtonSegment<int>(
-                    value: index,
-                    icon: Icon(
-                      _OrganizationOnboardingPageState._steps[index].$2,
-                      size: 17,
+  Widget build(BuildContext context) => MobileCollapsibleNavigation(
+    title: 'Навигация настроек',
+    summary: _OrganizationOnboardingPageState._steps[step].$1,
+    child: Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(24, 10, 24, 12),
+      decoration: const BoxDecoration(
+        color: Color(0xFF0D151F),
+        border: Border(bottom: BorderSide(color: Color(0xFF25364C))),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) => SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minWidth: constraints.maxWidth),
+            child: Center(
+              child: SegmentedButton<int>(
+                segments: [
+                  for (final index
+                      in _OrganizationOnboardingPageState._settingsStepIndexes)
+                    ButtonSegment<int>(
+                      value: index,
+                      icon: Icon(
+                        _OrganizationOnboardingPageState._steps[index].$2,
+                        size: 17,
+                      ),
+                      label: Text(
+                        _OrganizationOnboardingPageState._steps[index].$1,
+                      ),
                     ),
-                    label: Text(
-                      _OrganizationOnboardingPageState._steps[index].$1,
-                    ),
-                  ),
-              ],
-              selected: {step},
-              showSelectedIcon: false,
-              onSelectionChanged: (values) => onSelect(values.first),
+                ],
+                selected: {step},
+                showSelectedIcon: false,
+                onSelectionChanged: (values) => onSelect(values.first),
+              ),
             ),
           ),
         ),

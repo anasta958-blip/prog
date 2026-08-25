@@ -20,6 +20,8 @@ final class CatalogPage extends StatefulWidget {
 class _CatalogPageState extends State<CatalogPage> {
   CatalogItemDraft? draft;
   String? editingItemId;
+  bool mobileControlsExpanded = false;
+  bool mobileFiltersExpanded = false;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -87,6 +89,7 @@ class _CatalogPageState extends State<CatalogPage> {
 
   Widget _catalogBody(bool persistentEditor) {
     final controller = widget.controller;
+    final mobile = MediaQuery.sizeOf(context).width < 600;
     if (controller.configuration == null && controller.loading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -111,72 +114,117 @@ class _CatalogPageState extends State<CatalogPage> {
       );
     }
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 22, 24, 16),
+      padding: mobile
+          ? const EdgeInsets.fromLTRB(12, 10, 12, 10)
+          : const EdgeInsets.fromLTRB(24, 22, 24, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _Header(
-            loading: controller.loading,
-            transferBusy: controller.transferBusy,
-            onRefresh: controller.reloadConfiguration,
-            onTemplate: _downloadTemplate,
-            onImport: _importCatalog,
-            onExport: _exportCatalog,
-            onCreate: () =>
-                _openEditor(controller.createDraft(), null, persistentEditor),
-          ),
-          const SizedBox(height: 18),
-          TextField(
-            key: const Key('catalog-search'),
-            onChanged: controller.updateSearch,
-            decoration: const InputDecoration(
-              hintText: 'Поиск по наименованию или маркировке…',
-              prefixIcon: Icon(Icons.search),
+          if (mobile) ...[
+            _MobileControlsToggle(
+              expanded: mobileControlsExpanded,
+              total: controller.total,
+              selectedCount: controller.selectedIds.length,
+              onTap: () => setState(
+                () => mobileControlsExpanded = !mobileControlsExpanded,
+              ),
             ),
-          ),
-          const SizedBox(height: 14),
-          SizedBox(
-            height: 40,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              children: [
-                _CategoryChip(
-                  label: 'Все категории',
-                  selected: controller.categoryId == null,
-                  onTap: () => controller.selectCategory(null),
-                ),
-                for (final category in categories)
+            const SizedBox(height: 8),
+          ],
+          if (!mobile || mobileControlsExpanded) ...[
+            _Header(
+              compact: mobile,
+              loading: controller.loading,
+              transferBusy: controller.transferBusy,
+              onRefresh: controller.reloadConfiguration,
+              onTemplate: _downloadTemplate,
+              onImport: _importCatalog,
+              onExport: _exportCatalog,
+              onCreate: () =>
+                  _openEditor(controller.createDraft(), null, persistentEditor),
+            ),
+            SizedBox(height: mobile ? 10 : 18),
+            TextField(
+              key: const Key('catalog-search'),
+              onChanged: controller.updateSearch,
+              decoration: const InputDecoration(
+                hintText: 'Поиск по наименованию или маркировке…',
+                prefixIcon: Icon(Icons.search),
+              ),
+            ),
+            SizedBox(height: mobile ? 10 : 14),
+            SizedBox(
+              height: mobile ? 36 : 40,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: [
                   _CategoryChip(
-                    label: category.name,
-                    selected: controller.categoryId == category.id,
-                    onTap: () => controller.selectCategory(category.id),
+                    label: 'Все категории',
+                    selected: controller.categoryId == null,
+                    onTap: () => controller.selectCategory(null),
+                  ),
+                  for (final category in categories)
+                    _CategoryChip(
+                      label: category.name,
+                      selected: controller.categoryId == category.id,
+                      onTap: () => controller.selectCategory(category.id),
+                    ),
+                ],
+              ),
+            ),
+            SizedBox(height: mobile ? 8 : 12),
+            if (mobile) ...[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: () => setState(
+                    () => mobileFiltersExpanded = !mobileFiltersExpanded,
+                  ),
+                  icon: Icon(
+                    mobileFiltersExpanded
+                        ? Icons.filter_alt_off_outlined
+                        : Icons.filter_alt_outlined,
+                    size: 18,
+                  ),
+                  label: Text(
+                    mobileFiltersExpanded ? 'Скрыть фильтры' : 'Фильтры',
+                  ),
+                ),
+              ),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOutCubic,
+                child: mobileFiltersExpanded
+                    ? Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: _Filters(controller: controller, compact: true),
+                      )
+                    : const SizedBox.shrink(),
+              ),
+            ] else
+              _Filters(controller: controller),
+            if (controller.hasSelection) ...[
+              const SizedBox(height: 12),
+              _BulkToolbar(controller: controller, onDelete: _bulkDelete),
+            ],
+            SizedBox(height: mobile ? 8 : 14),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Найдено товаров: ${controller.total}',
+                    style: const TextStyle(color: Color(0xFF8FA4C2)),
+                  ),
+                ),
+                if (controller.loading)
+                  const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
                   ),
               ],
             ),
-          ),
-          const SizedBox(height: 12),
-          _Filters(controller: controller),
-          if (controller.hasSelection) ...[
-            const SizedBox(height: 12),
-            _BulkToolbar(controller: controller, onDelete: _bulkDelete),
           ],
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Найдено товаров: ${controller.total}',
-                  style: const TextStyle(color: Color(0xFF8FA4C2)),
-                ),
-              ),
-              if (controller.loading)
-                const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-            ],
-          ),
           if (controller.error != null) ...[
             const SizedBox(height: 10),
             _InlineError(controller.error!),
@@ -206,7 +254,7 @@ class _CatalogPageState extends State<CatalogPage> {
                         >= 1250 => 5,
                         >= 970 => 4,
                         >= 700 => 3,
-                        >= 430 => 2,
+                        >= 600 => 2,
                         _ => 1,
                       };
                       return GridView.builder(
@@ -215,7 +263,7 @@ class _CatalogPageState extends State<CatalogPage> {
                           crossAxisCount: columns,
                           crossAxisSpacing: 12,
                           mainAxisSpacing: 12,
-                          childAspectRatio: columns == 1 ? 1.55 : 0.82,
+                          childAspectRatio: columns == 1 ? 0.96 : 0.82,
                         ),
                         itemCount: controller.items.length,
                         itemBuilder: (context, index) {
@@ -467,8 +515,61 @@ class _CatalogPageState extends State<CatalogPage> {
   }
 }
 
+final class _MobileControlsToggle extends StatelessWidget {
+  const _MobileControlsToggle({
+    required this.expanded,
+    required this.total,
+    required this.selectedCount,
+    required this.onTap,
+  });
+
+  final bool expanded;
+  final int total;
+  final int selectedCount;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: const Color(0xFF131D2A),
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(10),
+      side: const BorderSide(color: Color(0xFF29384D)),
+    ),
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          children: [
+            const Icon(Icons.tune, size: 18, color: Color(0xFF6DA2FF)),
+            const SizedBox(width: 9),
+            const Expanded(
+              child: Text(
+                'Управление каталогом',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+              ),
+            ),
+            Text(
+              selectedCount > 0 ? 'Выбрано: $selectedCount' : '$total',
+              style: const TextStyle(fontSize: 11, color: Color(0xFF8FA4C2)),
+            ),
+            const SizedBox(width: 6),
+            AnimatedRotation(
+              turns: expanded ? .5 : 0,
+              duration: const Duration(milliseconds: 160),
+              child: const Icon(Icons.expand_more, size: 20),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
 final class _Header extends StatelessWidget {
   const _Header({
+    required this.compact,
     required this.loading,
     required this.transferBusy,
     required this.onRefresh,
@@ -477,6 +578,7 @@ final class _Header extends StatelessWidget {
     required this.onExport,
     required this.onCreate,
   });
+  final bool compact;
   final bool loading;
   final bool transferBusy;
   final VoidCallback onRefresh;
@@ -485,61 +587,129 @@ final class _Header extends StatelessWidget {
   final VoidCallback onExport;
   final VoidCallback onCreate;
   @override
-  Widget build(BuildContext context) => Wrap(
-    alignment: WrapAlignment.spaceBetween,
-    crossAxisAlignment: WrapCrossAlignment.center,
-    spacing: 16,
-    runSpacing: 12,
-    children: [
-      const Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  Widget build(BuildContext context) {
+    if (compact) {
+      return Row(
         children: [
-          Text(
-            'Каталог товаров',
-            style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
+          Expanded(
+            child: FilledButton.icon(
+              key: const Key('catalog-create'),
+              onPressed: onCreate,
+              icon: const Icon(Icons.add, size: 19),
+              label: const Text('Добавить товар'),
+            ),
           ),
-          SizedBox(height: 4),
-          Text(
-            'Карточки и структура текущей организации',
-            style: TextStyle(color: Color(0xFF8298B8)),
+          const SizedBox(width: 8),
+          PopupMenuButton<String>(
+            tooltip: 'Действия с каталогом',
+            enabled: !transferBusy,
+            onSelected: (value) {
+              switch (value) {
+                case 'refresh':
+                  onRefresh();
+                case 'template':
+                  onTemplate();
+                case 'import':
+                  onImport();
+                case 'export':
+                  onExport();
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: 'refresh',
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(Icons.refresh),
+                  title: Text('Обновить'),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'template',
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(Icons.description_outlined),
+                  title: Text('Скачать шаблон'),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'import',
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(Icons.upload_file_outlined),
+                  title: Text('Импорт'),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'export',
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(Icons.download_outlined),
+                  title: Text('Экспорт'),
+                ),
+              ),
+            ],
+            icon: const Icon(Icons.more_horiz),
           ),
         ],
-      ),
-      Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          IconButton(
-            tooltip: 'Обновить',
-            onPressed: loading ? null : onRefresh,
-            icon: const Icon(Icons.refresh),
-          ),
-          OutlinedButton.icon(
-            onPressed: transferBusy ? null : onTemplate,
-            icon: const Icon(Icons.description_outlined),
-            label: const Text('Шаблон'),
-          ),
-          OutlinedButton.icon(
-            onPressed: transferBusy ? null : onImport,
-            icon: const Icon(Icons.upload_file_outlined),
-            label: const Text('Импорт'),
-          ),
-          OutlinedButton.icon(
-            onPressed: transferBusy ? null : onExport,
-            icon: const Icon(Icons.download_outlined),
-            label: const Text('Экспорт'),
-          ),
-          FilledButton.icon(
-            key: const Key('catalog-create'),
-            onPressed: onCreate,
-            icon: const Icon(Icons.add),
-            label: const Text('Добавить товар'),
-          ),
-        ],
-      ),
-    ],
-  );
+      );
+    }
+    return Wrap(
+      alignment: WrapAlignment.spaceBetween,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 16,
+      runSpacing: 12,
+      children: [
+        const Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Каталог товаров',
+              style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
+            ),
+            SizedBox(height: 4),
+            Text(
+              'Карточки и структура текущей организации',
+              style: TextStyle(color: Color(0xFF8298B8)),
+            ),
+          ],
+        ),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            IconButton(
+              tooltip: 'Обновить',
+              onPressed: loading ? null : onRefresh,
+              icon: const Icon(Icons.refresh),
+            ),
+            OutlinedButton.icon(
+              onPressed: transferBusy ? null : onTemplate,
+              icon: const Icon(Icons.description_outlined),
+              label: const Text('Шаблон'),
+            ),
+            OutlinedButton.icon(
+              onPressed: transferBusy ? null : onImport,
+              icon: const Icon(Icons.upload_file_outlined),
+              label: const Text('Импорт'),
+            ),
+            OutlinedButton.icon(
+              onPressed: transferBusy ? null : onExport,
+              icon: const Icon(Icons.download_outlined),
+              label: const Text('Экспорт'),
+            ),
+            FilledButton.icon(
+              key: const Key('catalog-create'),
+              onPressed: onCreate,
+              icon: const Icon(Icons.add),
+              label: const Text('Добавить товар'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
 }
 
 final class _CategoryChip extends StatelessWidget {
@@ -563,17 +733,19 @@ final class _CategoryChip extends StatelessWidget {
 }
 
 final class _Filters extends StatelessWidget {
-  const _Filters({required this.controller});
+  const _Filters({required this.controller, this.compact = false});
   final CatalogController controller;
+  final bool compact;
   @override
   Widget build(BuildContext context) {
     final category = controller.selectedCategory;
+    final fieldWidth = compact ? double.infinity : null;
     return Wrap(
       spacing: 10,
       runSpacing: 10,
       children: [
         SizedBox(
-          width: 210,
+          width: fieldWidth ?? 210,
           child: AppSelectField<String>(
             value: controller.sectionId,
             label: 'Раздел',
@@ -589,7 +761,7 @@ final class _Filters extends StatelessWidget {
           ),
         ),
         SizedBox(
-          width: 190,
+          width: fieldWidth ?? 190,
           child: AppSelectField<String>(
             value: controller.status,
             label: 'Статус',

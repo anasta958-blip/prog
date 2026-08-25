@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
+import 'package:sklad_komforta_app/core/widgets/mobile_collapsible_navigation.dart';
 import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_controller.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_page.dart';
@@ -74,7 +75,19 @@ class _WorkspacePageState extends State<WorkspacePage> {
           if (!desktop) {
             return Scaffold(
               appBar: AppBar(
-                title: const Text('Склад Комфорта'),
+                toolbarHeight: 48,
+                titleSpacing: 0,
+                title: Text(
+                  switch (selectedIndex) {
+                    1 => companySection.label,
+                    2 => 'Активные устройства',
+                    _ => 'Каталог товаров',
+                  },
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
                 backgroundColor: const Color(0xFF101823),
               ),
               drawer: Drawer(
@@ -350,28 +363,40 @@ final class _SessionsPage extends StatelessWidget {
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: controller,
     builder: (context, _) => Padding(
-      padding: const EdgeInsets.all(28),
+      padding: EdgeInsets.all(MediaQuery.sizeOf(context).width < 600 ? 12 : 28),
       child: ListView(
         children: [
-          Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  'Активные устройства',
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
+          MobileCollapsibleNavigation(
+            title: 'Управление устройствами',
+            summary: '${controller.sessions.length}',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Активные устройства',
+                        style: TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Выйти',
+                      onPressed: controller.busy ? null : controller.logout,
+                      icon: const Icon(Icons.logout),
+                    ),
+                  ],
                 ),
-              ),
-              IconButton(
-                tooltip: 'Выйти',
-                onPressed: controller.busy ? null : controller.logout,
-                icon: const Icon(Icons.logout),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Управление действующими refresh-сессиями учётной записи.',
-            style: TextStyle(color: Color(0xFF8FA4C2)),
+                const SizedBox(height: 8),
+                const Text(
+                  'Управление действующими refresh-сессиями учётной записи.',
+                  style: TextStyle(color: Color(0xFF8FA4C2)),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 24),
           for (final session in controller.sessions)

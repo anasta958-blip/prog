@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
+import 'package:sklad_komforta_app/core/widgets/mobile_collapsible_navigation.dart';
 import 'package:sklad_komforta_app/features/company/company_controller.dart';
 import 'package:sklad_komforta_app/features/company/company_models.dart';
 import 'package:sklad_komforta_app/features/onboarding/organization_onboarding_page.dart';
@@ -570,37 +571,44 @@ final class _SectionHeader extends StatelessWidget {
   final String subtitle;
   final Widget? trailing;
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.fromLTRB(24, 20, 24, 18),
-    decoration: const BoxDecoration(
-      color: Color(0xFF101823),
-      border: Border(bottom: BorderSide(color: Color(0xFF253348))),
-    ),
-    child: Wrap(
-      alignment: WrapAlignment.spaceBetween,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      runSpacing: 12,
-      spacing: 20,
-      children: [
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 650),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 23,
-                  fontWeight: FontWeight.w800,
+  Widget build(BuildContext context) => MobileCollapsibleNavigation(
+    title: 'Управление разделом',
+    summary: title,
+    child: Container(
+      padding: const EdgeInsets.fromLTRB(24, 20, 24, 18),
+      decoration: const BoxDecoration(
+        color: Color(0xFF101823),
+        border: Border(bottom: BorderSide(color: Color(0xFF253348))),
+      ),
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        runSpacing: 12,
+        spacing: 20,
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 650),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 23,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 4),
-              Text(subtitle, style: const TextStyle(color: Color(0xFF8FA4C2))),
-            ],
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: const TextStyle(color: Color(0xFF8FA4C2)),
+                ),
+              ],
+            ),
           ),
-        ),
-        ?trailing,
-      ],
+          ?trailing,
+        ],
+      ),
     ),
   );
 }
