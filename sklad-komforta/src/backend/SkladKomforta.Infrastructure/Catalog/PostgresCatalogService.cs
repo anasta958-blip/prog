@@ -696,8 +696,8 @@ internal sealed class PostgresCatalogService(
         {
             fields.CommandText = """
                 SELECT category.id, category.name, category.sort_order,
-                       field.field_code, field.is_visible, field.is_required, field.sort_order,
-                       field.dictionary_code
+                       field.field_code, field.label, field.is_visible, field.is_required,
+                       field.sort_order, field.dictionary_code, field.field_type
                 FROM catalog_categories AS category
                 LEFT JOIN catalog_category_fields AS field ON field.category_id = category.id
                 ORDER BY category.sort_order, field.sort_order
@@ -713,15 +713,18 @@ internal sealed class PostgresCatalogService(
                 }
                 if (!reader.IsDBNull(3))
                 {
-                    var definition = OnboardingFieldRegistry.Get(reader.GetString(3));
+                    var code = reader.GetString(3);
+                    var systemDefinition = OnboardingFieldRegistry.IsSystemField(code)
+                        ? OnboardingFieldRegistry.Get(code)
+                        : null;
                     category.Fields.Add(new CatalogFieldSummary(
-                        definition.Code,
-                        definition.Label,
-                        definition.FieldType,
-                        reader.GetBoolean(4),
+                        code,
+                        reader.IsDBNull(4) ? systemDefinition?.Label ?? code : reader.GetString(4),
+                        reader.GetString(9),
                         reader.GetBoolean(5),
-                        reader.GetInt32(6),
-                        reader.IsDBNull(7) ? null : reader.GetString(7)));
+                        reader.GetBoolean(6),
+                        reader.GetInt32(7),
+                        reader.IsDBNull(8) ? null : reader.GetString(8)));
                 }
             }
         }
@@ -819,34 +822,48 @@ internal sealed class PostgresCatalogService(
         if (values.Keys.Any(string.IsNullOrWhiteSpace) || values.Keys.Any(ReservedValueCodes.Contains))
             throw Invalid("catalog_field_invalid", "Системные поля карточки нельзя передавать в наборе значений.");
 
-        var configured = new Dictionary<string, bool>(StringComparer.Ordinal);
+        var configured = new Dictionary<string, ConfiguredCatalogField>(StringComparer.Ordinal);
         await using (var fields = connection.CreateCommand())
         {
             fields.Transaction = transaction;
             fields.CommandText = """
-                SELECT field.field_code, field.is_required
+                SELECT field.field_code, field.is_required, field.label, field.field_type
                 FROM catalog_categories AS category
                 JOIN catalog_category_fields AS field ON field.category_id = category.id
                 WHERE category.id = @category_id
                 """;
             AddParameter(fields, "category_id", request.CategoryId);
             await using var reader = await fields.ExecuteReaderAsync(token);
-            while (await reader.ReadAsync(token)) configured.Add(reader.GetString(0), reader.GetBoolean(1));
+            while (await reader.ReadAsync(token))
+            {
+                var code = reader.GetString(0);
+                configured.Add(
+                    code,
+                    new ConfiguredCatalogField(
+                        reader.GetBoolean(1),
+                        reader.IsDBNull(2)
+                            ? (OnboardingFieldRegistry.IsSystemField(code)
+                                ? OnboardingFieldRegistry.Get(code).Label
+                                : code)
+                            : reader.GetString(2),
+                        reader.GetString(3)));
+            }
         }
         if (configured.Count == 0)
             throw Invalid("catalog_category_invalid", "Категория каталога не найдена или не имеет полей.");
         if (values.Keys.Any(code => !configured.ContainsKey(code)))
             throw Invalid("catalog_field_invalid", "Карточка содержит поле, не настроенное для выбранной категории.");
-        if (configured.GetValueOrDefault("marking") && string.IsNullOrEmpty(marking))
+        if (configured.GetValueOrDefault("marking")?.IsRequired is true && string.IsNullOrEmpty(marking))
             throw Invalid("catalog_required_field_missing", "Заполните обязательное поле «Маркировка / размер».");
-        if (configured.GetValueOrDefault("group") && request.GroupId is null)
+        if (configured.GetValueOrDefault("group")?.IsRequired is true && request.GroupId is null)
             throw Invalid("catalog_required_field_missing", "Выберите обязательную группу.");
-        foreach (var field in configured.Where(item => item.Value && !ReservedValueCodes.Contains(item.Key)))
+        foreach (var field in configured.Where(item => item.Value.IsRequired && !ReservedValueCodes.Contains(item.Key)))
         {
             if (!values.TryGetValue(field.Key, out var value) || IsEmpty(value))
-                throw Invalid("catalog_required_field_missing", $"Заполните обязательное поле «{OnboardingFieldRegistry.Get(field.Key).Label}».");
+                throw Invalid("catalog_required_field_missing", $"Заполните обязательное поле «{field.Value.Label}».");
         }
-        foreach (var value in values) ValidateValue(value.Key, value.Value);
+        foreach (var value in values)
+            ValidateValue(value.Key, value.Value, configured[value.Key]);
 
         await ValidateStructureAsync(connection, transaction, request.CategoryId, request.SectionId, request.GroupId, token);
         return new NormalizedItem(
@@ -859,11 +876,10 @@ internal sealed class PostgresCatalogService(
             values);
     }
 
-    private static void ValidateValue(string code, JsonElement value)
+    private static void ValidateValue(string code, JsonElement value, ConfiguredCatalogField field)
     {
         if (value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined) return;
-        var definition = OnboardingFieldRegistry.Get(code);
-        var valid = definition.FieldType switch
+        var valid = field.FieldType switch
         {
             "text" or "dictionary" or "enum" => value.ValueKind == JsonValueKind.String,
             "number" or "money" or "percent" => TryDecimal(value, out _),
@@ -873,7 +889,7 @@ internal sealed class PostgresCatalogService(
             _ => false,
         };
         if (!valid)
-            throw Invalid("catalog_field_type_invalid", $"Поле «{definition.Label}» имеет неверный тип значения.");
+            throw Invalid("catalog_field_type_invalid", $"Поле «{field.Label}» имеет неверный тип значения.");
         if (code == "base_price" && TryDecimal(value, out var price) && !CatalogItemRules.IsValidPrice(price))
             throw Invalid("catalog_price_invalid", "Цена товара должна быть больше нуля.");
     }
@@ -1244,6 +1260,8 @@ internal sealed class PostgresCatalogService(
             npgsqlParameter.NpgsqlDbType = NpgsqlDbType.Uuid;
         command.Parameters.Add(parameter);
     }
+
+    private sealed record ConfiguredCatalogField(bool IsRequired, string Label, string FieldType);
 
     private sealed record NormalizedItem(
         Guid CategoryId,

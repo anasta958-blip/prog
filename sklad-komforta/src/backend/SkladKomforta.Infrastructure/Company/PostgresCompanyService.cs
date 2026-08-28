@@ -1,6 +1,8 @@
 using System.Data.Common;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Npgsql;
+using SkladKomforta.Application.Abstractions.Files;
 using SkladKomforta.Application.Abstractions.Persistence;
 using SkladKomforta.Application.Abstractions.Tenancy;
 using SkladKomforta.Application.Company;
@@ -12,9 +14,16 @@ namespace SkladKomforta.Infrastructure.Company;
 /// <summary>Работает с единственным профилем организации в текущей tenant-схеме.</summary>
 internal sealed class PostgresCompanyService(
     IDatabaseConnectionFactory connectionFactory,
-    ITenantContext tenantContext) : ICompanyService
+    ITenantContext tenantContext,
+    IObjectStorage objectStorage,
+    ILogger<PostgresCompanyService> logger) : ICompanyService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly Action<ILogger, string, Exception?> LogObjectDeleteFailed =
+        LoggerMessage.Define<string>(
+            LogLevel.Error,
+            new EventId(2101, nameof(LogObjectDeleteFailed)),
+            "Не удалось удалить объект {ObjectKey} после удаления категории каталога.");
 
     public async Task<OrganizationOnboardingDraft> GetConfigurationAsync(
         CancellationToken cancellationToken)
@@ -22,21 +31,49 @@ internal sealed class PostgresCompanyService(
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
         var draft = await ReadDraftAsync(connection, cancellationToken);
         var profile = await ReadAsync(connection, cancellationToken);
-        return draft with { Company = ToDraft(profile), CurrentStep = 8 };
+        return draft with { Company = ToDraft(profile), CurrentStep = 9 };
     }
 
     public async Task<OrganizationOnboardingDraft> UpdateConfigurationAsync(
         Guid userId,
         OrganizationOnboardingDraft draft,
+        IReadOnlyList<string> deleteCategoryData,
         CancellationToken cancellationToken)
     {
-        var normalized = draft with { CurrentStep = 8 };
-        OnboardingValidator.Validate(normalized, true);
+        var normalized = draft with { CurrentStep = 9 };
+        // Рабочая конфигурация уже активирована. При её редактировании проверяем
+        // структуру и ссылки, но не требования мастера первичной активации:
+        // удаление категории может временно оставить канбан без категорий.
+        OnboardingValidator.Validate(normalized, false);
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
         var previous = await ReadDraftAsync(connection, cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var objectKeysToDelete = new List<string>();
         try
         {
+            var deletions = await PrepareCategoryDeletionsAsync(
+                connection, transaction, previous, normalized,
+                deleteCategoryData, cancellationToken);
+            foreach (var deletion in deletions)
+            {
+                objectKeysToDelete.AddRange(deletion.ObjectKeys);
+                await ExecuteAsync(connection, transaction,
+                    "DELETE FROM catalog_items WHERE category_id = @category_id",
+                    cancellationToken, ("category_id", deletion.CategoryId));
+                await ExecuteAsync(connection, transaction, """
+                    INSERT INTO audit_log (actor_user_id, entity_type, entity_id, action, diff)
+                    VALUES (@user_id, 'catalog_category', @category_id,
+                            'deleted_with_data', CAST(@diff AS jsonb))
+                    """, cancellationToken,
+                    ("user_id", userId), ("category_id", deletion.CategoryId),
+                    ("diff", JsonSerializer.Serialize(new
+                    {
+                        categoryName = deletion.Impact.CategoryName,
+                        itemCount = deletion.Impact.ItemCount,
+                        imageCount = deletion.Impact.ImageCount,
+                        relationCount = deletion.Impact.RelationCount
+                    }, JsonOptions)));
+            }
             await UpdateProfileAsync(connection, transaction, userId, normalized.Company, cancellationToken);
             await SyncDictionariesAsync(connection, transaction, normalized.Dictionaries, cancellationToken);
             await ExecuteAsync(connection, transaction, "DELETE FROM catalog_category_dependencies", cancellationToken);
@@ -52,7 +89,7 @@ internal sealed class PostgresCompanyService(
 
             await ExecuteAsync(connection, transaction, """
                 UPDATE onboarding_draft
-                SET current_step = 8, payload = CAST(@payload AS jsonb),
+                SET current_step = 9, payload = CAST(@payload AS jsonb),
                     updated_by = @user_id, updated_at = now()
                 WHERE singleton
                 """, cancellationToken,
@@ -65,7 +102,6 @@ internal sealed class PostgresCompanyService(
                 ("user_id", userId), ("organization_id", tenantContext.OrganizationId),
                 ("diff", JsonSerializer.Serialize(new { before = previous, after = normalized }, JsonOptions)));
             await transaction.CommitAsync(cancellationToken);
-            return normalized;
         }
         catch (PostgresException exception) when (exception.SqlState is "23503" or "23505")
         {
@@ -76,6 +112,39 @@ internal sealed class PostgresCompanyService(
                     ? "Нельзя удалить элемент настройки, который используется в рабочих данных."
                     : "В настройках организации обнаружены повторяющиеся значения.");
         }
+
+        foreach (var objectKey in objectKeysToDelete.Distinct(StringComparer.Ordinal))
+        {
+            try
+            {
+                await objectStorage.DeleteAsync(objectKey, CancellationToken.None);
+            }
+            catch (Exception exception)
+            {
+                LogObjectDeleteFailed(logger, objectKey, exception);
+            }
+        }
+        return normalized;
+    }
+
+    public async Task<CategoryDeletionImpact> GetCategoryDeletionImpactAsync(
+        string categoryClientId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
+        var draft = await ReadDraftAsync(connection, cancellationToken);
+        var categoryIndex = draft.Categories.ToList().FindIndex(
+            category => category.ClientId == categoryClientId);
+        if (categoryIndex < 0)
+            throw new IdentityException(404, "catalog_category_not_found", "Категория не найдена.");
+
+        var rows = await ReadOrderedRowsAsync(
+            connection, null, "SELECT id, name FROM catalog_categories ORDER BY sort_order", cancellationToken);
+        if (categoryIndex >= rows.Count)
+            throw new IdentityException(409, "organization_configuration_invalid", "Настройки каталога не соответствуют данным базы.");
+
+        return await ReadCategoryDeletionImpactAsync(
+            connection, null, categoryClientId, rows[categoryIndex], cancellationToken);
     }
 
     public async Task<CompanyProfile> GetAsync(CancellationToken cancellationToken)
@@ -138,6 +207,119 @@ internal sealed class PostgresCompanyService(
             ? JsonSerializer.Deserialize<OrganizationOnboardingDraft>(payload, JsonOptions)
               ?? throw new IdentityException(500, "organization_configuration_invalid", "Настройки организации повреждены.")
             : throw new IdentityException(404, "organization_configuration_not_found", "Настройки организации не найдены.");
+    }
+
+    private static async Task<IReadOnlyList<CategoryDeletionPlan>> PrepareCategoryDeletionsAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        OrganizationOnboardingDraft previous,
+        OrganizationOnboardingDraft next,
+        IReadOnlyList<string> approvedCategoryClientIds,
+        CancellationToken token)
+    {
+        var retainedIds = next.Categories
+            .Select(category => category.ClientId)
+            .ToHashSet(StringComparer.Ordinal);
+        var removedCategories = previous.Categories
+            .Select((category, index) => (Category: category, Index: index))
+            .Where(item => !retainedIds.Contains(item.Category.ClientId))
+            .ToArray();
+        var removedIds = removedCategories
+            .Select(item => item.Category.ClientId)
+            .ToHashSet(StringComparer.Ordinal);
+        var approvedIds = approvedCategoryClientIds.ToHashSet(StringComparer.Ordinal);
+
+        if (approvedIds.Except(removedIds).Any())
+            throw new IdentityException(
+                400,
+                "catalog_category_delete_confirmation_invalid",
+                "Разрешение на удаление данных относится к категории, которая не удаляется.");
+
+        var rows = await ReadOrderedRowsAsync(
+            connection, transaction,
+            "SELECT id, name FROM catalog_categories ORDER BY sort_order", token);
+        var result = new List<CategoryDeletionPlan>();
+        foreach (var removed in removedCategories)
+        {
+            if (removed.Index >= rows.Count)
+                throw new IdentityException(
+                    409,
+                    "organization_configuration_invalid",
+                    "Настройки каталога не соответствуют данным базы.");
+
+            var row = rows[removed.Index];
+            var impact = await ReadCategoryDeletionImpactAsync(
+                connection, transaction, removed.Category.ClientId, row, token);
+            if (!approvedIds.Contains(removed.Category.ClientId))
+            {
+                if (impact.ItemCount > 0 || impact.ImageCount > 0 || impact.RelationCount > 0)
+                    throw new IdentityException(
+                        409,
+                        "catalog_category_not_empty",
+                        $"Категория «{impact.CategoryName}» содержит рабочие данные. Подтвердите их удаление отдельно.");
+                continue;
+            }
+
+            var objectKeys = await ReadCategoryImageObjectKeysAsync(
+                connection, transaction, row.Id, token);
+            result.Add(new CategoryDeletionPlan(row.Id, impact, objectKeys));
+        }
+        return result;
+    }
+
+    private static async Task<CategoryDeletionImpact> ReadCategoryDeletionImpactAsync(
+        DbConnection connection,
+        DbTransaction? transaction,
+        string categoryClientId,
+        ExistingRow category,
+        CancellationToken token)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT
+                (SELECT count(*) FROM catalog_items item
+                 WHERE item.category_id = @category_id),
+                (SELECT count(*) FROM catalog_item_images image
+                 JOIN catalog_items item ON item.id = image.catalog_item_id
+                 WHERE item.category_id = @category_id),
+                (SELECT count(DISTINCT relation.id)
+                 FROM catalog_item_relations relation
+                 JOIN catalog_items target_item ON target_item.id = relation.target_item_id
+                 JOIN catalog_items source_item ON source_item.id = relation.source_item_id
+                 WHERE target_item.category_id = @category_id
+                    OR source_item.category_id = @category_id)
+            """;
+        Add(command, "category_id", category.Id);
+        await using var reader = await command.ExecuteReaderAsync(token);
+        await reader.ReadAsync(token);
+        return new CategoryDeletionImpact(
+            categoryClientId,
+            category.Key,
+            checked((int)reader.GetInt64(0)),
+            checked((int)reader.GetInt64(1)),
+            checked((int)reader.GetInt64(2)));
+    }
+
+    private static async Task<IReadOnlyList<string>> ReadCategoryImageObjectKeysAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        Guid categoryId,
+        CancellationToken token)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT image.object_key
+            FROM catalog_item_images image
+            JOIN catalog_items item ON item.id = image.catalog_item_id
+            WHERE item.category_id = @category_id
+            """;
+        Add(command, "category_id", categoryId);
+        var result = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync(token);
+        while (await reader.ReadAsync(token)) result.Add(reader.GetString(0));
+        return result;
     }
 
     private async Task UpdateProfileAsync(
@@ -227,9 +409,11 @@ internal sealed class PostgresCompanyService(
                 var field = category.Fields[fieldIndex];
                 await ExecuteAsync(connection, transaction, """
                     INSERT INTO catalog_category_fields
-                        (category_id, field_code, is_visible, is_required, sort_order, dictionary_code)
-                    VALUES (@category_id, @code, @visible, @required, @sort, @dictionary_code)
+                        (category_id, field_code, label, field_type, is_visible, is_required, sort_order, dictionary_code)
+                    VALUES (@category_id, @code, @label, @field_type, @visible, @required, @sort, @dictionary_code)
                     """, token, ("category_id", id), ("code", field.FieldCode.Trim()),
+                    ("label", OnboardingFieldRegistry.LabelOf(field)),
+                    ("field_type", OnboardingFieldRegistry.FieldTypeOf(field)),
                     ("visible", field.IsVisible), ("required", field.IsRequired), ("sort", fieldIndex),
                     ("dictionary_code", Db(field.DictionaryCode)));
             }
@@ -440,7 +624,7 @@ internal sealed class PostgresCompanyService(
 
     private static async Task<List<ExistingRow>> ReadOrderedRowsAsync(
         DbConnection connection,
-        DbTransaction transaction,
+        DbTransaction? transaction,
         string sql,
         CancellationToken token,
         Guid? parent = null)
@@ -498,6 +682,10 @@ internal sealed class PostgresCompanyService(
         profile.Kpp, profile.Ogrn, profile.Address, profile.Phone, profile.Email);
 
     private sealed record ExistingRow(Guid Id, string Key);
+    private sealed record CategoryDeletionPlan(
+        Guid CategoryId,
+        CategoryDeletionImpact Impact,
+        IReadOnlyList<string> ObjectKeys);
 
     private static async Task<CompanyProfile> ReadAsync(
         DbConnection connection,

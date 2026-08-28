@@ -13,8 +13,8 @@ public static class OnboardingValidator
     /// </summary>
     public static void Validate(OrganizationOnboardingDraft draft, bool forActivation)
     {
-        if (draft.CurrentStep is < 1 or > 8)
-            Fail("onboarding_step_invalid", "Номер шага должен быть от 1 до 8.");
+        if (draft.CurrentStep is < 1 or > 9)
+            Fail("onboarding_step_invalid", "Номер шага должен быть от 1 до 9.");
 
         ValidateCompany(draft.Company);
         ValidateUnique(draft.Workflows.Select(item => item.Code), "Коды канбанов");
@@ -48,6 +48,9 @@ public static class OnboardingValidator
             RequireText(category.ClientId, 1, 80, "Идентификатор категории");
             RequireText(category.Name, 1, 120, "Название категории");
             ValidateUnique(category.Fields.Select(item => item.FieldCode), $"Поля категории «{category.Name}»");
+            ValidateUnique(
+                category.Fields.Select(OnboardingFieldRegistry.LabelOf),
+                $"Названия полей категории «{category.Name}»");
             ValidateFieldSelection(category.Fields, $"категории «{category.Name}»");
             ValidateUnique(category.Sections.Select(item => item.Name), "Названия разделов");
             foreach (var section in category.Sections)
@@ -60,6 +63,11 @@ public static class OnboardingValidator
 
         ValidateWorkflowCategories(draft.Workflows, draft.Categories);
         ValidateDependencies(draft.Categories, draft.Dependencies ?? []);
+        ValidateRules(
+            draft.Categories,
+            draft.Dependencies ?? [],
+            draft.Rules ?? [],
+            draft.MoneyPipelines ?? []);
         ValidateDictionaryBindings(draft);
 
         ValidateUnique(draft.Fields.Select(item => $"{item.ContextCode}:{item.FieldCode}"), "Коды полей");
@@ -101,26 +109,37 @@ public static class OnboardingValidator
             .Select(item => item.Code.Trim())
             .ToHashSet(StringComparer.Ordinal);
         foreach (var field in draft.Categories.SelectMany(item => item.Fields))
-            ValidateDictionaryBinding(field.FieldCode, field.DictionaryCode, dictionaryCodes);
+            ValidateDictionaryBinding(
+                field.FieldCode,
+                OnboardingFieldRegistry.FieldTypeOf(field),
+                OnboardingFieldRegistry.LabelOf(field),
+                field.DictionaryCode,
+                dictionaryCodes);
         foreach (var field in draft.Fields)
-            ValidateDictionaryBinding(field.FieldCode, field.DictionaryCode, dictionaryCodes);
+            ValidateDictionaryBinding(
+                field.FieldCode,
+                field.FieldType,
+                field.Label,
+                field.DictionaryCode,
+                dictionaryCodes);
     }
 
     private static void ValidateDictionaryBinding(
         string fieldCode,
+        string fieldType,
+        string fieldLabel,
         string? dictionaryCode,
         HashSet<string> dictionaryCodes)
     {
         if (string.IsNullOrWhiteSpace(dictionaryCode)) return;
-        var definition = OnboardingFieldRegistry.Get(fieldCode);
         if (fieldCode == "group")
             Fail(
                 "onboarding_dictionary_binding_invalid",
                 "Поле «Группа» использует группы выбранного раздела и не требует справочника.");
-        if (definition.FieldType != "dictionary")
-            Fail("onboarding_dictionary_binding_invalid", $"Поле «{definition.Label}» не поддерживает справочник.");
+        if (fieldType != "dictionary")
+            Fail("onboarding_dictionary_binding_invalid", $"Поле «{fieldLabel}» не поддерживает справочник.");
         if (!dictionaryCodes.Contains(dictionaryCode.Trim()))
-            Fail("onboarding_dictionary_binding_invalid", $"Для поля «{definition.Label}» выбран неизвестный справочник.");
+            Fail("onboarding_dictionary_binding_invalid", $"Для поля «{fieldLabel}» выбран неизвестный справочник.");
     }
 
     /// <summary>Проверяет реквизиты одинаково при onboarding и последующем редактировании.</summary>
@@ -159,13 +178,13 @@ public static class OnboardingValidator
                 ValidateUnique(
                     selection.FieldCodes,
                     $"Поля категории «{category.Name}» в канбане «{workflow.Name}»");
-                var categoryFields = category.Fields
-                    .Select(item => item.FieldCode)
-                    .ToHashSet(StringComparer.Ordinal);
                 foreach (var fieldCode in selection.FieldCodes)
                 {
-                    var definition = OnboardingFieldRegistry.Get(fieldCode);
-                    if (!definition.IsCalculated && !categoryFields.Contains(definition.Code))
+                    var categoryField = category.Fields.FirstOrDefault(item => item.FieldCode == fieldCode);
+                    var definition = categoryField is null
+                        ? OnboardingFieldRegistry.Get(fieldCode)
+                        : OnboardingFieldRegistry.DefinitionOf(categoryField);
+                    if (!definition.IsCalculated && categoryField is null)
                         Fail("onboarding_workflow_field_invalid",
                             $"Поле «{definition.Label}» не настроено в категории «{category.Name}».");
                 }
@@ -202,10 +221,223 @@ public static class OnboardingValidator
             if (targetField is null)
                 Fail("onboarding_dependency_field_invalid",
                     $"В категории «{target.Name}» отсутствует поле для выбранной зависимости.");
-            if (OnboardingFieldRegistry.Get(targetField.FieldCode).FieldType != "relation")
+            if (OnboardingFieldRegistry.FieldTypeOf(targetField) != "relation")
                 Fail("onboarding_dependency_field_invalid",
-                    $"Поле «{OnboardingFieldRegistry.Get(targetField.FieldCode).Label}» не хранит связи.");
+                    $"Поле «{OnboardingFieldRegistry.LabelOf(targetField)}» не хранит связи.");
         }
+    }
+
+    /// <summary>Проверяет событийные правила и настройки фиксированного денежного конвейера.</summary>
+    private static void ValidateRules(
+        IReadOnlyList<CatalogCategoryDraft> categories,
+        IReadOnlyList<CategoryDependencyDraft> dependencies,
+        IReadOnlyList<CalculationRuleDraft> rules,
+        IReadOnlyList<MoneyPipelineDraft> pipelines)
+    {
+        ValidateUnique(rules.Select(item => item.ClientId), "Идентификаторы правил");
+        ValidateUnique(
+            rules.Select(item => $"{item.CategoryClientId}:{item.Name}"),
+            "Названия правил внутри категории");
+        ValidateUnique(
+            pipelines.Select(item => item.CategoryClientId),
+            "Денежные конвейеры категорий");
+
+        var categoriesById = categories.ToDictionary(item => item.ClientId, StringComparer.Ordinal);
+        var dependenciesById = dependencies.ToDictionary(item => item.ClientId, StringComparer.Ordinal);
+
+        foreach (var pipeline in pipelines)
+        {
+            var category = RequireRuleCategory(categoriesById, pipeline.CategoryClientId);
+            var fields = category.Fields.ToDictionary(item => item.FieldCode, StringComparer.Ordinal);
+            RequireRuleField(fields, pipeline.BasePriceFieldCode, ["money", "calculated_money"], "Базовая цена");
+            RequireOptionalRuleField(fields, pipeline.ManualPriceFieldCode, ["money"], "Ручная цена");
+            RequireOptionalRuleField(fields, pipeline.MarkupFieldCode, ["percent"], "Наценка");
+            RequireOptionalRuleField(fields, pipeline.DiscountFieldCode, ["percent"], "Скидка");
+            RequireOptionalRuleField(fields, pipeline.QuantityFieldCode, ["number"], "Количество");
+            RequireRuleField(fields, pipeline.ResultFieldCode, ["money", "calculated_money"], "Поле результата");
+            if (pipeline.DecimalPlaces is < 0 or > 6)
+                Fail("onboarding_rule_invalid", "Округление денежного конвейера должно быть от 0 до 6 знаков.");
+        }
+
+        foreach (var rule in rules)
+        {
+            RequireText(rule.ClientId, 1, 100, "Идентификатор правила");
+            RequireText(rule.Name, 1, 120, "Название правила");
+            var category = RequireRuleCategory(categoriesById, rule.CategoryClientId);
+            var fields = category.Fields.ToDictionary(item => item.FieldCode, StringComparer.Ordinal);
+            RequireAllowed(
+                rule.EventType,
+                ["field_changed", "card_saving", "row_calculation", "variant_calculation"],
+                "Событие правила");
+            if (rule.EventType == "field_changed")
+                RequireRuleField(fields, rule.EventFieldCode, null, "Поле события");
+            else if (!string.IsNullOrWhiteSpace(rule.EventFieldCode))
+                Fail("onboarding_rule_invalid", "Поле события задаётся только для изменения поля.");
+
+            foreach (var condition in rule.Conditions)
+                ValidateCondition(fields, condition);
+            if (rule.Actions.Count == 0)
+                Fail("onboarding_rule_invalid", $"В правиле «{rule.Name}» отсутствуют действия.");
+            foreach (var action in rule.Actions)
+                ValidateAction(fields, dependenciesById, category.ClientId, action);
+        }
+    }
+
+    private static CatalogCategoryDraft RequireRuleCategory(
+        Dictionary<string, CatalogCategoryDraft> categories,
+        string categoryClientId)
+    {
+        if (!categories.TryGetValue(categoryClientId, out var category))
+            Fail("onboarding_rule_category_invalid", "Правило ссылается на неизвестную категорию.");
+        return category;
+    }
+
+    private static void ValidateCondition(
+        IReadOnlyDictionary<string, CatalogFieldDraft> fields,
+        RuleConditionDraft condition)
+    {
+        var field = RequireRuleField(fields, condition.FieldCode, null, "Поле условия");
+        var fieldType = OnboardingFieldRegistry.FieldTypeOf(field);
+        RequireAllowed(
+            condition.Operator,
+            ["is_true", "is_false", "greater_than_zero", "is_filled", "equals"],
+            "Условие");
+        if (condition.Operator is "is_true" or "is_false" && fieldType != "boolean")
+            Fail("onboarding_rule_field_invalid", "Условие по состоянию флажка применимо только к полю типа «Флажок».");
+        if (condition.Operator == "greater_than_zero" && !IsNumericField(fieldType))
+            Fail("onboarding_rule_field_invalid", "Сравнение с нулём применимо только к числовому полю.");
+        if (condition.Operator == "equals" && string.IsNullOrWhiteSpace(condition.ComparisonValue))
+            Fail("onboarding_rule_invalid", "Для сравнения укажите значение.");
+    }
+
+    private static void ValidateAction(
+        IReadOnlyDictionary<string, CatalogFieldDraft> fields,
+        Dictionary<string, CategoryDependencyDraft> dependencies,
+        string categoryClientId,
+        RuleActionDraft action)
+    {
+        RequireAllowed(
+            action.ActionType,
+            [
+                "exclude_row", "set_field", "calculate_field", "add_related_cards",
+                "remove_related_cards", "set_field_visibility", "block_save", "aggregate_money"
+            ],
+            "Действие");
+
+        switch (action.ActionType)
+        {
+            case "exclude_row":
+                return;
+            case "set_field":
+                RequireRuleField(fields, action.TargetFieldCode, null, "Изменяемое поле");
+                var hasSource = !string.IsNullOrWhiteSpace(action.SourceFieldCode);
+                var hasConstant = action.ConstantValue is not null;
+                if (hasSource == hasConstant)
+                    Fail("onboarding_rule_invalid", "Для изменения поля выберите одно исходное поле или одну константу.");
+                if (hasSource) RequireRuleField(fields, action.SourceFieldCode, null, "Исходное поле");
+                return;
+            case "calculate_field":
+                RequireRuleField(fields, action.TargetFieldCode, ["number", "money", "percent", "calculated_money"], "Поле результата");
+                ValidateFormula(fields, action.Formula);
+                return;
+            case "add_related_cards":
+            case "remove_related_cards":
+                if (string.IsNullOrWhiteSpace(action.DependencyClientId) ||
+                    !dependencies.TryGetValue(action.DependencyClientId, out var dependency) ||
+                    dependency.TargetCategoryClientId != categoryClientId)
+                    Fail("onboarding_rule_dependency_invalid", "Действие с карточками ссылается на неподходящую зависимость.");
+                return;
+            case "set_field_visibility":
+                RequireRuleField(fields, action.TargetFieldCode, null, "Поле видимости");
+                if (action.BooleanValue is null)
+                    Fail("onboarding_rule_invalid", "Для видимости поля выберите «Показать» или «Скрыть».");
+                return;
+            case "block_save":
+                RequireText(action.Message ?? string.Empty, 1, 300, "Сообщение запрета сохранения");
+                return;
+            case "aggregate_money":
+                RequireRuleField(fields, action.SourceFieldCode, ["money", "calculated_money"], "Денежное поле");
+                RequireAllowed(action.AggregationOperation, ["add", "subtract"], "Операция агрегации");
+                RequireAllowed(action.AggregationTarget, ["variant_total"], "Итог агрегации");
+                if (action.MultiplyByQuantity)
+                    RequireRuleField(fields, action.QuantityFieldCode, ["number"], "Поле количества");
+                return;
+        }
+    }
+
+    private static void ValidateFormula(
+        IReadOnlyDictionary<string, CatalogFieldDraft> fields,
+        FormulaDraft? formula)
+    {
+        if (formula is null || formula.Tokens.Count == 0)
+            Fail("onboarding_formula_invalid", "Расчётная формула не заполнена.");
+        if (formula.DecimalPlaces is < 0 or > 6)
+            Fail("onboarding_formula_invalid", "Округление формулы должно быть от 0 до 6 знаков.");
+
+        var expectsOperand = true;
+        var groupDepth = 0;
+        foreach (var token in formula.Tokens)
+        {
+            switch (token.TokenType)
+            {
+                case "field" when expectsOperand:
+                    RequireRuleField(fields, token.FieldCode, ["number", "money", "percent", "calculated_money"], "Поле формулы");
+                    expectsOperand = false;
+                    break;
+                case "constant" when expectsOperand && token.ConstantValue is not null:
+                    expectsOperand = false;
+                    break;
+                case "open_group" when expectsOperand:
+                    groupDepth++;
+                    break;
+                case "close_group" when !expectsOperand && groupDepth > 0:
+                    groupDepth--;
+                    break;
+                case "operator" when !expectsOperand:
+                    RequireAllowed(token.Operator, ["add", "subtract", "multiply", "divide"], "Операция формулы");
+                    expectsOperand = true;
+                    break;
+                default:
+                    Fail("onboarding_formula_invalid", "Нарушен порядок элементов формулы.");
+                    break;
+            }
+        }
+
+        if (expectsOperand || groupDepth != 0)
+            Fail("onboarding_formula_invalid", "Формула не завершена или содержит незакрытые скобки.");
+    }
+
+    private static CatalogFieldDraft RequireRuleField(
+        IReadOnlyDictionary<string, CatalogFieldDraft> fields,
+        string? fieldCode,
+        string[]? allowedTypes,
+        string label)
+    {
+        if (string.IsNullOrWhiteSpace(fieldCode) || !fields.ContainsKey(fieldCode))
+            Fail("onboarding_rule_field_invalid", $"{label} не выбрано или отсутствует в категории.");
+        var field = fields[fieldCode];
+        var fieldType = OnboardingFieldRegistry.FieldTypeOf(field);
+        if (allowedTypes is not null && !allowedTypes.Contains(fieldType))
+            Fail("onboarding_rule_field_invalid", $"Поле «{OnboardingFieldRegistry.LabelOf(field)}» имеет неподходящий тип.");
+        return field;
+    }
+
+    private static void RequireOptionalRuleField(
+        IReadOnlyDictionary<string, CatalogFieldDraft> fields,
+        string? fieldCode,
+        string[] allowedTypes,
+        string label)
+    {
+        if (!string.IsNullOrWhiteSpace(fieldCode)) RequireRuleField(fields, fieldCode, allowedTypes, label);
+    }
+
+    private static bool IsNumericField(string fieldType) =>
+        fieldType is "number" or "money" or "percent" or "calculated_money";
+
+    private static void RequireAllowed(string? value, string[] values, string label)
+    {
+        if (string.IsNullOrWhiteSpace(value) || !values.Contains(value))
+            Fail("onboarding_rule_invalid", $"{label} имеет недопустимое значение.");
     }
 
     private static void ValidateFieldSelection(IReadOnlyList<CatalogFieldDraft> fields, string owner)
@@ -213,19 +445,30 @@ public static class OnboardingValidator
         var selected = fields.Select(item => item.FieldCode).ToHashSet(StringComparer.Ordinal);
         foreach (var field in fields)
         {
-            var definition = OnboardingFieldRegistry.Get(field.FieldCode);
+            var definition = OnboardingFieldRegistry.DefinitionOf(field);
+            RequireText(OnboardingFieldRegistry.LabelOf(field), 1, 120, "Название поля");
+            if (OnboardingFieldRegistry.IsSystemField(field.FieldCode) &&
+                !string.IsNullOrWhiteSpace(field.FieldType) &&
+                !string.Equals(field.FieldType.Trim(), definition.FieldType, StringComparison.Ordinal))
+                Fail("onboarding_field_metadata_invalid", $"Тип системного поля «{definition.Label}» нельзя изменять.");
             if (field.IsRequired && !field.IsVisible)
-                Fail("onboarding_field_invalid", $"Обязательное поле «{definition.Label}» в {owner} не может быть скрыто.");
+                Fail("onboarding_field_invalid", $"Обязательное поле «{OnboardingFieldRegistry.LabelOf(field)}» в {owner} не может быть скрыто.");
             if (field.IsRequired && !definition.CanBeRequired)
-                Fail("onboarding_field_invalid", $"Поле «{definition.Label}» в {owner} нельзя сделать обязательным.");
+                Fail("onboarding_field_invalid", $"Поле «{OnboardingFieldRegistry.LabelOf(field)}» в {owner} нельзя сделать обязательным.");
         }
 
-        if (!selected.Contains("name"))
-            Fail("onboarding_field_dependency", $"В {owner} обязательно поле «Наименование».");
         if (selected.Contains("line_total") && (!selected.Contains("base_price") || !selected.Contains("quantity")))
             Fail("onboarding_field_dependency", $"Для суммы в {owner} необходимы поля «Цена» и «Количество».");
         if ((selected.Contains("markup_value") || selected.Contains("discount_value")) && !selected.Contains("base_price"))
             Fail("onboarding_field_dependency", $"Для наценки и скидки в {owner} необходимо поле «Цена».");
+
+        foreach (var fixedField in OnboardingFieldRegistry.DefaultCatalogFields())
+        {
+            if (!selected.Contains(fixedField.FieldCode))
+                Fail(
+                    "onboarding_fixed_field_missing",
+                    $"В {owner} нельзя удалить системное поле «{OnboardingFieldRegistry.Get(fixedField.FieldCode).Label}».");
+        }
     }
 
     private static void ValidateUnique(IEnumerable<string> values, string label)

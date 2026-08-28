@@ -4,6 +4,7 @@ import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
 import 'package:sklad_komforta_app/core/widgets/mobile_collapsible_navigation.dart';
 import 'package:sklad_komforta_app/features/company/company_controller.dart';
 import 'package:sklad_komforta_app/features/company/company_models.dart';
+import 'package:sklad_komforta_app/features/company/configuration_edit_guard.dart';
 import 'package:sklad_komforta_app/features/onboarding/organization_onboarding_page.dart';
 
 /// Разделы пространства «Компания», отображаемые внутри основной навигации.
@@ -25,11 +26,13 @@ final class CompanyPage extends StatelessWidget {
     required this.controller,
     this.section = CompanySection.settings,
     this.onSectionRequested,
+    this.configurationEditGuard,
     super.key,
   });
   final CompanyController controller;
   final CompanySection section;
   final ValueChanged<CompanySection>? onSectionRequested;
+  final ConfigurationEditGuard? configurationEditGuard;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -59,6 +62,7 @@ final class CompanyPage extends StatelessWidget {
             CompanySection.audit => _AuditSection(controller: controller),
             CompanySection.settings => _OrganizationSettingsSection(
               controller: controller,
+              configurationEditGuard: configurationEditGuard,
             ),
           },
         ),
@@ -69,8 +73,12 @@ final class CompanyPage extends StatelessWidget {
 
 /// В настройках отдельно редактируются юридические лица и рабочая конфигурация.
 final class _OrganizationSettingsSection extends StatefulWidget {
-  const _OrganizationSettingsSection({required this.controller});
+  const _OrganizationSettingsSection({
+    required this.controller,
+    this.configurationEditGuard,
+  });
   final CompanyController controller;
+  final ConfigurationEditGuard? configurationEditGuard;
   @override
   State<_OrganizationSettingsSection> createState() =>
       _OrganizationSettingsSectionState();
@@ -79,6 +87,8 @@ final class _OrganizationSettingsSection extends StatefulWidget {
 final class _OrganizationSettingsSectionState
     extends State<_OrganizationSettingsSection> {
   int tab = 0;
+  late final ConfigurationEditGuard _configurationEditGuard =
+      widget.configurationEditGuard ?? ConfigurationEditGuard();
   @override
   Widget build(BuildContext context) => Column(
     children: [
@@ -101,7 +111,7 @@ final class _OrganizationSettingsSectionState
           ],
           selected: {tab},
           showSelectedIcon: false,
-          onSelectionChanged: (value) => setState(() => tab = value.first),
+          onSelectionChanged: _selectTab,
         ),
       ),
       Expanded(
@@ -113,10 +123,26 @@ final class _OrganizationSettingsSectionState
                 settingsBusy: widget.controller.saving,
                 settingsError: widget.controller.error,
                 onSettingsSave: widget.controller.saveConfiguration,
+                onCategoryDeletionImpact:
+                    widget.controller.getCategoryDeletionImpact,
+                onCategoryDeletionApproved:
+                    widget.controller.approveCategoryDataDeletion,
+                onCategoryDeletionApprovalsDiscarded:
+                    widget.controller.discardCategoryDataDeletionApprovals,
+                configurationEditGuard: _configurationEditGuard,
               ),
       ),
     ],
   );
+
+  Future<void> _selectTab(Set<int> value) async {
+    final next = value.first;
+    if (next == tab) return;
+    if (!await _configurationEditGuard.canLeave(context)) {
+      return;
+    }
+    if (mounted) setState(() => tab = next);
+  }
 }
 
 final class _LegalEntitiesSection extends StatelessWidget {

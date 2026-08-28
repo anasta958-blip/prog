@@ -5,6 +5,7 @@ import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_controller.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_page.dart';
 import 'package:sklad_komforta_app/features/company/company_controller.dart';
+import 'package:sklad_komforta_app/features/company/configuration_edit_guard.dart';
 import 'package:sklad_komforta_app/features/company/company_models.dart';
 import 'package:sklad_komforta_app/features/company/company_page.dart';
 
@@ -35,6 +36,8 @@ class _WorkspacePageState extends State<WorkspacePage> {
   int selectedIndex = 0;
   CompanySection companySection = CompanySection.settings;
   bool companyExpanded = false;
+  final ConfigurationEditGuard configurationEditGuard =
+      ConfigurationEditGuard();
 
   @override
   void initState() {
@@ -68,6 +71,7 @@ class _WorkspacePageState extends State<WorkspacePage> {
               controller: companyController,
               section: companySection,
               onSectionRequested: _selectCompanySection,
+              configurationEditGuard: configurationEditGuard,
             ),
             2 => _SessionsPage(controller: widget.authController),
             _ => CatalogPage(controller: catalogController),
@@ -135,7 +139,12 @@ class _WorkspacePageState extends State<WorkspacePage> {
     ),
   );
 
-  void _select(int index) {
+  Future<void> _select(int index) async {
+    if (index != selectedIndex &&
+        !await configurationEditGuard.canLeave(context)) {
+      return;
+    }
+    if (!mounted) return;
     setState(() => selectedIndex = index);
     if (index == 0) catalogController.reloadConfiguration();
     if (index == 1) companyController.initialize();
@@ -155,7 +164,12 @@ class _WorkspacePageState extends State<WorkspacePage> {
     companyController.initialize();
   }
 
-  void _selectCompanySection(CompanySection section) {
+  Future<void> _selectCompanySection(CompanySection section) async {
+    if ((selectedIndex != 1 || section != companySection) &&
+        !await configurationEditGuard.canLeave(context)) {
+      return;
+    }
+    if (!mounted) return;
     setState(() {
       selectedIndex = 1;
       companySection = section;

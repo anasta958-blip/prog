@@ -12,13 +12,13 @@ SET name = EXCLUDED.name,
     group_name = EXCLUDED.group_name;
 
 INSERT INTO roles (name, is_system)
-VALUES ('Директор', true), ('Администратор', true)
+VALUES ('Директор', true)
 ON CONFLICT (name) DO UPDATE SET is_system = true;
 
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT role.id, permission.id
 FROM roles AS role
 CROSS JOIN permissions AS permission
-WHERE role.name IN ('Директор', 'Администратор')
+WHERE role.name = 'Директор'
   AND permission.code = 'system.full_access'
 ON CONFLICT DO NOTHING;

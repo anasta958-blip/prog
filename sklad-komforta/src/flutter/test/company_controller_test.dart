@@ -41,9 +41,22 @@ void main() {
 
       final configurationSaved = await controller.saveConfiguration(
         controller.configuration!,
+        deleteCategoryData: const ['category-1'],
       );
       expect(configurationSaved, isTrue);
       expect(gateway.savedConfiguration, isNotNull);
+      expect(gateway.deletedCategoryData, const ['category-1']);
+
+      controller.approveCategoryDataDeletion('category-2');
+      final persistedApproval = await controller.saveConfiguration(
+        controller.configuration!,
+      );
+      expect(persistedApproval, isTrue);
+      expect(gateway.deletedCategoryData, const ['category-2']);
+
+      final impact = await controller.getCategoryDeletionImpact('category-1');
+      expect(impact?.categoryClientId, 'category-1');
+      expect(impact?.hasData, isFalse);
 
       controller.dispose();
       auth.dispose();
@@ -77,6 +90,93 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Канбаны'), findsWidgets);
       expect(find.text('Каталог'), findsOneWidget);
+
+      controller.dispose();
+      auth.dispose();
+    },
+  );
+
+  testWidgets(
+    'непустая категория удаляется только после явного подтверждения',
+    (tester) async {
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final draft = OrganizationOnboardingDraft.initial()
+        ..currentStep = 9
+        ..categories.add(
+          CatalogCategoryDraft(
+            clientId: 'equipment',
+            name: 'Оборудование',
+            sections: [],
+            fields: [],
+          ),
+        );
+      final gateway = _MemoryCompanyGateway()
+        ..configurationValue = draft
+        ..impact = const CategoryDeletionImpact(
+          categoryClientId: 'equipment',
+          categoryName: 'Оборудование',
+          itemCount: 3,
+          imageCount: 2,
+          relationCount: 1,
+        );
+      final auth = AuthController(
+        config,
+        api: _NoopAuthGateway(),
+        tokens: _MemoryTokenRepository(),
+      )..accessToken = 'access-token';
+      final controller = CompanyController(config, auth, api: gateway);
+      await controller.initialize();
+
+      await tester.pumpWidget(
+        MaterialApp(home: CompanyPage(controller: controller)),
+      );
+      await tester.tap(find.text('Рабочая конфигурация'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Каталог'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Удалить'));
+      await tester.pumpAndSettle();
+      expect(find.text('Категория не пуста'), findsOneWidget);
+      expect(find.textContaining('3 карточек'), findsOneWidget);
+      expect(find.text('Оборудование'), findsWidgets);
+
+      await tester.tap(find.text('Отмена'));
+      await tester.pumpAndSettle();
+      expect(find.text('Оборудование'), findsWidgets);
+
+      await tester.tap(find.byTooltip('Удалить'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Удалить всё'));
+      await tester.pumpAndSettle();
+      expect(find.text('Оборудование'), findsNothing);
+
+      await tester.tap(find.text('Юридические лица'));
+      await tester.pumpAndSettle();
+      expect(find.text('Изменения не сохранены'), findsOneWidget);
+      await tester.tap(find.text('Остаться'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Сохранить изменения'));
+      await tester.pumpAndSettle();
+      expect(gateway.deletedCategoryData, const ['equipment']);
+
+      // Любое следующее изменение остаётся локальным. При подтверждённом
+      // выходе оно отбрасывается и не меняет сохранённую конфигурацию.
+      await tester.tap(find.text('Добавить категорию'));
+      await tester.pumpAndSettle();
+      expect(find.text('Новая категория'), findsWidgets);
+      await tester.tap(find.text('Юридические лица'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Выйти без сохранения'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Рабочая конфигурация'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Каталог'));
+      await tester.pumpAndSettle();
+      expect(find.text('Новая категория'), findsNothing);
 
       controller.dispose();
       auth.dispose();
@@ -159,6 +259,15 @@ void main() {
 final class _MemoryCompanyGateway implements CompanyGateway {
   CompanyProfileDraft? saved;
   OrganizationOnboardingDraft? savedConfiguration;
+  List<String> deletedCategoryData = const [];
+  OrganizationOnboardingDraft? configurationValue;
+  CategoryDeletionImpact impact = const CategoryDeletionImpact(
+    categoryClientId: 'category',
+    categoryName: 'Категория',
+    itemCount: 0,
+    imageCount: 0,
+    relationCount: 0,
+  );
 
   @override
   Future<CompanyProfileDraft> getProfile(String accessToken) async =>
@@ -169,10 +278,10 @@ final class _MemoryCompanyGateway implements CompanyGateway {
   Future<OrganizationOnboardingDraft> getConfiguration(
     String accessToken,
   ) async {
-    final draft = OrganizationOnboardingDraft.initial();
+    final draft = configurationValue ?? OrganizationOnboardingDraft.initial();
     draft.company.organizationName = 'Склад Комфорта';
     draft.company.companyType = 'ООО';
-    return draft;
+    return OrganizationOnboardingDraft.fromJson(draft.toJson());
   }
 
   @override
@@ -187,11 +296,25 @@ final class _MemoryCompanyGateway implements CompanyGateway {
   @override
   Future<OrganizationOnboardingDraft> updateConfiguration(
     String accessToken,
-    OrganizationOnboardingDraft draft,
-  ) async {
+    OrganizationOnboardingDraft draft, {
+    List<String> deleteCategoryData = const [],
+  }) async {
     savedConfiguration = draft;
+    deletedCategoryData = deleteCategoryData;
     return OrganizationOnboardingDraft.fromJson(draft.toJson());
   }
+
+  @override
+  Future<CategoryDeletionImpact> getCategoryDeletionImpact(
+    String accessToken,
+    String categoryClientId,
+  ) async => CategoryDeletionImpact(
+    categoryClientId: categoryClientId,
+    categoryName: impact.categoryName,
+    itemCount: impact.itemCount,
+    imageCount: impact.imageCount,
+    relationCount: impact.relationCount,
+  );
 
   @override
   void close() {}

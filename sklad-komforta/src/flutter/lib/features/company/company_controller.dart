@@ -46,6 +46,20 @@ final class CompanyController extends ChangeNotifier {
   bool saving = false;
   String? error;
   bool saved = false;
+  final Set<String> _approvedCategoryDataDeletions = <String>{};
+
+  /// Сохраняет подтверждение удаления непустой категории до успешной записи
+  /// конфигурации. Оно не теряется при переходе между вкладками и повторном
+  /// создании экрана настроек.
+  void approveCategoryDataDeletion(String categoryClientId) {
+    _approvedCategoryDataDeletions.add(categoryClientId);
+  }
+
+  /// Отзывает неподтверждённые сервером разрешения вместе со сброшенным
+  /// локальным черновиком.
+  void discardCategoryDataDeletionApprovals() {
+    _approvedCategoryDataDeletions.clear();
+  }
 
   Future<void> initialize() async {
     if (loading) return;
@@ -248,17 +262,53 @@ final class CompanyController extends ChangeNotifier {
     }
   }
 
-  Future<bool> saveConfiguration(OrganizationOnboardingDraft draft) async {
+  Future<CategoryDeletionImpact?> getCategoryDeletionImpact(
+    String categoryClientId,
+  ) async {
+    error = null;
+    notifyListeners();
+    try {
+      return await _auth.executeAuthorized(
+        (token) => _api.getCategoryDeletionImpact(token, categoryClientId),
+      );
+    } on ApiException catch (exception) {
+      error = exception.message;
+      notifyListeners();
+      return null;
+    } on Object {
+      error = 'Не удалось проверить содержимое категории.';
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<bool> saveConfiguration(
+    OrganizationOnboardingDraft draft, {
+    List<String> deleteCategoryData = const [],
+  }) async {
     if (saving) return false;
     saving = true;
     saved = false;
     error = null;
     notifyListeners();
+    final retainedCategoryIds = draft.categories
+        .map((category) => category.clientId)
+        .toSet();
+    _approvedCategoryDataDeletions.removeWhere(retainedCategoryIds.contains);
+    final approvedDeletions =
+        <String>{..._approvedCategoryDataDeletions, ...deleteCategoryData}
+            .where((clientId) => !retainedCategoryIds.contains(clientId))
+            .toList(growable: false);
     try {
       configuration = await _auth.executeAuthorized(
-        (token) => _api.updateConfiguration(token, draft),
+        (token) => _api.updateConfiguration(
+          token,
+          draft,
+          deleteCategoryData: approvedDeletions,
+        ),
       );
       profile = configuration!.company;
+      _approvedCategoryDataDeletions.removeAll(approvedDeletions);
       saved = true;
       return true;
     } on ApiException catch (exception) {

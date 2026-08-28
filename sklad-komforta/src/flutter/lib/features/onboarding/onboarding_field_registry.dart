@@ -1,3 +1,5 @@
+import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
+
 /// Описание системного поля, для которого backend реализует хранение и логику.
 final class OnboardingFieldDefinition {
   const OnboardingFieldDefinition({
@@ -16,6 +18,60 @@ final class OnboardingFieldDefinition {
   final bool canBeRequired;
   final bool isCalculated;
 }
+
+/// Типы, из которых пользователь может создавать собственные поля карточки.
+const customCatalogFieldTypes = <OnboardingFieldDefinition>[
+  OnboardingFieldDefinition(
+    code: 'text',
+    label: 'Текст',
+    fieldType: 'text',
+    group: 'Тип поля',
+  ),
+  OnboardingFieldDefinition(
+    code: 'number',
+    label: 'Число',
+    fieldType: 'number',
+    group: 'Тип поля',
+  ),
+  OnboardingFieldDefinition(
+    code: 'money',
+    label: 'Денежное значение',
+    fieldType: 'money',
+    group: 'Тип поля',
+  ),
+  OnboardingFieldDefinition(
+    code: 'percent',
+    label: 'Процент',
+    fieldType: 'percent',
+    group: 'Тип поля',
+  ),
+  OnboardingFieldDefinition(
+    code: 'dictionary',
+    label: 'Справочник',
+    fieldType: 'dictionary',
+    group: 'Тип поля',
+  ),
+  OnboardingFieldDefinition(
+    code: 'boolean',
+    label: 'Флажок',
+    fieldType: 'boolean',
+    group: 'Тип поля',
+  ),
+  OnboardingFieldDefinition(
+    code: 'relation',
+    label: 'Связанные карточки',
+    fieldType: 'relation',
+    group: 'Тип поля',
+  ),
+  OnboardingFieldDefinition(
+    code: 'calculated_money',
+    label: 'Расчётная сумма',
+    fieldType: 'calculated_money',
+    group: 'Тип поля',
+    canBeRequired: false,
+    isCalculated: true,
+  ),
+];
 
 /// Клиентское зеркало серверного реестра. Сервер остаётся источником истины и
 /// отклоняет неизвестные коды или изменённые метаданные.
@@ -152,16 +208,40 @@ final onboardingFieldByCode = <String, OnboardingFieldDefinition>{
 };
 
 const defaultCatalogFieldCodes = <String>[
-  'group',
   'name',
   'marking',
-  'note',
-  'quantity',
   'unit',
-  'supplier',
-  'purchase_price',
-  'minimal_price',
   'base_price',
-  'excluded_from_calc',
-  'linked_services',
 ];
+
+/// Системные поля присутствуют в каждой категории и не удаляются из неё.
+bool isFixedCatalogField(String code) =>
+    defaultCatalogFieldCodes.contains(code);
+
+bool isCustomCatalogField(String code) => code.startsWith('custom_');
+
+String catalogFieldType(CatalogFieldDraft field) =>
+    onboardingFieldByCode[field.fieldCode]?.fieldType ??
+    field.fieldType ??
+    'text';
+
+OnboardingFieldDefinition catalogFieldDefinition(CatalogFieldDraft field) {
+  final systemDefinition = onboardingFieldByCode[field.fieldCode];
+  if (systemDefinition != null) return systemDefinition;
+  final type = catalogFieldType(field);
+  return OnboardingFieldDefinition(
+    code: field.fieldCode,
+    label: catalogFieldLabel(field),
+    fieldType: type,
+    group: 'Пользовательские',
+    canBeRequired: type != 'calculated_money',
+    isCalculated: type == 'calculated_money',
+  );
+}
+
+/// Пользовательское название поля с совместимым fallback для старых черновиков.
+String catalogFieldLabel(CatalogFieldDraft field) {
+  final customLabel = field.label?.trim();
+  if (customLabel != null && customLabel.isNotEmpty) return customLabel;
+  return onboardingFieldByCode[field.fieldCode]?.label ?? '';
+}

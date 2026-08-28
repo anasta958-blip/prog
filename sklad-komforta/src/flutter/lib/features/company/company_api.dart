@@ -14,10 +14,15 @@ abstract interface class CompanyGateway {
     CompanyProfileDraft profile,
   );
   Future<OrganizationOnboardingDraft> getConfiguration(String accessToken);
+  Future<CategoryDeletionImpact> getCategoryDeletionImpact(
+    String accessToken,
+    String categoryClientId,
+  );
   Future<OrganizationOnboardingDraft> updateConfiguration(
     String accessToken,
-    OrganizationOnboardingDraft draft,
-  );
+    OrganizationOnboardingDraft draft, {
+    List<String> deleteCategoryData = const [],
+  });
   void close();
 }
 
@@ -93,15 +98,29 @@ final class CompanyApi implements CompanyGateway, CompanyWorkspaceGateway {
   @override
   Future<OrganizationOnboardingDraft> updateConfiguration(
     String accessToken,
-    OrganizationOnboardingDraft draft,
-  ) async {
+    OrganizationOnboardingDraft draft, {
+    List<String> deleteCategoryData = const [],
+  }) async {
     final data = await _sendPath(
       'PUT',
       '/company/configuration',
       accessToken,
-      body: draft.toJson(),
+      body: {'draft': draft.toJson(), 'deleteCategoryData': deleteCategoryData},
     );
     return OrganizationOnboardingDraft.fromJson(data as Map<String, dynamic>);
+  }
+
+  @override
+  Future<CategoryDeletionImpact> getCategoryDeletionImpact(
+    String accessToken,
+    String categoryClientId,
+  ) async {
+    final data = await _sendPath(
+      'GET',
+      '/company/configuration/categories/${Uri.encodeComponent(categoryClientId)}/deletion-impact',
+      accessToken,
+    );
+    return CategoryDeletionImpact.fromJson(data as Map<String, dynamic>);
   }
 
   Future<dynamic> _send(

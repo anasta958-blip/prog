@@ -1,13 +1,16 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:sklad_komforta_app/core/widgets/mobile_collapsible_navigation.dart';
 import 'package:flutter/services.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
 import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
 import 'package:sklad_komforta_app/features/company/company_profile_form.dart';
+import 'package:sklad_komforta_app/features/company/configuration_edit_guard.dart';
 import 'package:sklad_komforta_app/features/onboarding/onboarding_field_registry.dart';
 import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
 
-/// Полноэкранный восьмишаговый мастер создания изолированной организации.
+/// Полноэкранный девятишаговый мастер создания изолированной организации.
 final class OrganizationOnboardingPage extends StatefulWidget {
   const OrganizationOnboardingPage({
     required this.controller,
@@ -15,6 +18,10 @@ final class OrganizationOnboardingPage extends StatefulWidget {
     this.settingsBusy = false,
     this.settingsError,
     this.onSettingsSave,
+    this.onCategoryDeletionImpact,
+    this.onCategoryDeletionApproved,
+    this.onCategoryDeletionApprovalsDiscarded,
+    this.configurationEditGuard,
     super.key,
   });
 
@@ -31,8 +38,25 @@ final class OrganizationOnboardingPage extends StatefulWidget {
   final String? settingsError;
 
   /// Сохраняет изменённую конфигурацию без повторной активации организации.
-  final Future<bool> Function(OrganizationOnboardingDraft draft)?
+  final Future<bool> Function(
+    OrganizationOnboardingDraft draft, {
+    required List<String> deleteCategoryData,
+  })?
   onSettingsSave;
+
+  /// Проверяет рабочие данные до удаления категории из действующей организации.
+  final Future<CategoryDeletionImpact?> Function(String categoryClientId)?
+  onCategoryDeletionImpact;
+
+  /// Передаёт подтверждение владельцу рабочего состояния, чтобы оно не
+  /// потерялось при переходе пользователя в другой раздел приложения.
+  final ValueChanged<String>? onCategoryDeletionApproved;
+
+  /// Отзывает подтверждения, если пользователь отказался сохранять черновик.
+  final VoidCallback? onCategoryDeletionApprovalsDiscarded;
+
+  /// Связывает локальный редактор с навигацией рабочего пространства.
+  final ConfigurationEditGuard? configurationEditGuard;
 
   @override
   State<OrganizationOnboardingPage> createState() =>
@@ -46,6 +70,7 @@ final class _OrganizationOnboardingPageState
     ('Канбаны', Icons.view_kanban_outlined),
     ('Каталог', Icons.inventory_2_outlined),
     ('Поля', Icons.view_column_outlined),
+    ('Правила и расчёты', Icons.calculate_outlined),
     ('Зависимости', Icons.account_tree_outlined),
     ('Роли', Icons.admin_panel_settings_outlined),
     ('Справочники', Icons.menu_book_outlined),
@@ -73,8 +98,9 @@ final class _OrganizationOnboardingPageState
   ];
   // Реквизиты юридических лиц редактируются в отдельной вкладке «Компания».
   // Здесь остаётся только рабочая конфигурация без второго источника данных.
-  static const _settingsStepIndexes = [1, 2, 3, 4, 6];
+  static const _settingsStepIndexes = [1, 2, 3, 4, 5, 7];
   late OrganizationOnboardingDraft draft;
+  late String _savedDraftJson;
   late int step;
   final _companyFormKey = GlobalKey<FormState>();
   final Set<String> _collapsedWorkflowCodes = <String>{};
@@ -85,8 +111,12 @@ final class _OrganizationOnboardingPageState
       <CategoryDependencyDraft>{};
   final Set<OnboardingRoleDraft> _collapsedRoles = <OnboardingRoleDraft>{};
   final Set<DictionaryDraft> _collapsedDictionaries = <DictionaryDraft>{};
+  final Set<String> _collapsedRules = <String>{};
+  final Set<String> _collapsedPipelines = <String>{};
   final Set<CatalogSectionDraft> _expandedCatalogSections =
       <CatalogSectionDraft>{};
+  final Set<String> _approvedCategoryDataDeletions = <String>{};
+  final Set<String> _checkingCategoryIds = <String>{};
 
   bool get _settingsMode => widget.onSettingsSave != null;
   bool get _busy =>
@@ -97,26 +127,93 @@ final class _OrganizationOnboardingPageState
   @override
   void initState() {
     super.initState();
-    draft =
+    final source =
         widget.settingsDraft ??
         widget.controller.onboardingDraft ??
         OrganizationOnboardingDraft.initial();
+    draft = _settingsMode ? _copyDraft(source) : source;
+    _ensureFixedCatalogFields();
+    _savedDraftJson = jsonEncode(draft.toJson());
     _collapseConfiguredBlocks();
     step = _settingsMode
         ? _settingsStepIndexes.first
-        : draft.currentStep.clamp(1, 8) - 1;
+        : draft.currentStep.clamp(1, 9) - 1;
+    widget.configurationEditGuard?.attach(this, _confirmLeave);
   }
 
   @override
   void didUpdateWidget(covariant OrganizationOnboardingPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(
+      oldWidget.configurationEditGuard,
+      widget.configurationEditGuard,
+    )) {
+      oldWidget.configurationEditGuard?.detach(this);
+      widget.configurationEditGuard?.attach(this, _confirmLeave);
+    }
     if (_settingsMode &&
         widget.settingsDraft != null &&
         !identical(oldWidget.settingsDraft, widget.settingsDraft) &&
         !widget.settingsBusy) {
-      draft = widget.settingsDraft!;
+      draft = _copyDraft(widget.settingsDraft!);
+      _approvedCategoryDataDeletions.clear();
+      _ensureFixedCatalogFields();
+      _savedDraftJson = jsonEncode(draft.toJson());
       _collapseConfiguredBlocks();
     }
+  }
+
+  @override
+  void dispose() {
+    widget.configurationEditGuard?.detach(this);
+    super.dispose();
+  }
+
+  OrganizationOnboardingDraft _copyDraft(OrganizationOnboardingDraft value) =>
+      OrganizationOnboardingDraft.fromJson(value.toJson());
+
+  bool get _hasUnsavedChanges => jsonEncode(draft.toJson()) != _savedDraftJson;
+
+  void _discardUnsavedChanges() {
+    widget.onCategoryDeletionApprovalsDiscarded?.call();
+    draft = OrganizationOnboardingDraft.fromJson(
+      jsonDecode(_savedDraftJson) as Map<String, dynamic>,
+    );
+    _approvedCategoryDataDeletions.clear();
+    _ensureFixedCatalogFields();
+    _collapseConfiguredBlocks();
+  }
+
+  Future<bool> _confirmLeave(BuildContext context) async {
+    if (!_settingsMode || !_hasUnsavedChanges) return true;
+    final leave = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        icon: const Icon(Icons.warning_amber_rounded, color: Color(0xFFF59E0B)),
+        title: const Text('Изменения не сохранены'),
+        content: const Text(
+          'Вы изменили настройки организации, но не сохранили их. '
+          'Если выйти сейчас, все внесённые изменения будут потеряны.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Остаться'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFB83A4B),
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Выйти без сохранения'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || leave != true) return false;
+    setState(_discardUnsavedChanges);
+    return true;
   }
 
   /// Сворачивает уже настроенные составные блоки при первом показе конфигурации.
@@ -143,11 +240,41 @@ final class _OrganizationOnboardingPageState
     _collapsedDictionaries
       ..clear()
       ..addAll(draft.dictionaries);
+    _collapsedRules
+      ..clear()
+      ..addAll(draft.rules.map((rule) => rule.clientId));
+    _collapsedPipelines
+      ..clear()
+      ..addAll(
+        draft.moneyPipelines.map((pipeline) => pipeline.categoryClientId),
+      );
     _expandedCatalogSections.clear();
   }
 
   void _toggleCollapsed<T>(Set<T> collapsedItems, T item) {
     if (!collapsedItems.add(item)) collapsedItems.remove(item);
+  }
+
+  /// Восстанавливает системные поля в старых черновиках и конфигурациях.
+  /// Существующий порядок и все пользовательские поля при этом сохраняются.
+  void _ensureFixedCatalogFields() {
+    for (final category in draft.categories) {
+      final selectedCodes = category.fields
+          .map((field) => field.fieldCode)
+          .toSet();
+      for (final code in defaultCatalogFieldCodes) {
+        if (selectedCodes.add(code)) {
+          category.fields.add(
+            CatalogFieldDraft(
+              fieldCode: code,
+              isVisible: true,
+              isRequired: code == 'name',
+              label: onboardingFieldByCode[code]!.label,
+            ),
+          );
+        }
+      }
+    }
   }
 
   /// Сохраняет агрегат целиком, чтобы сервер мог проверить межшаговые связи.
@@ -157,26 +284,116 @@ final class _OrganizationOnboardingPageState
       return;
     }
     if (_settingsMode) {
-      draft.currentStep = 8;
-      final saved = await widget.onSettingsSave!(draft);
+      draft.currentStep = 9;
+      final saved = await widget.onSettingsSave!(
+        draft,
+        deleteCategoryData: _approvedCategoryDataDeletions.toList(),
+      );
       if (!mounted || !saved) return;
-      setState(() => step = (step + 1).clamp(0, 7));
+      setState(() {
+        _approvedCategoryDataDeletions.clear();
+        step = (step + 1).clamp(0, 8);
+      });
       return;
     }
-    draft.currentStep = (step + 2).clamp(1, 8);
+    draft.currentStep = (step + 2).clamp(1, 9);
     await widget.controller.saveOnboardingStep(draft);
     if (!mounted || widget.controller.error != null) return;
     setState(() {
       draft = widget.controller.onboardingDraft ?? draft;
-      step = (step + 1).clamp(0, 7);
+      step = (step + 1).clamp(0, 8);
     });
   }
 
   Future<void> _saveSettings() async {
-    draft.currentStep = 8;
-    final saved = await widget.onSettingsSave!(draft);
+    draft.currentStep = 9;
+    final saved = await widget.onSettingsSave!(
+      draft,
+      deleteCategoryData: _approvedCategoryDataDeletions.toList(),
+    );
     if (!mounted || !saved) return;
+    _approvedCategoryDataDeletions.clear();
+    _savedDraftJson = jsonEncode(draft.toJson());
     _showMessage('Настройки организации сохранены.');
+  }
+
+  Future<void> _deleteCategory(String categoryClientId) async {
+    if (_checkingCategoryIds.contains(categoryClientId)) return;
+    if (!draft.categories.any((item) => item.clientId == categoryClientId)) {
+      return;
+    }
+
+    if (_settingsMode) {
+      final inspect = widget.onCategoryDeletionImpact;
+      if (inspect == null) return;
+      setState(() => _checkingCategoryIds.add(categoryClientId));
+      final impact = await inspect(categoryClientId);
+      if (!mounted) return;
+      setState(() => _checkingCategoryIds.remove(categoryClientId));
+      if (impact == null) return;
+
+      if (impact.hasData) {
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            icon: const Icon(
+              Icons.warning_amber_rounded,
+              color: Color(0xFFF59E0B),
+            ),
+            title: const Text('Категория не пуста'),
+            content: Text(
+              'В категории «${impact.categoryName}» находится '
+              '${impact.itemCount} карточек, ${impact.imageCount} изображений '
+              'и ${impact.relationCount} связей. При сохранении они будут '
+              'удалены без возможности восстановления.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Отмена'),
+              ),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFB83A4B),
+                ),
+                onPressed: () => Navigator.pop(dialogContext, true),
+                icon: const Icon(Icons.delete_forever_outlined),
+                label: const Text('Удалить всё'),
+              ),
+            ],
+          ),
+        );
+        if (!mounted || confirmed != true) return;
+        _approvedCategoryDataDeletions.add(categoryClientId);
+        widget.onCategoryDeletionApproved?.call(categoryClientId);
+      }
+    }
+
+    setState(() {
+      final currentIndex = draft.categories.indexWhere(
+        (item) => item.clientId == categoryClientId,
+      );
+      if (currentIndex < 0) return;
+      final removed = draft.categories.removeAt(currentIndex);
+      _collapsedCategoryIds.remove(removed.clientId);
+      _expandedCatalogSections.removeAll(removed.sections);
+      draft.dependencies.removeWhere(
+        (dependency) =>
+            dependency.sourceCategoryClientId == removed.clientId ||
+            dependency.targetCategoryClientId == removed.clientId,
+      );
+      draft.rules.removeWhere(
+        (rule) => rule.categoryClientId == removed.clientId,
+      );
+      draft.moneyPipelines.removeWhere(
+        (pipeline) => pipeline.categoryClientId == removed.clientId,
+      );
+      for (final workflow in draft.workflows) {
+        workflow.categories.removeWhere(
+          (item) => item.categoryClientId == removed.clientId,
+        );
+      }
+    });
   }
 
   void _showMessage(String message) {
@@ -248,10 +465,8 @@ final class _OrganizationOnboardingPageState
   Future<void> _selectStep(int value) async {
     if (_settingsMode) {
       if (value == step || widget.settingsBusy) return;
-      draft.currentStep = 8;
-      final saved = await widget.onSettingsSave!(draft);
-      if (!mounted || !saved) return;
-      setState(() => step = value);
+      if (!await _confirmLeave(context)) return;
+      if (mounted) setState(() => step = value);
       return;
     }
     if (value <= draft.currentStep - 1) setState(() => step = value);
@@ -301,7 +516,7 @@ final class _OrganizationOnboardingPageState
                     ? null
                     : _settingsMode
                     ? _saveSettings
-                    : step == 7
+                    : step == 8
                     ? widget.controller.activateOrganization
                     : _saveAndContinue,
                 icon: _busy
@@ -310,14 +525,14 @@ final class _OrganizationOnboardingPageState
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : Icon(
-                        _settingsMode || step == 7
+                        _settingsMode || step == 8
                             ? Icons.save_outlined
                             : Icons.arrow_forward,
                       ),
                 label: Text(
                   _settingsMode
                       ? 'Сохранить изменения'
-                      : step == 7
+                      : step == 8
                       ? 'Активировать организацию'
                       : 'Сохранить и продолжить',
                 ),
@@ -334,9 +549,10 @@ final class _OrganizationOnboardingPageState
     1 => _workflowEditor(),
     2 => _catalogEditor(),
     3 => _fieldsEditor(),
-    4 => _dependenciesEditor(),
-    5 => _rolesEditor(),
-    6 => _dictionariesEditor(),
+    4 => _rulesEditor(),
+    5 => _dependenciesEditor(),
+    6 => _rolesEditor(),
+    7 => _dictionariesEditor(),
     _ => _review(),
   };
 
@@ -599,21 +815,13 @@ final class _OrganizationOnboardingPageState
                 _collapsedCategoryIds.remove(categoryId);
               }
             }),
-            onDelete: () => setState(() {
-              final category = draft.categories.removeAt(categoryIndex);
-              _collapsedCategoryIds.remove(category.clientId);
-              _expandedCatalogSections.removeAll(category.sections);
-              draft.dependencies.removeWhere(
-                (dependency) =>
-                    dependency.sourceCategoryClientId == category.clientId ||
-                    dependency.targetCategoryClientId == category.clientId,
-              );
-              for (final workflow in draft.workflows) {
-                workflow.categories.removeWhere(
-                  (item) => item.categoryClientId == category.clientId,
-                );
-              }
-            }),
+            onDelete:
+                _checkingCategoryIds.contains(
+                  draft.categories[categoryIndex].clientId,
+                )
+                ? null
+                : () =>
+                      _deleteCategory(draft.categories[categoryIndex].clientId),
             child: Column(
               children: [
                 _textField('Категория', draft.categories[categoryIndex].name, (
@@ -907,7 +1115,7 @@ final class _OrganizationOnboardingPageState
             for (final field in relationFields)
               AppSelectOption(
                 value: field.fieldCode,
-                label: onboardingFieldByCode[field.fieldCode]!.label,
+                label: catalogFieldLabel(field),
               ),
           ],
           onChanged: (value) {
@@ -922,10 +1130,7 @@ final class _OrganizationOnboardingPageState
 
   List<CatalogFieldDraft> _relationFields(CatalogCategoryDraft category) =>
       category.fields
-          .where(
-            (field) =>
-                onboardingFieldByCode[field.fieldCode]?.fieldType == 'relation',
-          )
+          .where((field) => catalogFieldType(field) == 'relation')
           .toList();
 
   CatalogCategoryDraft? _categoryByClientId(String clientId) {
@@ -998,29 +1203,24 @@ final class _OrganizationOnboardingPageState
                 final field = category.fields.removeAt(index);
                 category.fields.insert(index + delta, field);
               }),
-              onDelete: () => setState(() {
-                final field = category.fields.removeAt(index);
-                draft.dependencies.removeWhere(
-                  (dependency) =>
-                      dependency.targetCategoryClientId == category.clientId &&
-                      dependency.targetFieldCode == field.fieldCode,
-                );
-                _removeUnavailableWorkflowField(category, field.fieldCode);
-              }),
+              onDelete: isFixedCatalogField(category.fields[index].fieldCode)
+                  ? null
+                  : () => setState(() {
+                      final field = category.fields.removeAt(index);
+                      draft.dependencies.removeWhere(
+                        (dependency) =>
+                            dependency.targetCategoryClientId ==
+                                category.clientId &&
+                            dependency.targetFieldCode == field.fieldCode,
+                      );
+                      _removeUnavailableWorkflowField(
+                        category,
+                        field.fieldCode,
+                      );
+                    }),
               child: _catalogFieldControls(category.fields[index]),
             ),
-          _addFieldButton(
-            selectedCodes: category.fields.map((item) => item.fieldCode),
-            onSelected: (definition) => setState(
-              () => category.fields.add(
-                CatalogFieldDraft(
-                  fieldCode: definition.code,
-                  isVisible: true,
-                  isRequired: definition.code == 'name',
-                ),
-              ),
-            ),
-          ),
+          _addCatalogFieldButton(category),
         ],
       ),
     );
@@ -1033,8 +1233,8 @@ final class _OrganizationOnboardingPageState
     final result = <OnboardingFieldDefinition>[];
     final added = <String>{};
     for (final field in category.fields) {
-      final definition = onboardingFieldByCode[field.fieldCode];
-      if (definition != null && added.add(definition.code)) {
+      final definition = catalogFieldDefinition(field);
+      if (added.add(definition.code)) {
         result.add(definition);
       }
     }
@@ -1160,7 +1360,9 @@ final class _OrganizationOnboardingPageState
                           contentPadding: EdgeInsets.zero,
                           dense: true,
                           controlAffinity: ListTileControlAffinity.leading,
-                          title: Text(definition.label),
+                          title: Text(
+                            _categoryFieldLabel(category, definition.code),
+                          ),
                           subtitle: definition.isCalculated
                               ? const Text('Расчётное поле')
                               : null,
@@ -1184,134 +1386,121 @@ final class _OrganizationOnboardingPageState
   }
 
   Widget _catalogFieldControls(CatalogFieldDraft field) {
-    final definition = onboardingFieldByCode[field.fieldCode]!;
-    return Column(
-      children: [
-        _fieldControls(
-          definition,
-          field.isVisible,
-          field.isRequired,
-          (value) => setState(() {
-            field.isVisible = value;
-            if (!value) field.isRequired = false;
-          }),
-          definition.canBeRequired && field.isVisible
-              ? (value) => setState(() => field.isRequired = value)
-              : null,
-        ),
-        if (definition.fieldType == 'dictionary' &&
-            definition.code != 'group') ...[
-          const SizedBox(height: 8),
-          AppSelectField<String>(
-            value:
-                draft.dictionaries.any(
-                  (dictionary) => dictionary.code == field.dictionaryCode,
-                )
-                ? field.dictionaryCode
-                : null,
-            label: 'Источник значений',
-            options: [
-              const AppSelectOption(value: null, label: 'Справочник не выбран'),
-              for (final dictionary in draft.dictionaries)
-                AppSelectOption(value: dictionary.code, label: dictionary.name),
+    final definition = catalogFieldDefinition(field);
+    final flags = [
+      _CompactFlag(
+        label: 'Показывать',
+        value: field.isVisible,
+        onChanged: (value) => setState(() {
+          field.isVisible = value;
+          if (!value) field.isRequired = false;
+        }),
+      ),
+      _CompactFlag(
+        label: 'Обязательное',
+        value: field.isRequired,
+        onChanged: definition.canBeRequired && field.isVisible
+            ? (value) => setState(() => field.isRequired = value)
+            : null,
+      ),
+    ];
+    final dictionarySelector =
+        definition.fieldType == 'dictionary' && definition.code != 'group'
+        ? SizedBox(
+            width: 210,
+            child: AppSelectField<String>(
+              value:
+                  draft.dictionaries.any(
+                    (dictionary) => dictionary.code == field.dictionaryCode,
+                  )
+                  ? field.dictionaryCode
+                  : null,
+              label: 'Источник значений',
+              options: [
+                const AppSelectOption(
+                  value: null,
+                  label: 'Справочник не выбран',
+                ),
+                for (final dictionary in draft.dictionaries)
+                  AppSelectOption(
+                    value: dictionary.code,
+                    label: dictionary.name,
+                  ),
+              ],
+              onChanged: (value) =>
+                  setState(() => field.dictionaryCode = value),
+            ),
+          )
+        : null;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final name = TextFormField(
+          initialValue: catalogFieldLabel(field),
+          decoration: const InputDecoration(labelText: 'Название поля'),
+          onChanged: (value) => field.label = value,
+        );
+        final type = _FieldTypeBadge(_fieldTypeLabel(definition.fieldType));
+        if (constraints.maxWidth < 760) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              name,
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 10,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [?dictionarySelector, type, ...flags],
+              ),
             ],
-            onChanged: (value) => setState(() => field.dictionaryCode = value),
-          ),
-        ],
-      ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(child: name),
+            if (dictionarySelector != null) ...[
+              const SizedBox(width: 12),
+              SizedBox(width: 210, child: dictionarySelector),
+            ],
+            const SizedBox(width: 10),
+            SizedBox(width: 160, child: type),
+            const SizedBox(width: 8),
+            ...flags,
+          ],
+        );
+      },
     );
   }
 
-  Widget _fieldControls(
-    OnboardingFieldDefinition definition,
-    bool visible,
-    bool required,
-    ValueChanged<bool> onVisible,
-    ValueChanged<bool>? onRequired,
-  ) => LayoutBuilder(
-    builder: (context, constraints) {
-      final title = Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            definition.label,
-            style: const TextStyle(fontWeight: FontWeight.w600),
+  Widget _addCatalogFieldButton(CatalogCategoryDraft category) => Align(
+    alignment: Alignment.centerLeft,
+    child: PopupMenuButton<OnboardingFieldDefinition>(
+      tooltip: 'Выбрать тип нового поля',
+      onSelected: (type) => setState(() {
+        category.fields.add(
+          CatalogFieldDraft(
+            fieldCode: 'custom_${DateTime.now().microsecondsSinceEpoch}',
+            fieldType: type.fieldType,
+            isVisible: true,
+            isRequired: false,
+            label: '',
           ),
-          const SizedBox(height: 3),
-          Text(
-            '${definition.group} · ${definition.isCalculated ? 'расчётное' : definition.fieldType}',
-            style: const TextStyle(color: Color(0xFF8FA4C2), fontSize: 12),
-          ),
-        ],
-      );
-      final flags = Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _Flag(label: 'Показывать', value: visible, onChanged: onVisible),
-          if (definition.isCalculated)
-            const _Flag(
-              label: 'Рассчитывается',
-              value: true,
-              onChanged: null,
-              tooltip:
-                  'Значение вычисляется автоматически и не вводится пользователем.',
-            )
-          else
-            _Flag(
-              label: 'Обязательное',
-              value: required,
-              onChanged: onRequired,
-              tooltip:
-                  'Без значения этого поля позицию нельзя будет сохранить.',
-            ),
-        ],
-      );
-      return constraints.maxWidth < 620
-          ? Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [title, flags],
-            )
-          : Row(
-              children: [
-                Expanded(child: title),
-                flags,
-              ],
-            );
-    },
-  );
-
-  Widget _addFieldButton({
-    required Iterable<String> selectedCodes,
-    required ValueChanged<OnboardingFieldDefinition> onSelected,
-  }) {
-    final selected = selectedCodes.toSet();
-    final available = onboardingFieldDefinitions
-        .where((definition) => !selected.contains(definition.code))
-        .toList();
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: PopupMenuButton<OnboardingFieldDefinition>(
-        enabled: available.isNotEmpty,
-        onSelected: onSelected,
-        itemBuilder: (context) => [
-          for (final definition in available)
-            PopupMenuItem(
-              value: definition,
-              child: Text('${definition.label} · ${definition.group}'),
-            ),
-        ],
-        child: IgnorePointer(
-          child: TextButton.icon(
-            onPressed: available.isEmpty ? null : () {},
-            icon: const Icon(Icons.add),
-            label: Text(
-              available.isEmpty ? 'Все поля добавлены' : 'Добавить поле',
-            ),
-          ),
+        );
+      }),
+      itemBuilder: (context) => [
+        for (final type in customCatalogFieldTypes)
+          PopupMenuItem(value: type, child: Text(type.label)),
+      ],
+      child: IgnorePointer(
+        child: TextButton.icon(
+          onPressed: () {},
+          icon: const Icon(Icons.add),
+          label: const Text('Добавить поле'),
         ),
       ),
-    );
-  }
+    ),
+  );
 
   List<CatalogFieldDraft> _defaultCatalogFields() => [
     for (final code in defaultCatalogFieldCodes)
@@ -1319,8 +1508,881 @@ final class _OrganizationOnboardingPageState
         fieldCode: code,
         isVisible: true,
         isRequired: code == 'name' || code == 'quantity',
+        label: onboardingFieldByCode[code]!.label,
       ),
   ];
+
+  String _categoryFieldLabel(CatalogCategoryDraft category, String code) {
+    for (final field in category.fields) {
+      if (field.fieldCode == code) return catalogFieldLabel(field);
+    }
+    return onboardingFieldByCode[code]?.label ?? code;
+  }
+
+  String _fieldTypeLabel(String type) => switch (type) {
+    'text' => 'Текст',
+    'number' => 'Число',
+    'money' => 'Деньги',
+    'percent' => 'Процент',
+    'dictionary' => 'Справочник',
+    'boolean' => 'Флажок',
+    'relation' => 'Связанные карточки',
+    'enum' => 'Выбор значения',
+    'calculated_money' => 'Расчётная сумма',
+    _ => type,
+  };
+
+  Widget _rulesEditor() => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const _InfoBanner(
+        'Денежный расчёт всегда выполняется в порядке: базовая цена → ручная цена → наценка → скидка → количество → округление → итог.',
+      ),
+      const SizedBox(height: 16),
+      const _SectionTitle(
+        title: 'Денежные конвейеры',
+        subtitle:
+            'Сопоставьте уже созданные поля каждой категории с фиксированными этапами расчёта.',
+      ),
+      const SizedBox(height: 12),
+      for (final category in draft.categories)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: _moneyPipelinePanel(category),
+        ),
+      if (draft.categories.isEmpty)
+        const _EmptyHint('Сначала создайте категории и поля.'),
+      const SizedBox(height: 22),
+      const _SectionTitle(
+        title: 'Событийные правила',
+        subtitle: 'Настройте условия и действия без программного кода.',
+      ),
+      const SizedBox(height: 12),
+      for (var index = 0; index < draft.rules.length; index++)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: _rulePanel(draft.rules[index], index),
+        ),
+      if (draft.rules.isEmpty)
+        const _EmptyHint('Событийные правила ещё не добавлены.'),
+      const SizedBox(height: 10),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: OutlinedButton.icon(
+          onPressed: draft.categories.isEmpty ? null : _addRule,
+          icon: const Icon(Icons.add),
+          label: const Text('Добавить правило'),
+        ),
+      ),
+    ],
+  );
+
+  Widget _moneyPipelinePanel(CatalogCategoryDraft category) {
+    final pipeline = draft.moneyPipelines
+        .where((item) => item.categoryClientId == category.clientId)
+        .firstOrNull;
+    if (pipeline == null) {
+      return _SubPanel(
+        title: category.name,
+        child: Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Расчёт для категории не настроен. Поля останутся обычными значениями.',
+              ),
+            ),
+            OutlinedButton.icon(
+              onPressed:
+                  _numericFields(category, const [
+                    'money',
+                    'calculated_money',
+                  ]).isEmpty
+                  ? null
+                  : () => _addMoneyPipeline(category),
+              icon: const Icon(Icons.tune),
+              label: const Text('Настроить'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final expanded = !_collapsedPipelines.contains(category.clientId);
+    return _SubPanel(
+      title: category.name,
+      expanded: expanded,
+      onToggle: () => setState(
+        () => _toggleCollapsed(_collapsedPipelines, category.clientId),
+      ),
+      onDelete: () => setState(() {
+        draft.moneyPipelines.remove(pipeline);
+        _collapsedPipelines.remove(category.clientId);
+      }),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _responsiveFields([
+            _ruleFieldSelect(
+              category,
+              'Базовая цена',
+              pipeline.basePriceFieldCode,
+              const ['money', 'calculated_money'],
+              (value) => setState(() => pipeline.basePriceFieldCode = value!),
+              required: true,
+            ),
+            _ruleFieldSelect(
+              category,
+              'Ручная цена',
+              pipeline.manualPriceFieldCode,
+              const ['money'],
+              (value) => setState(() => pipeline.manualPriceFieldCode = value),
+            ),
+          ]),
+          const SizedBox(height: 12),
+          _responsiveFields([
+            _ruleFieldSelect(
+              category,
+              'Наценка',
+              pipeline.markupFieldCode,
+              const ['percent'],
+              (value) => setState(() => pipeline.markupFieldCode = value),
+            ),
+            _ruleFieldSelect(
+              category,
+              'Скидка',
+              pipeline.discountFieldCode,
+              const ['percent'],
+              (value) => setState(() => pipeline.discountFieldCode = value),
+            ),
+            _ruleFieldSelect(
+              category,
+              'Количество',
+              pipeline.quantityFieldCode,
+              const ['number'],
+              (value) => setState(() => pipeline.quantityFieldCode = value),
+            ),
+          ]),
+          const SizedBox(height: 12),
+          _responsiveFields([
+            _ruleFieldSelect(
+              category,
+              'Записать результат в',
+              pipeline.resultFieldCode,
+              const ['money', 'calculated_money'],
+              (value) => setState(() => pipeline.resultFieldCode = value!),
+              required: true,
+            ),
+            AppSelectField<int>(
+              value: pipeline.decimalPlaces,
+              label: 'Округление',
+              options: [
+                for (var value = 0; value <= 6; value++)
+                  AppSelectOption(value: value, label: '$value знаков'),
+              ],
+              onChanged: (value) =>
+                  setState(() => pipeline.decimalPlaces = value ?? 2),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            controlAffinity: ListTileControlAffinity.leading,
+            title: const Text('Участвует в итогах'),
+            subtitle: const Text(
+              'Результат строки включается в сумму варианта.',
+            ),
+            value: pipeline.includeResultInTotals,
+            onChanged: (value) =>
+                setState(() => pipeline.includeResultInTotals = value ?? true),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _addMoneyPipeline(CatalogCategoryDraft category) {
+    final money = _numericFields(category, const ['money', 'calculated_money']);
+    if (money.isEmpty) return;
+    final result = money.firstWhere(
+      (field) => catalogFieldType(field) == 'calculated_money',
+      orElse: () => money.first,
+    );
+    setState(() {
+      draft.moneyPipelines.add(
+        MoneyPipelineDraft(
+          categoryClientId: category.clientId,
+          basePriceFieldCode: money.first.fieldCode,
+          resultFieldCode: result.fieldCode,
+        ),
+      );
+      _collapsedPipelines.remove(category.clientId);
+    });
+  }
+
+  void _addRule() {
+    final category = draft.categories.first;
+    final id = 'rule_${DateTime.now().microsecondsSinceEpoch}';
+    setState(() {
+      draft.rules.add(
+        CalculationRuleDraft(
+          clientId: id,
+          name: 'Новое правило',
+          categoryClientId: category.clientId,
+          eventType: 'card_saving',
+          isEnabled: true,
+          actions: [
+            RuleActionDraft(
+              actionType: 'block_save',
+              message: 'Заполните обязательные данные.',
+            ),
+          ],
+        ),
+      );
+      _collapsedRules.remove(id);
+    });
+  }
+
+  Widget _rulePanel(CalculationRuleDraft rule, int index) {
+    final category = _categoryByClientId(rule.categoryClientId);
+    final expanded = !_collapsedRules.contains(rule.clientId);
+    return _SubPanel(
+      title: rule.name,
+      expanded: expanded,
+      onToggle: () =>
+          setState(() => _toggleCollapsed(_collapsedRules, rule.clientId)),
+      onDelete: () => setState(() {
+        draft.rules.removeAt(index);
+        _collapsedRules.remove(rule.clientId);
+      }),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _responsiveFields([
+            _textField('Название правила', rule.name, (value) {
+              setState(() => rule.name = value);
+            }),
+            AppSelectField<String>(
+              value: category?.clientId,
+              label: 'Категория',
+              options: [
+                for (final item in draft.categories)
+                  AppSelectOption(value: item.clientId, label: item.name),
+              ],
+              onChanged: (value) {
+                if (value == null) return;
+                setState(() {
+                  rule.categoryClientId = value;
+                  rule.eventFieldCode = null;
+                  rule.conditions.clear();
+                  rule.actions = [
+                    RuleActionDraft(
+                      actionType: 'block_save',
+                      message: 'Заполните обязательные данные.',
+                    ),
+                  ];
+                });
+              },
+            ),
+          ]),
+          const SizedBox(height: 8),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Правило активно'),
+            value: rule.isEnabled,
+            onChanged: (value) => setState(() => rule.isEnabled = value),
+          ),
+          const Divider(height: 24),
+          _ruleEventEditor(rule, category),
+          const Divider(height: 28),
+          _ruleConditionsEditor(rule, category),
+          const Divider(height: 28),
+          _ruleActionsEditor(rule, category),
+        ],
+      ),
+    );
+  }
+
+  Widget _ruleEventEditor(
+    CalculationRuleDraft rule,
+    CatalogCategoryDraft? category,
+  ) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Text('Событие', style: TextStyle(fontWeight: FontWeight.w700)),
+      const SizedBox(height: 10),
+      _responsiveFields([
+        AppSelectField<String>(
+          value: rule.eventType,
+          label: 'Когда выполнять',
+          options: const [
+            AppSelectOption(
+              value: 'field_changed',
+              label: 'При изменении поля',
+            ),
+            AppSelectOption(
+              value: 'card_saving',
+              label: 'При сохранении карточки',
+            ),
+            AppSelectOption(
+              value: 'row_calculation',
+              label: 'При расчёте строки',
+            ),
+            AppSelectOption(
+              value: 'variant_calculation',
+              label: 'При расчёте варианта',
+            ),
+          ],
+          onChanged: (value) => setState(() {
+            rule.eventType = value ?? 'card_saving';
+            if (rule.eventType != 'field_changed') rule.eventFieldCode = null;
+          }),
+        ),
+        if (rule.eventType == 'field_changed' && category != null)
+          _ruleFieldSelect(
+            category,
+            'Изменяемое поле',
+            rule.eventFieldCode,
+            const [],
+            (value) => setState(() => rule.eventFieldCode = value),
+            required: true,
+          ),
+      ]),
+    ],
+  );
+
+  Widget _ruleConditionsEditor(
+    CalculationRuleDraft rule,
+    CatalogCategoryDraft? category,
+  ) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Text('Условия', style: TextStyle(fontWeight: FontWeight.w700)),
+      const SizedBox(height: 8),
+      for (var index = 0; index < rule.conditions.length; index++)
+        _DeleteRow(
+          onDelete: () => setState(() => rule.conditions.removeAt(index)),
+          child: _conditionEditor(rule.conditions[index], category),
+        ),
+      TextButton.icon(
+        onPressed: category == null || category.fields.isEmpty
+            ? null
+            : () => setState(
+                () => rule.conditions.add(
+                  RuleConditionDraft(
+                    fieldCode: category.fields.first.fieldCode,
+                    operator: 'is_filled',
+                  ),
+                ),
+              ),
+        icon: const Icon(Icons.add),
+        label: const Text('Добавить условие'),
+      ),
+    ],
+  );
+
+  Widget _conditionEditor(
+    RuleConditionDraft condition,
+    CatalogCategoryDraft? category,
+  ) {
+    if (category == null) return const SizedBox.shrink();
+    return _responsiveFields([
+      _ruleFieldSelect(
+        category,
+        'Поле',
+        condition.fieldCode,
+        const [],
+        (value) => setState(() => condition.fieldCode = value!),
+        required: true,
+      ),
+      AppSelectField<String>(
+        value: condition.operator,
+        label: 'Проверка',
+        options: const [
+          AppSelectOption(value: 'is_true', label: 'Флажок включён'),
+          AppSelectOption(value: 'is_false', label: 'Флажок выключен'),
+          AppSelectOption(value: 'greater_than_zero', label: 'Больше нуля'),
+          AppSelectOption(value: 'is_filled', label: 'Поле заполнено'),
+          AppSelectOption(value: 'equals', label: 'Равно значению'),
+        ],
+        onChanged: (value) =>
+            setState(() => condition.operator = value ?? 'is_filled'),
+      ),
+      if (condition.operator == 'equals')
+        _textField('Значение', condition.comparisonValue ?? '', (value) {
+          condition.comparisonValue = value;
+        }),
+    ]);
+  }
+
+  Widget _ruleActionsEditor(
+    CalculationRuleDraft rule,
+    CatalogCategoryDraft? category,
+  ) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Text('Действия', style: TextStyle(fontWeight: FontWeight.w700)),
+      const SizedBox(height: 8),
+      for (var index = 0; index < rule.actions.length; index++)
+        _DeleteRow(
+          onDelete: () => setState(() => rule.actions.removeAt(index)),
+          child: _actionEditor(rule.actions[index], category),
+        ),
+      TextButton.icon(
+        onPressed: () => setState(
+          () => rule.actions.add(RuleActionDraft(actionType: 'exclude_row')),
+        ),
+        icon: const Icon(Icons.add),
+        label: const Text('Добавить действие'),
+      ),
+    ],
+  );
+
+  Widget _actionEditor(RuleActionDraft action, CatalogCategoryDraft? category) {
+    final actionType = AppSelectField<String>(
+      value: action.actionType,
+      label: 'Действие',
+      options: const [
+        AppSelectOption(
+          value: 'exclude_row',
+          label: 'Исключить строку из расчёта',
+        ),
+        AppSelectOption(value: 'set_field', label: 'Изменить другое поле'),
+        AppSelectOption(value: 'calculate_field', label: 'Рассчитать значение'),
+        AppSelectOption(
+          value: 'add_related_cards',
+          label: 'Добавить связанные карточки',
+        ),
+        AppSelectOption(
+          value: 'remove_related_cards',
+          label: 'Удалить связанные карточки',
+        ),
+        AppSelectOption(
+          value: 'set_field_visibility',
+          label: 'Скрыть или показать поле',
+        ),
+        AppSelectOption(value: 'block_save', label: 'Запретить сохранение'),
+        AppSelectOption(
+          value: 'aggregate_money',
+          label: 'Добавить в итог варианта',
+        ),
+      ],
+      onChanged: (value) => setState(() {
+        action.actionType = value ?? 'exclude_row';
+        action.targetFieldCode = null;
+        action.sourceFieldCode = null;
+        action.constantValue = null;
+        action.booleanValue = null;
+        action.dependencyClientId = null;
+        action.formula = null;
+      }),
+    );
+    if (category == null) return actionType;
+
+    final controls = <Widget>[actionType];
+    switch (action.actionType) {
+      case 'exclude_row':
+        break;
+      case 'set_field':
+        controls.addAll([
+          _ruleFieldSelect(
+            category,
+            'Изменить поле',
+            action.targetFieldCode,
+            const [],
+            (value) => setState(() => action.targetFieldCode = value),
+            required: true,
+          ),
+          _ruleFieldSelect(
+            category,
+            'Взять значение из',
+            action.sourceFieldCode,
+            const [],
+            (value) => setState(() => action.sourceFieldCode = value),
+            required: true,
+          ),
+        ]);
+        break;
+      case 'calculate_field':
+        controls.add(
+          _ruleFieldSelect(
+            category,
+            'Записать результат в',
+            action.targetFieldCode,
+            const ['number', 'money', 'percent', 'calculated_money'],
+            (value) => setState(() => action.targetFieldCode = value),
+            required: true,
+          ),
+        );
+        break;
+      case 'add_related_cards':
+      case 'remove_related_cards':
+        final dependencies = draft.dependencies
+            .where(
+              (dependency) =>
+                  dependency.targetCategoryClientId == category.clientId,
+            )
+            .toList();
+        controls.add(
+          AppSelectField<String>(
+            value:
+                dependencies.any(
+                  (item) => item.clientId == action.dependencyClientId,
+                )
+                ? action.dependencyClientId
+                : null,
+            label: 'Зависимость',
+            options: [
+              for (final dependency in dependencies)
+                AppSelectOption(
+                  value: dependency.clientId,
+                  label: _dependencyLabel(dependency),
+                ),
+            ],
+            onChanged: (value) =>
+                setState(() => action.dependencyClientId = value),
+          ),
+        );
+        break;
+      case 'set_field_visibility':
+        controls.addAll([
+          _ruleFieldSelect(
+            category,
+            'Поле',
+            action.targetFieldCode,
+            const [],
+            (value) => setState(() => action.targetFieldCode = value),
+            required: true,
+          ),
+          AppSelectField<bool>(
+            value: action.booleanValue,
+            label: 'Видимость',
+            options: const [
+              AppSelectOption(value: true, label: 'Показать'),
+              AppSelectOption(value: false, label: 'Скрыть'),
+            ],
+            onChanged: (value) => setState(() => action.booleanValue = value),
+          ),
+        ]);
+        break;
+      case 'block_save':
+        controls.add(
+          _textField(
+            'Сообщение пользователю',
+            action.message ?? '',
+            (value) => action.message = value,
+          ),
+        );
+        break;
+      case 'aggregate_money':
+        controls.addAll([
+          _ruleFieldSelect(
+            category,
+            'Денежное поле',
+            action.sourceFieldCode,
+            const ['money', 'calculated_money'],
+            (value) => setState(() => action.sourceFieldCode = value),
+            required: true,
+          ),
+          AppSelectField<String>(
+            value: action.aggregationOperation,
+            label: 'Операция',
+            options: const [
+              AppSelectOption(value: 'add', label: 'Прибавить'),
+              AppSelectOption(value: 'subtract', label: 'Вычесть'),
+            ],
+            onChanged: (value) => setState(() {
+              action.aggregationOperation = value;
+              action.aggregationTarget = 'variant_total';
+            }),
+          ),
+        ]);
+        break;
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _responsiveFields(controls),
+        if (action.actionType == 'calculate_field') ...[
+          const SizedBox(height: 12),
+          _formulaEditor(action, category),
+        ],
+        if (action.actionType == 'aggregate_money') ...[
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            controlAffinity: ListTileControlAffinity.leading,
+            title: const Text('Учитывать количество'),
+            value: action.multiplyByQuantity,
+            onChanged: (value) => setState(() {
+              action.multiplyByQuantity = value ?? false;
+              if (!action.multiplyByQuantity) action.quantityFieldCode = null;
+            }),
+          ),
+          if (action.multiplyByQuantity)
+            _ruleFieldSelect(
+              category,
+              'Поле количества',
+              action.quantityFieldCode,
+              const ['number'],
+              (value) => setState(() => action.quantityFieldCode = value),
+              required: true,
+            ),
+        ],
+      ],
+    );
+  }
+
+  String _dependencyLabel(CategoryDependencyDraft dependency) {
+    final source = _categoryByClientId(dependency.sourceCategoryClientId);
+    final target = _categoryByClientId(dependency.targetCategoryClientId);
+    return '${source?.name ?? 'Категория'} → ${target?.name ?? 'Категория'}';
+  }
+
+  Widget _formulaEditor(RuleActionDraft action, CatalogCategoryDraft category) {
+    final formula = action.formula ??= FormulaDraft();
+    final numeric = _numericFields(category, const [
+      'number',
+      'money',
+      'percent',
+      'calculated_money',
+    ]);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFF0B141F),
+        border: Border.all(color: const Color(0xFF2A405A)),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Визуальная формула',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 10),
+            Container(
+              constraints: const BoxConstraints(minHeight: 52),
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF101C2B),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (var index = 0; index < formula.tokens.length; index++)
+                    InputChip(
+                      label: Text(
+                        _formulaTokenLabel(formula.tokens[index], category),
+                      ),
+                      onDeleted: () =>
+                          setState(() => formula.tokens.removeAt(index)),
+                    ),
+                  if (formula.tokens.isEmpty)
+                    const Text(
+                      'Добавьте поле, число, операцию или скобку.',
+                      style: TextStyle(color: Color(0xFF8FA4C2)),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                PopupMenuButton<CatalogFieldDraft>(
+                  onSelected: (field) => setState(
+                    () => formula.tokens.add(
+                      FormulaTokenDraft(
+                        tokenType: 'field',
+                        fieldCode: field.fieldCode,
+                      ),
+                    ),
+                  ),
+                  itemBuilder: (context) => [
+                    for (final field in numeric)
+                      PopupMenuItem(
+                        value: field,
+                        child: Text(catalogFieldLabel(field)),
+                      ),
+                  ],
+                  child: const Chip(label: Text('+ Поле')),
+                ),
+                ActionChip(
+                  label: const Text('+ Число'),
+                  onPressed: () async {
+                    final value = await _askFormulaConstant();
+                    if (!mounted || value == null) return;
+                    setState(
+                      () => formula.tokens.add(
+                        FormulaTokenDraft(
+                          tokenType: 'constant',
+                          constantValue: value,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                for (final operation in const [
+                  ('add', '+'),
+                  ('subtract', '−'),
+                  ('multiply', '×'),
+                  ('divide', '÷'),
+                ])
+                  ActionChip(
+                    label: Text(operation.$2),
+                    onPressed: () => setState(
+                      () => formula.tokens.add(
+                        FormulaTokenDraft(
+                          tokenType: 'operator',
+                          operator: operation.$1,
+                        ),
+                      ),
+                    ),
+                  ),
+                ActionChip(
+                  label: const Text('('),
+                  onPressed: () => setState(
+                    () => formula.tokens.add(
+                      FormulaTokenDraft(tokenType: 'open_group'),
+                    ),
+                  ),
+                ),
+                ActionChip(
+                  label: const Text(')'),
+                  onPressed: () => setState(
+                    () => formula.tokens.add(
+                      FormulaTokenDraft(tokenType: 'close_group'),
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: formula.tokens.isEmpty
+                      ? null
+                      : () => setState(formula.tokens.clear),
+                  child: const Text('Очистить'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: 220,
+              child: AppSelectField<int>(
+                value: formula.decimalPlaces,
+                label: 'Округление результата',
+                options: [
+                  for (var value = 0; value <= 6; value++)
+                    AppSelectOption(value: value, label: '$value знаков'),
+                ],
+                onChanged: (value) =>
+                    setState(() => formula.decimalPlaces = value ?? 2),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<num?> _askFormulaConstant() async {
+    final controller = TextEditingController();
+    final result = await showDialog<num>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Добавить число'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(
+            decimal: true,
+            signed: true,
+          ),
+          inputFormatters: [
+            FilteringTextInputFormatter.allow(RegExp(r'[-0-9.,]')),
+          ],
+          decoration: const InputDecoration(labelText: 'Значение'),
+          onSubmitted: (_) {
+            final value = num.tryParse(controller.text.replaceAll(',', '.'));
+            if (value != null) Navigator.pop(dialogContext, value);
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final value = num.tryParse(controller.text.replaceAll(',', '.'));
+              if (value != null) Navigator.pop(dialogContext, value);
+            },
+            child: const Text('Добавить'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return result;
+  }
+
+  String _formulaTokenLabel(
+    FormulaTokenDraft token,
+    CatalogCategoryDraft category,
+  ) => switch (token.tokenType) {
+    'field' => '[${_categoryFieldLabel(category, token.fieldCode ?? '')}]',
+    'constant' => '${token.constantValue}',
+    'operator' => switch (token.operator) {
+      'add' => '+',
+      'subtract' => '−',
+      'multiply' => '×',
+      'divide' => '÷',
+      _ => '?',
+    },
+    'open_group' => '(',
+    'close_group' => ')',
+    _ => '?',
+  };
+
+  Widget _ruleFieldSelect(
+    CatalogCategoryDraft category,
+    String label,
+    String? value,
+    List<String> allowedTypes,
+    ValueChanged<String?> onChanged, {
+    bool required = false,
+  }) {
+    final fields = allowedTypes.isEmpty
+        ? category.fields
+        : _numericFields(category, allowedTypes);
+    final selected = fields.any((field) => field.fieldCode == value)
+        ? value
+        : null;
+    return AppSelectField<String>(
+      value: selected,
+      label: label,
+      options: [
+        if (!required)
+          const AppSelectOption(value: null, label: 'Не используется'),
+        for (final field in fields)
+          AppSelectOption(
+            value: field.fieldCode,
+            label: catalogFieldLabel(field),
+          ),
+      ],
+      onChanged: onChanged,
+    );
+  }
+
+  List<CatalogFieldDraft> _numericFields(
+    CatalogCategoryDraft category,
+    List<String> allowedTypes,
+  ) => category.fields
+      .where((field) => allowedTypes.contains(catalogFieldType(field)))
+      .toList();
 
   Widget _rolesEditor() => Column(
     children: [
@@ -1511,6 +2573,8 @@ final class _OrganizationOnboardingPageState
       ),
       _ReviewRow('Категории', '${draft.categories.length}'),
       _ReviewRow('Поля', '${draft.fields.length}'),
+      _ReviewRow('Денежные конвейеры', '${draft.moneyPipelines.length}'),
+      _ReviewRow('Событийные правила', '${draft.rules.length}'),
       _ReviewRow('Зависимости', '${draft.dependencies.length}'),
       _ReviewRow('Дополнительные роли', '${draft.roles.length}'),
       _ReviewRow('Справочники', '${draft.dictionaries.length}'),
@@ -1756,6 +2820,7 @@ final class _Progress extends StatelessWidget {
     'Канбаны',
     'Каталог',
     'Поля',
+    'Правила и расчёты',
     'Зависимости',
     'Роли',
     'Справочники',
@@ -1820,14 +2885,14 @@ final class _Progress extends StatelessWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  '${step + 1} из 8 · ${labels[step]}',
+                  '${step + 1} из 9 · ${labels[step]}',
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
               ),
               SizedBox(
                 width: 90,
                 child: LinearProgressIndicator(
-                  value: (step + 1) / 8,
+                  value: (step + 1) / 9,
                   minHeight: 5,
                 ),
               ),
@@ -2191,7 +3256,7 @@ final class _OrderedRow extends StatelessWidget {
   final int length;
   final Widget child;
   final ValueChanged<int> onMove;
-  final VoidCallback onDelete;
+  final VoidCallback? onDelete;
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: 8),
@@ -2210,46 +3275,61 @@ final class _OrderedRow extends StatelessWidget {
         Expanded(child: child),
         IconButton(
           onPressed: onDelete,
-          icon: const Icon(Icons.close),
-          tooltip: 'Удалить',
+          icon: Icon(onDelete == null ? Icons.lock_outline : Icons.close),
+          tooltip: onDelete == null
+              ? 'Системное поле нельзя удалить'
+              : 'Удалить',
         ),
       ],
     ),
   );
 }
 
-final class _Flag extends StatelessWidget {
-  const _Flag({
+final class _CompactFlag extends StatelessWidget {
+  const _CompactFlag({
     required this.label,
     required this.value,
     required this.onChanged,
-    this.tooltip,
   });
+
   final String label;
   final bool value;
   final ValueChanged<bool>? onChanged;
-  final String? tooltip;
+
   @override
-  Widget build(BuildContext context) => Tooltip(
-    message: tooltip ?? '',
-    child: SizedBox(
-      width: 154,
-      child: CheckboxListTile(
-        contentPadding: EdgeInsets.zero,
-        dense: true,
-        controlAffinity: ListTileControlAffinity.leading,
-        title: Text(
-          label,
-          maxLines: 1,
-          softWrap: false,
-          overflow: TextOverflow.visible,
-          style: const TextStyle(fontSize: 12),
-        ),
-        value: value,
-        onChanged: onChanged == null
-            ? null
-            : (value) => onChanged!(value ?? false),
-      ),
+  Widget build(BuildContext context) => SizedBox(
+    width: 142,
+    child: CheckboxListTile(
+      contentPadding: EdgeInsets.zero,
+      dense: true,
+      controlAffinity: ListTileControlAffinity.leading,
+      title: Text(label, maxLines: 1, style: const TextStyle(fontSize: 12)),
+      value: value,
+      onChanged: onChanged == null
+          ? null
+          : (selected) => onChanged!(selected ?? false),
+    ),
+  );
+}
+
+final class _FieldTypeBadge extends StatelessWidget {
+  const _FieldTypeBadge(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    constraints: const BoxConstraints(minWidth: 112),
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+    decoration: BoxDecoration(
+      color: const Color(0xFF101C2B),
+      border: Border.all(color: const Color(0xFF2A405A)),
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: Text(
+      label,
+      textAlign: TextAlign.center,
+      style: const TextStyle(color: Color(0xFF9DB2CE), fontSize: 12),
     ),
   );
 }

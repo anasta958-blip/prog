@@ -63,7 +63,7 @@ internal sealed class PostgresOrganizationOnboardingService(
         var state = await ReadStateAsync(connection, cancellationToken);
         if (state.IsCompleted) return state;
 
-        var draft = state.Draft with { CurrentStep = 8 };
+        var draft = state.Draft with { CurrentStep = 9 };
         OnboardingValidator.Validate(draft, true);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
@@ -92,7 +92,7 @@ internal sealed class PostgresOrganizationOnboardingService(
             ("name", draft.Company.OrganizationName.Trim()),
             ("organization_id", tenantContext.OrganizationId));
         await ExecuteAsync(connection, transaction,
-            "UPDATE onboarding_draft SET current_step = 8, payload = CAST(@payload AS jsonb), updated_by = @user_id, updated_at = now() WHERE singleton",
+            "UPDATE onboarding_draft SET current_step = 9, payload = CAST(@payload AS jsonb), updated_by = @user_id, updated_at = now() WHERE singleton",
             cancellationToken,
             ("payload", JsonSerializer.Serialize(draft, JsonOptions)),
             ("user_id", userId));
@@ -288,10 +288,12 @@ internal sealed class PostgresOrganizationOnboardingService(
                 var field = category.Fields[fieldIndex];
                 await ExecuteAsync(connection, transaction, """
                     INSERT INTO catalog_category_fields
-                        (category_id, field_code, is_visible, is_required, sort_order, dictionary_code)
-                    VALUES (@category_id, @field_code, @visible, @required, @sort, @dictionary_code)
+                        (category_id, field_code, label, field_type, is_visible, is_required, sort_order, dictionary_code)
+                    VALUES (@category_id, @field_code, @label, @field_type, @visible, @required, @sort, @dictionary_code)
                     """, token,
                     ("category_id", categoryId), ("field_code", field.FieldCode.Trim()),
+                    ("label", OnboardingFieldRegistry.LabelOf(field)),
+                    ("field_type", OnboardingFieldRegistry.FieldTypeOf(field)),
                     ("visible", field.IsVisible), ("required", field.IsRequired), ("sort", fieldIndex),
                     ("dictionary_code", Db(field.DictionaryCode)));
             }
@@ -447,10 +449,7 @@ internal sealed class PostgresOrganizationOnboardingService(
             fields,
             [],
             [new DictionaryDraft("units", "Единицы измерения", [new("шт"), new("м"), new("м²")])],
-            [
-                new CategoryDependencyDraft("works-equipment", "works", "equipment", "linked_services"),
-                new CategoryDependencyDraft("works-materials", "works", "materials", "linked_services"),
-            ]);
+            []);
     }
 
     private static object Db(string? value) => string.IsNullOrWhiteSpace(value) ? DBNull.Value : value.Trim();

@@ -89,7 +89,7 @@ INSERT INTO role_permissions (role_id, permission_id)
 SELECT role.id, permission.id
 FROM roles AS role
 CROSS JOIN permissions AS permission
-WHERE role.name IN ('Директор', 'Администратор')
+WHERE role.name = 'Директор'
   AND role.is_system
   AND permission.code LIKE 'company.%'
 ON CONFLICT DO NOTHING;

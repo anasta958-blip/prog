@@ -11,6 +11,7 @@ import 'package:sklad_komforta_app/features/catalog/catalog_controller.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_models.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_page.dart';
 import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
+import 'package:sklad_komforta_app/features/onboarding/onboarding_field_registry.dart';
 
 void main() {
   const config = AppConfig(
@@ -212,7 +213,7 @@ void main() {
     },
   );
 
-  testWidgets('onboarding использует выбранный восьмишаговый вариант 2', (
+  testWidgets('onboarding использует выбранный девятишаговый вариант 2', (
     tester,
   ) async {
     tester.view.devicePixelRatio = 1;
@@ -238,7 +239,8 @@ void main() {
     expect(find.text('1. Компания'), findsWidgets);
     expect(find.text('Предварительный просмотр'), findsOneWidget);
     expect(find.text('Сохранить и продолжить'), findsOneWidget);
-    expect(find.text('5. Зависимости'), findsOneWidget);
+    expect(find.text('5. Правила и расчёты'), findsWidgets);
+    expect(find.text('6. Зависимости'), findsOneWidget);
 
     controller.dispose();
   });
@@ -272,6 +274,38 @@ void main() {
       find.widgetWithText(MenuItemButton, 'ИП'),
     );
     expect(menuItemBounds.top, greaterThanOrEqualTo(fieldBounds.bottom));
+
+    controller.dispose();
+  });
+
+  testWidgets('пятый шаг открывает правила и фиксированный денежный порядок', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 900);
+    addTearDown(tester.view.reset);
+    final controller = AuthController(
+      config,
+      api: _OfflineAuthGateway(),
+      tokens: _MemoryTokenRepository(),
+    );
+    controller.stage = AuthStage.organization;
+    controller.onboardingDraft = OrganizationOnboardingDraft.initial()
+      ..currentStep = 5;
+
+    await tester.pumpWidget(
+      SkladKomfortaApp(
+        config: config,
+        authController: controller,
+        initializeAuthController: false,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('5. Правила и расчёты'), findsWidgets);
+    expect(find.text('Денежные конвейеры'), findsOneWidget);
+    expect(find.textContaining('базовая цена → ручная цена'), findsOneWidget);
+    expect(find.text('Добавить правило'), findsOneWidget);
 
     controller.dispose();
   });
@@ -430,7 +464,39 @@ void main() {
 
     await tester.tap(find.bySemanticsLabel('Развернуть поля категории'));
     await tester.pumpAndSettle();
-    await tester.tap(find.bySemanticsLabel('Развернуть поля канбана'));
+    expect(find.byTooltip('Системное поле нельзя удалить'), findsNWidgets(4));
+
+    final addFieldButton = find.text('Добавить поле');
+    await Scrollable.ensureVisible(
+      tester.element(addFieldButton),
+      alignment: 0.5,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.ancestor(
+        of: addFieldButton,
+        matching: find.byType(PopupMenuButton<OnboardingFieldDefinition>),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Число').last);
+    await tester.pumpAndSettle();
+
+    final customField = category.fields.last;
+    expect(customField.fieldCode, startsWith('custom_'));
+    expect(customField.fieldType, 'number');
+    expect(customField.label, isEmpty);
+    expect(find.byTooltip('Удалить'), findsOneWidget);
+
+    final workflowFieldsToggle = find.bySemanticsLabel(
+      'Развернуть поля канбана',
+    );
+    await Scrollable.ensureVisible(
+      tester.element(workflowFieldsToggle),
+      alignment: 0.5,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(workflowFieldsToggle);
     await tester.pumpAndSettle();
     await tester.ensureVisible(
       find.text('Использовать категорию в этом канбане'),
@@ -444,10 +510,24 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(workflow.categories.single.categoryClientId, 'equipment');
-    expect(workflow.categories.single.fieldCodes, ['name']);
+    expect(workflow.categories.single.fieldCodes, [
+      'name',
+      'marking',
+      'unit',
+      'base_price',
+      customField.fieldCode,
+    ]);
     expect(find.text('Расчётное поле'), findsOneWidget);
 
-    await tester.tap(find.bySemanticsLabel('Свернуть поля категории'));
+    final categoryFieldsToggle = find.bySemanticsLabel(
+      'Свернуть поля категории',
+    );
+    await Scrollable.ensureVisible(
+      tester.element(categoryFieldsToggle),
+      alignment: 0.5,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(categoryFieldsToggle);
     await tester.pumpAndSettle();
     expect(find.bySemanticsLabel('Развернуть поля категории'), findsOneWidget);
 
@@ -467,7 +547,7 @@ void main() {
     );
     controller.stage = AuthStage.organization;
     controller.onboardingDraft = OrganizationOnboardingDraft.initial()
-      ..currentStep = 7
+      ..currentStep = 8
       ..dictionaries.add(
         DictionaryDraft(code: 'dictionary_2', name: 'Поставщики', items: []),
       );

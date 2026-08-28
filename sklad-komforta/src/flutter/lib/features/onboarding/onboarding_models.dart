@@ -149,12 +149,16 @@ final class CatalogFieldDraft {
     required this.isVisible,
     required this.isRequired,
     this.dictionaryCode,
+    this.label,
+    this.fieldType,
   });
 
   String fieldCode;
   bool isVisible;
   bool isRequired;
   String? dictionaryCode;
+  String? label;
+  String? fieldType;
 
   factory CatalogFieldDraft.fromJson(Map<String, dynamic> json) =>
       CatalogFieldDraft(
@@ -164,6 +168,8 @@ final class CatalogFieldDraft {
         dictionaryCode: json['fieldCode'] == 'group'
             ? null
             : json['dictionaryCode'] as String?,
+        label: json['label'] as String?,
+        fieldType: json['fieldType'] as String?,
       );
 
   Map<String, dynamic> toJson() => {
@@ -171,6 +177,8 @@ final class CatalogFieldDraft {
     'isVisible': isVisible,
     'isRequired': isRequired,
     'dictionaryCode': fieldCode == 'group' ? null : dictionaryCode,
+    'label': label,
+    'fieldType': fieldType,
   };
 }
 
@@ -334,7 +342,254 @@ final class DictionaryDraft {
   };
 }
 
-/// Полный изменяемый черновик всех восьми шагов onboarding.
+/// Элемент безопасной формулы: поле, число, операция или скобка.
+final class FormulaTokenDraft {
+  FormulaTokenDraft({
+    required this.tokenType,
+    this.fieldCode,
+    this.constantValue,
+    this.operator,
+  });
+
+  String tokenType;
+  String? fieldCode;
+  num? constantValue;
+  String? operator;
+
+  factory FormulaTokenDraft.fromJson(Map<String, dynamic> json) =>
+      FormulaTokenDraft(
+        tokenType: json['tokenType'] as String,
+        fieldCode: json['fieldCode'] as String?,
+        constantValue: json['constantValue'] as num?,
+        operator: json['operator'] as String?,
+      );
+
+  Map<String, dynamic> toJson() => {
+    'tokenType': tokenType,
+    'fieldCode': fieldCode,
+    'constantValue': constantValue,
+    'operator': operator,
+  };
+}
+
+/// Формула и число знаков после запятой в её результате.
+final class FormulaDraft {
+  FormulaDraft({List<FormulaTokenDraft>? tokens, this.decimalPlaces = 2})
+    : tokens = tokens ?? <FormulaTokenDraft>[];
+
+  List<FormulaTokenDraft> tokens;
+  int decimalPlaces;
+
+  factory FormulaDraft.fromJson(Map<String, dynamic> json) => FormulaDraft(
+    tokens: ((json['tokens'] as List<dynamic>?) ?? const [])
+        .map((item) => FormulaTokenDraft.fromJson(item as Map<String, dynamic>))
+        .toList(),
+    decimalPlaces: (json['decimalPlaces'] as num?)?.toInt() ?? 2,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'tokens': tokens.map((item) => item.toJson()).toList(),
+    'decimalPlaces': decimalPlaces,
+  };
+}
+
+/// Проверяемое условие событийного правила.
+final class RuleConditionDraft {
+  RuleConditionDraft({
+    required this.fieldCode,
+    required this.operator,
+    this.comparisonValue,
+  });
+
+  String fieldCode;
+  String operator;
+  String? comparisonValue;
+
+  factory RuleConditionDraft.fromJson(Map<String, dynamic> json) =>
+      RuleConditionDraft(
+        fieldCode: json['fieldCode'] as String,
+        operator: json['operator'] as String,
+        comparisonValue: json['comparisonValue'] as String?,
+      );
+
+  Map<String, dynamic> toJson() => {
+    'fieldCode': fieldCode,
+    'operator': operator,
+    'comparisonValue': comparisonValue,
+  };
+}
+
+/// Действие, выполняемое после успешной проверки условий.
+final class RuleActionDraft {
+  RuleActionDraft({
+    required this.actionType,
+    this.targetFieldCode,
+    this.sourceFieldCode,
+    this.constantValue,
+    this.booleanValue,
+    this.dependencyClientId,
+    this.aggregationOperation,
+    this.aggregationTarget,
+    this.multiplyByQuantity = false,
+    this.quantityFieldCode,
+    this.message,
+    this.formula,
+  });
+
+  String actionType;
+  String? targetFieldCode;
+  String? sourceFieldCode;
+  String? constantValue;
+  bool? booleanValue;
+  String? dependencyClientId;
+  String? aggregationOperation;
+  String? aggregationTarget;
+  bool multiplyByQuantity;
+  String? quantityFieldCode;
+  String? message;
+  FormulaDraft? formula;
+
+  factory RuleActionDraft.fromJson(Map<String, dynamic> json) =>
+      RuleActionDraft(
+        actionType: json['actionType'] as String,
+        targetFieldCode: json['targetFieldCode'] as String?,
+        sourceFieldCode: json['sourceFieldCode'] as String?,
+        constantValue: json['constantValue'] as String?,
+        booleanValue: json['booleanValue'] as bool?,
+        dependencyClientId: json['dependencyClientId'] as String?,
+        aggregationOperation: json['aggregationOperation'] as String?,
+        aggregationTarget: json['aggregationTarget'] as String?,
+        multiplyByQuantity: json['multiplyByQuantity'] as bool? ?? false,
+        quantityFieldCode: json['quantityFieldCode'] as String?,
+        message: json['message'] as String?,
+        formula: json['formula'] == null
+            ? null
+            : FormulaDraft.fromJson(json['formula'] as Map<String, dynamic>),
+      );
+
+  Map<String, dynamic> toJson() => {
+    'actionType': actionType,
+    'targetFieldCode': targetFieldCode,
+    'sourceFieldCode': sourceFieldCode,
+    'constantValue': constantValue,
+    'booleanValue': booleanValue,
+    'dependencyClientId': dependencyClientId,
+    'aggregationOperation': aggregationOperation,
+    'aggregationTarget': aggregationTarget,
+    'multiplyByQuantity': multiplyByQuantity,
+    'quantityFieldCode': quantityFieldCode,
+    'message': message,
+    'formula': formula?.toJson(),
+  };
+}
+
+/// Событийное правило для полей одной категории.
+final class CalculationRuleDraft {
+  CalculationRuleDraft({
+    required this.clientId,
+    required this.name,
+    required this.categoryClientId,
+    required this.eventType,
+    required this.isEnabled,
+    this.eventFieldCode,
+    List<RuleConditionDraft>? conditions,
+    List<RuleActionDraft>? actions,
+  }) : conditions = conditions ?? <RuleConditionDraft>[],
+       actions = actions ?? <RuleActionDraft>[];
+
+  String clientId;
+  String name;
+  String categoryClientId;
+  String eventType;
+  bool isEnabled;
+  String? eventFieldCode;
+  List<RuleConditionDraft> conditions;
+  List<RuleActionDraft> actions;
+
+  factory CalculationRuleDraft.fromJson(Map<String, dynamic> json) =>
+      CalculationRuleDraft(
+        clientId: json['clientId'] as String,
+        name: json['name'] as String,
+        categoryClientId: json['categoryClientId'] as String,
+        eventType: json['eventType'] as String,
+        isEnabled: json['isEnabled'] as bool? ?? true,
+        eventFieldCode: json['eventFieldCode'] as String?,
+        conditions: ((json['conditions'] as List<dynamic>?) ?? const [])
+            .map(
+              (item) =>
+                  RuleConditionDraft.fromJson(item as Map<String, dynamic>),
+            )
+            .toList(),
+        actions: ((json['actions'] as List<dynamic>?) ?? const [])
+            .map(
+              (item) => RuleActionDraft.fromJson(item as Map<String, dynamic>),
+            )
+            .toList(),
+      );
+
+  Map<String, dynamic> toJson() => {
+    'clientId': clientId,
+    'name': name,
+    'categoryClientId': categoryClientId,
+    'eventType': eventType,
+    'isEnabled': isEnabled,
+    'eventFieldCode': eventFieldCode,
+    'conditions': conditions.map((item) => item.toJson()).toList(),
+    'actions': actions.map((item) => item.toJson()).toList(),
+  };
+}
+
+/// Поля неизменяемого денежного конвейера одной категории.
+final class MoneyPipelineDraft {
+  MoneyPipelineDraft({
+    required this.categoryClientId,
+    required this.basePriceFieldCode,
+    required this.resultFieldCode,
+    this.manualPriceFieldCode,
+    this.markupFieldCode,
+    this.discountFieldCode,
+    this.quantityFieldCode,
+    this.decimalPlaces = 2,
+    this.includeResultInTotals = true,
+  });
+
+  String categoryClientId;
+  String basePriceFieldCode;
+  String? manualPriceFieldCode;
+  String? markupFieldCode;
+  String? discountFieldCode;
+  String? quantityFieldCode;
+  String resultFieldCode;
+  int decimalPlaces;
+  bool includeResultInTotals;
+
+  factory MoneyPipelineDraft.fromJson(Map<String, dynamic> json) =>
+      MoneyPipelineDraft(
+        categoryClientId: json['categoryClientId'] as String,
+        basePriceFieldCode: json['basePriceFieldCode'] as String,
+        manualPriceFieldCode: json['manualPriceFieldCode'] as String?,
+        markupFieldCode: json['markupFieldCode'] as String?,
+        discountFieldCode: json['discountFieldCode'] as String?,
+        quantityFieldCode: json['quantityFieldCode'] as String?,
+        resultFieldCode: json['resultFieldCode'] as String,
+        decimalPlaces: (json['decimalPlaces'] as num?)?.toInt() ?? 2,
+        includeResultInTotals: json['includeResultInTotals'] as bool? ?? true,
+      );
+
+  Map<String, dynamic> toJson() => {
+    'categoryClientId': categoryClientId,
+    'basePriceFieldCode': basePriceFieldCode,
+    'manualPriceFieldCode': manualPriceFieldCode,
+    'markupFieldCode': markupFieldCode,
+    'discountFieldCode': discountFieldCode,
+    'quantityFieldCode': quantityFieldCode,
+    'resultFieldCode': resultFieldCode,
+    'decimalPlaces': decimalPlaces,
+    'includeResultInTotals': includeResultInTotals,
+  };
+}
+
+/// Полный изменяемый черновик всех девяти шагов onboarding.
 final class OrganizationOnboardingDraft {
   OrganizationOnboardingDraft({
     required this.currentStep,
@@ -345,7 +600,10 @@ final class OrganizationOnboardingDraft {
     required this.roles,
     required this.dictionaries,
     required this.dependencies,
-  });
+    List<CalculationRuleDraft>? rules,
+    List<MoneyPipelineDraft>? moneyPipelines,
+  }) : rules = rules ?? <CalculationRuleDraft>[],
+       moneyPipelines = moneyPipelines ?? <MoneyPipelineDraft>[];
   int currentStep;
   CompanyProfileDraft company;
   List<WorkflowDraft> workflows;
@@ -354,6 +612,8 @@ final class OrganizationOnboardingDraft {
   List<OnboardingRoleDraft> roles;
   List<DictionaryDraft> dictionaries;
   List<CategoryDependencyDraft> dependencies;
+  List<CalculationRuleDraft> rules;
+  List<MoneyPipelineDraft> moneyPipelines;
 
   /// Создаёт локальную стартовую конфигурацию до появления tenant-схемы.
   factory OrganizationOnboardingDraft.initial() => OrganizationOnboardingDraft(
@@ -365,6 +625,8 @@ final class OrganizationOnboardingDraft {
     roles: [],
     dictionaries: [],
     dependencies: [],
+    rules: [],
+    moneyPipelines: [],
   );
 
   factory OrganizationOnboardingDraft.fromJson(
@@ -399,6 +661,16 @@ final class OrganizationOnboardingDraft {
               CategoryDependencyDraft.fromJson(item as Map<String, dynamic>),
         )
         .toList(),
+    rules: ((json['rules'] as List<dynamic>?) ?? const [])
+        .map(
+          (item) => CalculationRuleDraft.fromJson(item as Map<String, dynamic>),
+        )
+        .toList(),
+    moneyPipelines: ((json['moneyPipelines'] as List<dynamic>?) ?? const [])
+        .map(
+          (item) => MoneyPipelineDraft.fromJson(item as Map<String, dynamic>),
+        )
+        .toList(),
   );
 
   Map<String, dynamic> toJson() => {
@@ -410,5 +682,35 @@ final class OrganizationOnboardingDraft {
     'roles': roles.map((item) => item.toJson()).toList(),
     'dictionaries': dictionaries.map((item) => item.toJson()).toList(),
     'dependencies': dependencies.map((item) => item.toJson()).toList(),
+    'rules': rules.map((item) => item.toJson()).toList(),
+    'moneyPipelines': moneyPipelines.map((item) => item.toJson()).toList(),
   };
+}
+
+/// Количество рабочих данных, которые зависят от удаляемой категории.
+final class CategoryDeletionImpact {
+  const CategoryDeletionImpact({
+    required this.categoryClientId,
+    required this.categoryName,
+    required this.itemCount,
+    required this.imageCount,
+    required this.relationCount,
+  });
+
+  final String categoryClientId;
+  final String categoryName;
+  final int itemCount;
+  final int imageCount;
+  final int relationCount;
+
+  bool get hasData => itemCount > 0 || imageCount > 0 || relationCount > 0;
+
+  factory CategoryDeletionImpact.fromJson(Map<String, dynamic> json) =>
+      CategoryDeletionImpact(
+        categoryClientId: json['categoryClientId'] as String,
+        categoryName: json['categoryName'] as String,
+        itemCount: (json['itemCount'] as num).toInt(),
+        imageCount: (json['imageCount'] as num).toInt(),
+        relationCount: (json['relationCount'] as num).toInt(),
+      );
 }

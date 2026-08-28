@@ -13,7 +13,7 @@
 - `auth_flow_page.dart` отображает этапы входа, QR, recovery-коды и активные
   устройства, а onboarding передаёт отдельному экрану.
 - `onboarding_models.dart` описывает полный изменяемый черновик организации.
-- `organization_onboarding_page.dart` реализует выбранный восьмишаговый вариант
+- `organization_onboarding_page.dart` реализует выбранный девятишаговый вариант
   с desktop/mobile-компоновкой и живым предварительным просмотром.
 - `token_store.dart` отделяет `TokenRepository` от production secure storage.
 - `http_client_factory_web.dart` включает `withCredentials` только для Web,

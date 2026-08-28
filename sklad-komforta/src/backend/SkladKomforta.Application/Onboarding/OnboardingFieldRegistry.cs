@@ -18,6 +18,22 @@ public sealed record OnboardingFieldDefinition(
 /// </summary>
 public static class OnboardingFieldRegistry
 {
+    public const string CustomFieldPrefix = "custom_";
+
+    public static readonly IReadOnlySet<string> CustomFieldTypes = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "text", "number", "money", "percent", "dictionary", "boolean", "relation", "enum",
+        "calculated_money"
+    };
+
+    private static readonly CatalogFieldDraft[] DefaultCatalogFieldValues =
+    [
+        new("name", true, true),
+        new("marking", true, false),
+        new("unit", true, false),
+        new("base_price", true, false),
+    ];
+
     public static readonly IReadOnlyList<OnboardingFieldDefinition> All =
     [
         new("group", "Группа", "dictionary", true, false, "Основные"),
@@ -51,6 +67,37 @@ public static class OnboardingFieldRegistry
             ? definition
             : throw new Identity.IdentityException(400, "onboarding_field_unknown", $"Неизвестное поле: {code}.");
 
+    public static bool IsSystemField(string code) => ByCode.ContainsKey(code.Trim());
+
+    /// <summary>Возвращает доверенные метаданные системного поля или проверенные метаданные пользовательского поля.</summary>
+    public static OnboardingFieldDefinition DefinitionOf(CatalogFieldDraft field)
+    {
+        var code = field.FieldCode.Trim();
+        if (ByCode.TryGetValue(code, out var systemDefinition)) return systemDefinition;
+        if (!code.StartsWith(CustomFieldPrefix, StringComparison.Ordinal) ||
+            string.IsNullOrWhiteSpace(field.FieldType) ||
+            !CustomFieldTypes.Contains(field.FieldType.Trim()))
+            throw new Identity.IdentityException(400, "onboarding_field_unknown", $"Неизвестное поле: {field.FieldCode}.");
+
+        var isCalculated = field.FieldType.Trim() == "calculated_money";
+        return new OnboardingFieldDefinition(
+            code,
+            field.Label?.Trim() ?? string.Empty,
+            field.FieldType.Trim(),
+            !isCalculated,
+            isCalculated,
+            "Пользовательские");
+    }
+
+    public static string FieldTypeOf(CatalogFieldDraft field) => DefinitionOf(field).FieldType;
+
+    /// <summary>Возвращает пользовательское название либо системное название для старых черновиков.</summary>
+    public static string LabelOf(CatalogFieldDraft field)
+    {
+        if (!string.IsNullOrWhiteSpace(field.Label)) return field.Label.Trim();
+        return IsSystemField(field.FieldCode) ? Get(field.FieldCode).Label : string.Empty;
+    }
+
     /// <summary>Создаёт серверное поле контекста только из доверенных метаданных реестра.</summary>
     public static EntityFieldDraft CreateContextField(
         string contextCode,
@@ -70,18 +117,5 @@ public static class OnboardingFieldRegistry
 
     /// <summary>Стартовый набор карточки категории, соответствующий базовой товарной строке.</summary>
     public static IReadOnlyList<CatalogFieldDraft> DefaultCatalogFields() =>
-    [
-        new("group", true, false),
-        new("name", true, true),
-        new("marking", true, false),
-        new("note", true, false),
-        new("quantity", true, true),
-        new("unit", true, false),
-        new("supplier", true, false),
-        new("purchase_price", true, false),
-        new("minimal_price", true, false),
-        new("base_price", true, false),
-        new("excluded_from_calc", true, false),
-        new("linked_services", true, false),
-    ];
+        DefaultCatalogFieldValues;
 }

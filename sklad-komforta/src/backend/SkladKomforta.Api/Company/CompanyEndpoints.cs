@@ -29,13 +29,21 @@ internal static class CompanyEndpoints
                 CancellationToken token) =>
                 Results.Ok(ApiResponse.Success(await service.GetConfigurationAsync(token))))
             .RequireTenantPermission("company.view");
+        company.MapGet("/configuration/categories/{categoryClientId}/deletion-impact", async (
+                string categoryClientId,
+                ICompanyService service,
+                CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.GetCategoryDeletionImpactAsync(
+                    categoryClientId, token))))
+            .RequireTenantPermission("company.manage");
         company.MapPut("/configuration", async (
                 HttpContext context,
-                OrganizationOnboardingDraft draft,
+                UpdateOrganizationConfigurationRequest request,
                 ICompanyService service,
                 CancellationToken token) =>
                 Results.Ok(ApiResponse.Success(await service.UpdateConfigurationAsync(
-                    UserId(context.User), draft, token))))
+                    UserId(context.User), request.Draft,
+                    request.DeleteCategoryData ?? [], token))))
             .RequireTenantPermission("company.manage");
 
         company.MapGet("/lifecycle", async (ICompanyWorkspaceService service, CancellationToken token) =>

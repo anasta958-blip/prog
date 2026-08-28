@@ -18,6 +18,22 @@ public sealed record CompanyProfile(
 /// <summary>Общий срок действия организации, применяемый ко всем её аккаунтам.</summary>
 public sealed record OrganizationLifecycle(DateTimeOffset ActiveUntil, bool IsFrozen);
 
+/// <summary>Рабочие данные, которые будут удалены вместе с категорией каталога.</summary>
+public sealed record CategoryDeletionImpact(
+    string CategoryClientId,
+    string CategoryName,
+    int ItemCount,
+    int ImageCount,
+    int RelationCount);
+
+/// <summary>
+/// Полное обновление конфигурации с явным разрешением удалить данные только
+/// у перечисленных категорий. Пустой список никогда не запускает каскадное удаление.
+/// </summary>
+public sealed record UpdateOrganizationConfigurationRequest(
+    OrganizationOnboardingDraft Draft,
+    IReadOnlyList<string>? DeleteCategoryData);
+
 /// <summary>Одна пользовательская операция из журнала текущей организации.</summary>
 public sealed record CompanyAuditEntry(
     long Id,
@@ -178,9 +194,13 @@ public interface ICompanyService
     Task<CompanyProfile> GetAsync(CancellationToken cancellationToken);
     Task<CompanyProfile> UpdateAsync(Guid userId, CompanyProfile profile, CancellationToken cancellationToken);
     Task<OrganizationOnboardingDraft> GetConfigurationAsync(CancellationToken cancellationToken);
+    Task<CategoryDeletionImpact> GetCategoryDeletionImpactAsync(
+        string categoryClientId,
+        CancellationToken cancellationToken);
     Task<OrganizationOnboardingDraft> UpdateConfigurationAsync(
         Guid userId,
         OrganizationOnboardingDraft draft,
+        IReadOnlyList<string> deleteCategoryData,
         CancellationToken cancellationToken);
 }
 

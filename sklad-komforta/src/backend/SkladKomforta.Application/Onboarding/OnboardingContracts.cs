@@ -39,7 +39,9 @@ public sealed record CatalogFieldDraft(
     string FieldCode,
     bool IsVisible,
     bool IsRequired,
-    string? DictionaryCode = null);
+    string? DictionaryCode = null,
+    string? Label = null,
+    string? FieldType = null);
 
 /// <summary>Раздел каталога и его группы.</summary>
 public sealed record CatalogSectionDraft(string Name, IReadOnlyList<CatalogGroupDraft> Groups);
@@ -80,8 +82,67 @@ public sealed record DictionaryItemDraft(string Value);
 /// <summary>Справочник организации, например единицы измерения или поставщики.</summary>
 public sealed record DictionaryDraft(string Code, string Name, IReadOnlyList<DictionaryItemDraft> Items);
 
+/// <summary>Один элемент безопасной формулы: поле, число, операция или скобка.</summary>
+public sealed record FormulaTokenDraft(
+    string TokenType,
+    string? FieldCode = null,
+    decimal? ConstantValue = null,
+    string? Operator = null);
+
+/// <summary>Формула и точность её итогового округления.</summary>
+public sealed record FormulaDraft(
+    IReadOnlyList<FormulaTokenDraft> Tokens,
+    int DecimalPlaces = 2);
+
+/// <summary>Одно проверяемое условие событийного правила.</summary>
+public sealed record RuleConditionDraft(
+    string FieldCode,
+    string Operator,
+    string? ComparisonValue = null);
+
+/// <summary>Одно действие, выполняемое после успешной проверки условий.</summary>
+public sealed record RuleActionDraft(
+    string ActionType,
+    string? TargetFieldCode = null,
+    string? SourceFieldCode = null,
+    string? ConstantValue = null,
+    bool? BooleanValue = null,
+    string? DependencyClientId = null,
+    string? AggregationOperation = null,
+    string? AggregationTarget = null,
+    bool MultiplyByQuantity = false,
+    string? QuantityFieldCode = null,
+    string? Message = null,
+    FormulaDraft? Formula = null);
+
+/// <summary>Событийное правило одной категории с условиями и действиями.</summary>
+public sealed record CalculationRuleDraft(
+    string ClientId,
+    string Name,
+    string CategoryClientId,
+    string EventType,
+    bool IsEnabled,
+    string? EventFieldCode,
+    IReadOnlyList<RuleConditionDraft> Conditions,
+    IReadOnlyList<RuleActionDraft> Actions);
+
 /// <summary>
-/// Полный серверный черновик восьмишаговой настройки. Клиент всегда отправляет
+/// Сопоставление полей с неизменяемым конвейером:
+/// базовая цена, ручная цена, наценка, скидка, количество, округление и итог.
+/// </summary>
+public sealed record MoneyPipelineDraft(
+    string CategoryClientId,
+    string BasePriceFieldCode,
+    string? ManualPriceFieldCode,
+    string? MarkupFieldCode,
+    string? DiscountFieldCode,
+    string? QuantityFieldCode,
+    string ResultFieldCode,
+    int DecimalPlaces,
+    bool IncludeResultInTotals);
+
+/// <summary>
+/// Полный серверный черновик девятишаговой настройки. Клиент всегда отправляет
 /// агрегат целиком, поэтому сервер может валидировать согласованность связей.
 /// </summary>
 public sealed record OrganizationOnboardingDraft(
@@ -92,7 +153,9 @@ public sealed record OrganizationOnboardingDraft(
     IReadOnlyList<EntityFieldDraft> Fields,
     IReadOnlyList<OnboardingRoleDraft> Roles,
     IReadOnlyList<DictionaryDraft> Dictionaries,
-    IReadOnlyList<CategoryDependencyDraft>? Dependencies = null);
+    IReadOnlyList<CategoryDependencyDraft>? Dependencies = null,
+    IReadOnlyList<CalculationRuleDraft>? Rules = null,
+    IReadOnlyList<MoneyPipelineDraft>? MoneyPipelines = null);
 
 /// <summary>Состояние onboarding и признак окончательной активации организации.</summary>
 public sealed record OrganizationOnboardingState(

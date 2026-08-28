@@ -1,6 +1,6 @@
 # Проверка итерации 3
 
-## Проверка восьмишагового onboarding
+## Проверка девятишагового onboarding
 
 - `dotnet test SkladKomforta.sln --no-restore` — успешно: 36 unit-тестов и
   9 API integration-тестов;
