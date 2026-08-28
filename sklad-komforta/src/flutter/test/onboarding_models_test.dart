@@ -193,6 +193,7 @@ void main() {
       )
       ..moneyPipelines.add(
         MoneyPipelineDraft(
+          clientId: 'equipment-total',
           categoryClientId: 'equipment',
           basePriceFieldCode: 'base_price',
           resultFieldCode: 'line_total',
@@ -205,6 +206,21 @@ void main() {
 
     expect(restored.currentStep, 9);
     expect(restored.rules.single.actions.single.formula?.tokens, hasLength(3));
+    expect(restored.moneyPipelines.single.clientId, 'equipment-total');
     expect(restored.moneyPipelines.single.basePriceFieldCode, 'base_price');
+  });
+
+  test('старый денежный конвейер без id получает устойчивый id', () {
+    final source = MoneyPipelineDraft(
+      categoryClientId: 'equipment',
+      basePriceFieldCode: 'base_price',
+      resultFieldCode: 'line_total',
+    ).toJson()..remove('clientId');
+
+    final first = MoneyPipelineDraft.fromJson(source);
+    final second = MoneyPipelineDraft.fromJson(source);
+
+    expect(first.clientId, 'pipeline_equipment_line_total');
+    expect(second.clientId, first.clientId);
   });
 }

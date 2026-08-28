@@ -127,7 +127,7 @@ public sealed record CalculationRuleDraft(
     IReadOnlyList<RuleActionDraft> Actions);
 
 /// <summary>
-/// Сопоставление полей с неизменяемым конвейером:
+/// Один именованный расчёт категории с неизменяемым конвейером:
 /// базовая цена, ручная цена, наценка, скидка, количество, округление и итог.
 /// </summary>
 public sealed record MoneyPipelineDraft(
@@ -139,7 +139,8 @@ public sealed record MoneyPipelineDraft(
     string? QuantityFieldCode,
     string ResultFieldCode,
     int DecimalPlaces,
-    bool IncludeResultInTotals);
+    bool IncludeResultInTotals,
+    string? ClientId = null);
 
 /// <summary>
 /// Полный серверный черновик девятишаговой настройки. Клиент всегда отправляет

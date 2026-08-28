@@ -245,9 +245,7 @@ final class _OrganizationOnboardingPageState
       ..addAll(draft.rules.map((rule) => rule.clientId));
     _collapsedPipelines
       ..clear()
-      ..addAll(
-        draft.moneyPipelines.map((pipeline) => pipeline.categoryClientId),
-      );
+      ..addAll(draft.moneyPipelines.map((pipeline) => pipeline.clientId));
     _expandedCatalogSections.clear();
   }
 
@@ -307,13 +305,21 @@ final class _OrganizationOnboardingPageState
 
   Future<void> _saveSettings() async {
     draft.currentStep = 9;
+    // Сохраняем именно отправленный снимок. Уведомление родительского
+    // контроллера во время await не должно заменить новые правила старой
+    // конфигурацией до завершения успешного сохранения.
+    final submitted = _copyDraft(draft);
     final saved = await widget.onSettingsSave!(
-      draft,
+      submitted,
       deleteCategoryData: _approvedCategoryDataDeletions.toList(),
     );
     if (!mounted || !saved) return;
-    _approvedCategoryDataDeletions.clear();
-    _savedDraftJson = jsonEncode(draft.toJson());
+    setState(() {
+      draft = submitted;
+      _approvedCategoryDataDeletions.clear();
+      _savedDraftJson = jsonEncode(draft.toJson());
+      _collapseConfiguredBlocks();
+    });
     _showMessage('Настройки организации сохранены.');
   }
 
@@ -1548,7 +1554,7 @@ final class _OrganizationOnboardingPageState
       for (final category in draft.categories)
         Padding(
           padding: const EdgeInsets.only(bottom: 12),
-          child: _moneyPipelinePanel(category),
+          child: _moneyPipelineCategoryPanel(category),
         ),
       if (draft.categories.isEmpty)
         const _EmptyHint('Сначала создайте категории и поля.'),
@@ -1577,46 +1583,57 @@ final class _OrganizationOnboardingPageState
     ],
   );
 
-  Widget _moneyPipelinePanel(CatalogCategoryDraft category) {
-    final pipeline = draft.moneyPipelines
+  Widget _moneyPipelineCategoryPanel(CatalogCategoryDraft category) {
+    final pipelines = draft.moneyPipelines
         .where((item) => item.categoryClientId == category.clientId)
-        .firstOrNull;
-    if (pipeline == null) {
-      return _SubPanel(
-        title: category.name,
-        child: Row(
-          children: [
-            const Expanded(
-              child: Text(
-                'Расчёт для категории не настроен. Поля останутся обычными значениями.',
-              ),
-            ),
-            OutlinedButton.icon(
-              onPressed:
-                  _numericFields(category, const [
-                    'money',
-                    'calculated_money',
-                  ]).isEmpty
-                  ? null
-                  : () => _addMoneyPipeline(category),
-              icon: const Icon(Icons.tune),
-              label: const Text('Настроить'),
-            ),
-          ],
-        ),
-      );
-    }
-
-    final expanded = !_collapsedPipelines.contains(category.clientId);
+        .toList(growable: false);
+    final availableResults = _availablePipelineResults(category);
     return _SubPanel(
       title: category.name,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (pipelines.isEmpty)
+            const _EmptyHint(
+              'Расчёты для категории не настроены. Поля останутся обычными значениями.',
+            ),
+          for (final pipeline in pipelines) ...[
+            _moneyPipelinePanel(category, pipeline),
+            const SizedBox(height: 10),
+          ],
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              onPressed: availableResults.isEmpty
+                  ? null
+                  : () => _addMoneyPipeline(category),
+              icon: const Icon(Icons.add),
+              label: const Text('Добавить расчёт'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _moneyPipelinePanel(
+    CatalogCategoryDraft category,
+    MoneyPipelineDraft pipeline,
+  ) {
+    final expanded = !_collapsedPipelines.contains(pipeline.clientId);
+    final resultLabel = _categoryFieldLabel(
+      category,
+      pipeline.resultFieldCode,
+    );
+    return _SubPanel(
+      title: resultLabel,
       expanded: expanded,
       onToggle: () => setState(
-        () => _toggleCollapsed(_collapsedPipelines, category.clientId),
+        () => _toggleCollapsed(_collapsedPipelines, pipeline.clientId),
       ),
       onDelete: () => setState(() {
         draft.moneyPipelines.remove(pipeline);
-        _collapsedPipelines.remove(category.clientId);
+        _collapsedPipelines.remove(pipeline.clientId);
       }),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1671,6 +1688,14 @@ final class _OrganizationOnboardingPageState
               const ['money', 'calculated_money'],
               (value) => setState(() => pipeline.resultFieldCode = value!),
               required: true,
+              excludedFieldCodes: draft.moneyPipelines
+                  .where(
+                    (item) =>
+                        item.categoryClientId == category.clientId &&
+                        item.clientId != pipeline.clientId,
+                  )
+                  .map((item) => item.resultFieldCode)
+                  .toSet(),
             ),
             AppSelectField<int>(
               value: pipeline.decimalPlaces,
@@ -1702,21 +1727,36 @@ final class _OrganizationOnboardingPageState
 
   void _addMoneyPipeline(CatalogCategoryDraft category) {
     final money = _numericFields(category, const ['money', 'calculated_money']);
-    if (money.isEmpty) return;
-    final result = money.firstWhere(
+    final availableResults = _availablePipelineResults(category);
+    if (money.isEmpty || availableResults.isEmpty) return;
+    final result = availableResults.firstWhere(
       (field) => catalogFieldType(field) == 'calculated_money',
-      orElse: () => money.first,
+      orElse: () => availableResults.first,
     );
+    final id = 'pipeline_${DateTime.now().microsecondsSinceEpoch}';
     setState(() {
       draft.moneyPipelines.add(
         MoneyPipelineDraft(
+          clientId: id,
           categoryClientId: category.clientId,
           basePriceFieldCode: money.first.fieldCode,
           resultFieldCode: result.fieldCode,
         ),
       );
-      _collapsedPipelines.remove(category.clientId);
+      _collapsedPipelines.remove(id);
     });
+  }
+
+  List<CatalogFieldDraft> _availablePipelineResults(
+    CatalogCategoryDraft category,
+  ) {
+    final selected = draft.moneyPipelines
+        .where((item) => item.categoryClientId == category.clientId)
+        .map((item) => item.resultFieldCode)
+        .toSet();
+    return _numericFields(category, const ['money', 'calculated_money'])
+        .where((field) => !selected.contains(field.fieldCode))
+        .toList(growable: false);
   }
 
   void _addRule() {
@@ -2354,10 +2394,18 @@ final class _OrganizationOnboardingPageState
     List<String> allowedTypes,
     ValueChanged<String?> onChanged, {
     bool required = false,
+    Set<String> excludedFieldCodes = const <String>{},
   }) {
-    final fields = allowedTypes.isEmpty
+    final candidates = allowedTypes.isEmpty
         ? category.fields
         : _numericFields(category, allowedTypes);
+    final fields = candidates
+        .where(
+          (field) =>
+              field.fieldCode == value ||
+              !excludedFieldCodes.contains(field.fieldCode),
+        )
+        .toList(growable: false);
     final selected = fields.any((field) => field.fieldCode == value)
         ? value
         : null;

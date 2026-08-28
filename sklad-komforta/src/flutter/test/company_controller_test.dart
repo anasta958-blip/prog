@@ -39,12 +39,28 @@ void main() {
       expect(controller.saved, isTrue);
       expect(controller.error, isNull);
 
+      controller.configuration!.rules.add(
+        CalculationRuleDraft(
+          clientId: 'rule-save-check',
+          name: 'Проверка сохранения',
+          categoryClientId: 'equipment',
+          eventType: 'card_saving',
+          isEnabled: true,
+          actions: [
+            RuleActionDraft(
+              actionType: 'block_save',
+              message: 'Заполните данные.',
+            ),
+          ],
+        ),
+      );
       final configurationSaved = await controller.saveConfiguration(
         controller.configuration!,
         deleteCategoryData: const ['category-1'],
       );
       expect(configurationSaved, isTrue);
       expect(gateway.savedConfiguration, isNotNull);
+      expect(controller.configuration!.rules.single.clientId, 'rule-save-check');
       expect(gateway.deletedCategoryData, const ['category-1']);
 
       controller.approveCategoryDataDeletion('category-2');

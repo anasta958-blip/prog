@@ -568,6 +568,44 @@ public sealed class OnboardingValidatorTests
     }
 
     [Fact]
+    public void DraftAcceptsSeveralMoneyPipelinesWithDifferentResultsInOneCategory()
+    {
+        var source = ValidDraft();
+        var category = CategoryWithCalculationFields();
+        var first = new MoneyPipelineDraft(
+            "equipment", "base_price", null, "custom_markup", null,
+            "custom_quantity", "custom_total", 2, true, "pipeline-total");
+        var second = new MoneyPipelineDraft(
+            "equipment", "base_price", "custom_manual_price", null, "custom_discount",
+            "custom_quantity", "custom_manual_price", 2, false, "pipeline-manual");
+
+        var exception = Record.Exception(() => OnboardingValidator.Validate(
+            source with { Categories = [category], MoneyPipelines = [first, second] },
+            false));
+
+        Assert.Null(exception);
+    }
+
+    [Fact]
+    public void DraftRejectsSeveralMoneyPipelinesWritingToSameResult()
+    {
+        var source = ValidDraft();
+        var category = CategoryWithCalculationFields();
+        var first = new MoneyPipelineDraft(
+            "equipment", "base_price", null, "custom_markup", null,
+            "custom_quantity", "custom_total", 2, true, "pipeline-first");
+        var second = new MoneyPipelineDraft(
+            "equipment", "base_price", null, null, "custom_discount",
+            "custom_quantity", "custom_total", 2, true, "pipeline-second");
+
+        var exception = Assert.Throws<IdentityException>(() => OnboardingValidator.Validate(
+            source with { Categories = [category], MoneyPipelines = [first, second] },
+            false));
+
+        Assert.Equal("onboarding_duplicate", exception.Code);
+    }
+
+    [Fact]
     public void DraftRejectsFormulaWithMissingOperand()
     {
         var source = ValidDraft();

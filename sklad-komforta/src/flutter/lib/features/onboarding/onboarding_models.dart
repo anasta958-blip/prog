@@ -542,6 +542,7 @@ final class CalculationRuleDraft {
 /// Поля неизменяемого денежного конвейера одной категории.
 final class MoneyPipelineDraft {
   MoneyPipelineDraft({
+    String? clientId,
     required this.categoryClientId,
     required this.basePriceFieldCode,
     required this.resultFieldCode,
@@ -551,8 +552,10 @@ final class MoneyPipelineDraft {
     this.quantityFieldCode,
     this.decimalPlaces = 2,
     this.includeResultInTotals = true,
-  });
+  }) : clientId =
+           clientId ?? 'pipeline_${DateTime.now().microsecondsSinceEpoch}';
 
+  String clientId;
   String categoryClientId;
   String basePriceFieldCode;
   String? manualPriceFieldCode;
@@ -565,6 +568,9 @@ final class MoneyPipelineDraft {
 
   factory MoneyPipelineDraft.fromJson(Map<String, dynamic> json) =>
       MoneyPipelineDraft(
+        clientId:
+            json['clientId'] as String? ??
+            'pipeline_${json['categoryClientId']}_${json['resultFieldCode']}',
         categoryClientId: json['categoryClientId'] as String,
         basePriceFieldCode: json['basePriceFieldCode'] as String,
         manualPriceFieldCode: json['manualPriceFieldCode'] as String?,
@@ -577,6 +583,7 @@ final class MoneyPipelineDraft {
       );
 
   Map<String, dynamic> toJson() => {
+    'clientId': clientId,
     'categoryClientId': categoryClientId,
     'basePriceFieldCode': basePriceFieldCode,
     'manualPriceFieldCode': manualPriceFieldCode,

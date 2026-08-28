@@ -239,8 +239,13 @@ public static class OnboardingValidator
             rules.Select(item => $"{item.CategoryClientId}:{item.Name}"),
             "Названия правил внутри категории");
         ValidateUnique(
-            pipelines.Select(item => item.CategoryClientId),
-            "Денежные конвейеры категорий");
+            pipelines.Select(item => string.IsNullOrWhiteSpace(item.ClientId)
+                ? $"{item.CategoryClientId}:{item.ResultFieldCode}"
+                : item.ClientId!),
+            "Идентификаторы денежных конвейеров");
+        ValidateUnique(
+            pipelines.Select(item => $"{item.CategoryClientId}:{item.ResultFieldCode}"),
+            "Поля результата денежных конвейеров");
 
         var categoriesById = categories.ToDictionary(item => item.ClientId, StringComparer.Ordinal);
         var dependenciesById = dependencies.ToDictionary(item => item.ClientId, StringComparer.Ordinal);
