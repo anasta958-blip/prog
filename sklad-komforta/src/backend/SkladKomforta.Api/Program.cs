@@ -8,6 +8,7 @@ using SkladKomforta.Api.Identity;
 using SkladKomforta.Api.Authorization;
 using SkladKomforta.Api.Catalog;
 using SkladKomforta.Api.Company;
+using SkladKomforta.Api.Kanban;
 using SkladKomforta.Api.Onboarding;
 using SkladKomforta.Application.Contracts;
 using SkladKomforta.Application.Identity;
@@ -109,6 +110,7 @@ app.MapIdentityEndpoints();
 app.MapOnboardingEndpoints();
 app.MapRoleEndpoints();
 app.MapCatalogEndpoints();
+app.MapKanbanEndpoints();
 app.MapCompanyEndpoints();
 app.MapHealthChecks("/health/live", new HealthCheckOptions
 {

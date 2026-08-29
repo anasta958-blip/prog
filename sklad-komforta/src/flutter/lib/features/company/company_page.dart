@@ -451,7 +451,9 @@ final class _AccessSection extends StatelessWidget {
                           style: const TextStyle(fontWeight: FontWeight.w700),
                         ),
                         subtitle: Text(
-                          '${role.permissionCodes.length} прав · ${role.subordinateRoleIds.length} подчинённых ролей',
+                          '${role.permissionCodes.length} прав · '
+                          '${role.subordinateRoleIds.length} подчинённых ролей · '
+                          '${_cardVisibilityLabel(role.cardVisibilityMode)}',
                         ),
                         trailing: role.isSystem
                             ? const Icon(Icons.lock_outline, size: 18)
@@ -879,6 +881,7 @@ Future<void> _editRole(
       _RoleDialog(
         source: source,
         roles: controller.roles,
+        employees: controller.employees,
         permissions: controller.permissions,
         controller: controller,
       ),
@@ -1831,11 +1834,13 @@ final class _RoleDialog extends StatefulWidget {
   const _RoleDialog({
     required this.source,
     required this.roles,
+    required this.employees,
     required this.permissions,
     required this.controller,
   });
   final CompanyRoleModel? source;
   final List<CompanyRoleModel> roles;
+  final List<EmployeeModel> employees;
   final List<CompanyPermissionModel> permissions;
   final CompanyController controller;
   @override
@@ -1846,6 +1851,8 @@ final class _RoleDialogState extends State<_RoleDialog> {
   late String name;
   late Set<String> permissions;
   late Set<String> subordinates;
+  late String cardVisibilityMode;
+  late Set<String> cardVisibilityMembershipIds;
   bool submitting = false;
   String? submitError;
   @override
@@ -1854,6 +1861,10 @@ final class _RoleDialogState extends State<_RoleDialog> {
     name = widget.source?.name ?? '';
     permissions = {...?widget.source?.permissionCodes};
     subordinates = {...?widget.source?.subordinateRoleIds};
+    cardVisibilityMode = widget.source?.cardVisibilityMode ?? 'own';
+    cardVisibilityMembershipIds = {
+      ...?widget.source?.cardVisibilityMembershipIds,
+    };
   }
 
   @override
@@ -1895,6 +1906,72 @@ final class _RoleDialogState extends State<_RoleDialog> {
                             : permissions.remove(code),
                       ),
                     ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Видимость карточек',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 8),
+                  AppSelectField<String>(
+                    value: cardVisibilityMode,
+                    label: 'Какие карточки видит пользователь',
+                    options: const [
+                      AppSelectOption(value: 'own', label: 'Только свои'),
+                      AppSelectOption(value: 'all', label: 'Все карточки'),
+                      AppSelectOption(
+                        value: 'subordinates',
+                        label: 'Свои и подчинённых',
+                      ),
+                      AppSelectOption(
+                        value: 'specific',
+                        label: 'Свои и выбранных сотрудников',
+                      ),
+                    ],
+                    onChanged: (value) => setState(() {
+                      cardVisibilityMode = value ?? 'own';
+                      if (cardVisibilityMode != 'specific') {
+                        cardVisibilityMembershipIds.clear();
+                      }
+                    }),
+                  ),
+                  if (cardVisibilityMode == 'specific') ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0D1724),
+                        border: Border.all(color: const Color(0xFF263A52)),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        children: [
+                          for (final employee in widget.employees)
+                            CheckboxListTile(
+                              dense: true,
+                              controlAffinity: ListTileControlAffinity.leading,
+                              value: cardVisibilityMembershipIds.contains(
+                                employee.membershipId,
+                              ),
+                              title: Text(employee.displayName),
+                              subtitle: Text(employee.roleName),
+                              onChanged: (value) => setState(
+                                () => value == true
+                                    ? cardVisibilityMembershipIds.add(
+                                        employee.membershipId,
+                                      )
+                                    : cardVisibilityMembershipIds.remove(
+                                        employee.membershipId,
+                                      ),
+                              ),
+                            ),
+                          if (widget.employees.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.all(14),
+                              child: Text('Сотрудники ещё не созданы.'),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   const Text(
                     'Подчинённые роли',
@@ -1953,6 +2030,8 @@ final class _RoleDialogState extends State<_RoleDialog> {
         isSystem: false,
         permissionCodes: permissions.toList(),
         subordinateRoleIds: subordinates.toList(),
+        cardVisibilityMode: cardVisibilityMode,
+        cardVisibilityMembershipIds: cardVisibilityMembershipIds.toList(),
       ),
       create: widget.source == null,
     );
@@ -1967,6 +2046,13 @@ final class _RoleDialogState extends State<_RoleDialog> {
     });
   }
 }
+
+String _cardVisibilityLabel(String mode) => switch (mode) {
+  'all' => 'все карточки',
+  'subordinates' => 'свои и подчинённых',
+  'specific' => 'свои и выбранных сотрудников',
+  _ => 'только свои карточки',
+};
 
 /// Визуально отделяет пространство прав от вложенных разрешений и сохраняет
 /// компактное раскрытие длинного списка.

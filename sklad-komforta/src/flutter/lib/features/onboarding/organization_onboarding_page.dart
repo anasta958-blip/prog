@@ -1198,41 +1198,43 @@ final class _OrganizationOnboardingPageState
       }),
       child: Column(
         children: [
-          for (var index = 0; index < category.fields.length; index++)
-            _OrderedRow(
-              key: ValueKey(
-                '${category.clientId}:${category.fields[index].fieldCode}',
-              ),
-              index: index,
-              length: category.fields.length,
-              onMove: (delta) => setState(() {
-                final field = category.fields.removeAt(index);
-                category.fields.insert(index + delta, field);
-              }),
-              onDelete: isFixedCatalogField(category.fields[index].fieldCode)
-                  ? null
-                  : () => setState(() {
-                      final field = category.fields.removeAt(index);
-                      draft.dependencies.removeWhere(
-                        (dependency) =>
-                            dependency.targetCategoryClientId ==
-                                category.clientId &&
-                            dependency.targetFieldCode == field.fieldCode,
-                      );
-                      _removeUnavailableWorkflowField(
-                        category,
-                        field.fieldCode,
-                      );
-                    }),
-              child: _catalogFieldControls(category.fields[index]),
-            ),
+          ReorderableListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            buildDefaultDragHandles: false,
+            itemCount: category.fields.length,
+            onReorder: (oldIndex, newIndex) => setState(() {
+              if (newIndex > oldIndex) newIndex--;
+              final field = category.fields.removeAt(oldIndex);
+              category.fields.insert(newIndex, field);
+            }),
+            itemBuilder: (context, index) {
+              final field = category.fields[index];
+              return _DraggableOrderedRow(
+                key: ValueKey('${category.clientId}:${field.fieldCode}'),
+                index: index,
+                onDelete: isFixedCatalogField(field.fieldCode)
+                    ? null
+                    : () => setState(() {
+                        category.fields.remove(field);
+                        _removeFieldReferences(category, field.fieldCode);
+                        _removeUnavailableWorkflowField(
+                          category,
+                          field.fieldCode,
+                        );
+                      }),
+                child: _catalogFieldControls(field),
+              );
+            },
+          ),
           _addCatalogFieldButton(category),
         ],
       ),
     );
   }
 
-  /// Возвращает поля категории вместе с расчётными полями, доступными системе.
+  /// Возвращает только реальные поля категории. Расчётные результаты задаются
+  /// правилами и не являются самостоятельными полями рабочей карточки.
   List<OnboardingFieldDefinition> _workflowAvailableFields(
     CatalogCategoryDraft category,
   ) {
@@ -1244,12 +1246,46 @@ final class _OrganizationOnboardingPageState
         result.add(definition);
       }
     }
-    for (final definition in onboardingFieldDefinitions) {
-      if (definition.isCalculated && added.add(definition.code)) {
-        result.add(definition);
-      }
-    }
     return result;
+  }
+
+  /// Удаляет настройки, которые больше нельзя выполнить без удалённого поля.
+  /// Благодаря этому сохранение не блокируется старой ссылкой из правила,
+  /// формулы или денежного конвейера.
+  void _removeFieldReferences(CatalogCategoryDraft category, String fieldCode) {
+    draft.dependencies.removeWhere(
+      (dependency) =>
+          dependency.targetCategoryClientId == category.clientId &&
+          dependency.targetFieldCode == fieldCode,
+    );
+    draft.moneyPipelines.removeWhere(
+      (pipeline) =>
+          pipeline.categoryClientId == category.clientId &&
+          (pipeline.basePriceFieldCode == fieldCode ||
+              pipeline.manualPriceFieldCode == fieldCode ||
+              pipeline.markupFieldCode == fieldCode ||
+              pipeline.discountFieldCode == fieldCode ||
+              pipeline.quantityFieldCode == fieldCode ||
+              pipeline.resultFieldCode == fieldCode),
+    );
+    draft.rules.removeWhere(
+      (rule) =>
+          rule.categoryClientId == category.clientId &&
+          (rule.eventFieldCode == fieldCode ||
+              rule.conditions.any(
+                (condition) => condition.fieldCode == fieldCode,
+              ) ||
+              rule.actions.any(
+                (action) =>
+                    action.targetFieldCode == fieldCode ||
+                    action.sourceFieldCode == fieldCode ||
+                    action.quantityFieldCode == fieldCode ||
+                    (action.formula?.tokens.any(
+                          (token) => token.fieldCode == fieldCode,
+                        ) ??
+                        false),
+              )),
+    );
   }
 
   /// Удаляет поле из карточек канбанов, если категория больше его не поддерживает.
@@ -1312,6 +1348,9 @@ final class _OrganizationOnboardingPageState
   ) {
     final selection = _workflowCategory(workflow, category.clientId);
     final availableFields = _workflowAvailableFields(category);
+    final selectedFields = selection?.fieldCodes
+        .where((code) => availableFields.any((field) => field.code == code))
+        .toList();
     return DecoratedBox(
       decoration: BoxDecoration(
         color: const Color(0xFF0D1724),
@@ -1355,32 +1394,85 @@ final class _OrganizationOnboardingPageState
               const Divider(height: 18),
               Padding(
                 padding: const EdgeInsets.only(left: 18),
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    for (final definition in availableFields)
-                      SizedBox(
-                        width: 250,
-                        child: CheckboxListTile(
-                          contentPadding: EdgeInsets.zero,
-                          dense: true,
-                          controlAffinity: ListTileControlAffinity.leading,
-                          title: Text(
-                            _categoryFieldLabel(category, definition.code),
+                    const Text(
+                      'Поля на карточке',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 8),
+                    ReorderableListView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      buildDefaultDragHandles: false,
+                      itemCount: selectedFields?.length ?? 0,
+                      onReorder: (oldIndex, newIndex) => setState(() {
+                        if (newIndex > oldIndex) newIndex--;
+                        final ordered = List<String>.of(selectedFields!);
+                        final fieldCode = ordered.removeAt(oldIndex);
+                        ordered.insert(newIndex, fieldCode);
+                        final unavailable = selection.fieldCodes
+                            .where((code) => !ordered.contains(code))
+                            .toList();
+                        selection.fieldCodes
+                          ..clear()
+                          ..addAll(ordered)
+                          ..addAll(unavailable);
+                      }),
+                      itemBuilder: (context, index) {
+                        final fieldCode = selectedFields![index];
+                        return _DraggableOrderedRow(
+                          key: ValueKey(
+                            '${workflow.code}:${category.clientId}:$fieldCode',
                           ),
-                          subtitle: definition.isCalculated
-                              ? const Text('Расчётное поле')
-                              : null,
-                          value: selection.fieldCodes.contains(definition.code),
-                          onChanged: (enabled) => setState(() {
-                            selection.fieldCodes.remove(definition.code);
-                            if (enabled ?? false) {
-                              selection.fieldCodes.add(definition.code);
-                            }
-                          }),
+                          index: index,
+                          onDelete: () => setState(
+                            () => selection.fieldCodes.remove(fieldCode),
+                          ),
+                          child: Text(
+                            _categoryFieldLabel(category, fieldCode),
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                        );
+                      },
+                    ),
+                    if (availableFields.any(
+                      (field) => !selection.fieldCodes.contains(field.code),
+                    )) ...[
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Добавить поле',
+                        style: TextStyle(
+                          color: Color(0xFF8EA5C4),
+                          fontSize: 12,
                         ),
                       ),
+                      const SizedBox(height: 4),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 4,
+                        children: [
+                          for (final definition in availableFields)
+                            if (!selection.fieldCodes.contains(definition.code))
+                              _CompactFlag(
+                                label: _categoryFieldLabel(
+                                  category,
+                                  definition.code,
+                                ),
+                                value: false,
+                                onChanged: (enabled) {
+                                  if (!enabled) return;
+                                  setState(
+                                    () => selection.fieldCodes.add(
+                                      definition.code,
+                                    ),
+                                  );
+                                },
+                              ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -1621,10 +1713,7 @@ final class _OrganizationOnboardingPageState
     MoneyPipelineDraft pipeline,
   ) {
     final expanded = !_collapsedPipelines.contains(pipeline.clientId);
-    final resultLabel = _categoryFieldLabel(
-      category,
-      pipeline.resultFieldCode,
-    );
+    final resultLabel = _categoryFieldLabel(category, pipeline.resultFieldCode);
     return _SubPanel(
       title: resultLabel,
       expanded: expanded,
@@ -3293,7 +3382,6 @@ final class _DeleteRow extends StatelessWidget {
 
 final class _OrderedRow extends StatelessWidget {
   const _OrderedRow({
-    super.key,
     required this.index,
     required this.length,
     required this.child,
@@ -3319,6 +3407,48 @@ final class _OrderedRow extends StatelessWidget {
           onPressed: index + 1 < length ? () => onMove(1) : null,
           icon: const Icon(Icons.arrow_downward),
           tooltip: 'Ниже',
+        ),
+        Expanded(child: child),
+        IconButton(
+          onPressed: onDelete,
+          icon: Icon(onDelete == null ? Icons.lock_outline : Icons.close),
+          tooltip: onDelete == null
+              ? 'Системное поле нельзя удалить'
+              : 'Удалить',
+        ),
+      ],
+    ),
+  );
+}
+
+/// Строка упорядочиваемого списка полей. Перетаскивание начинается только за
+/// явную ручку, поэтому ввод текста, флажки и удаление остаются независимыми.
+final class _DraggableOrderedRow extends StatelessWidget {
+  const _DraggableOrderedRow({
+    super.key,
+    required this.index,
+    required this.child,
+    required this.onDelete,
+  });
+
+  final int index;
+  final Widget child;
+  final VoidCallback? onDelete;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Row(
+      children: [
+        ReorderableDragStartListener(
+          index: index,
+          child: const MouseRegion(
+            cursor: SystemMouseCursors.grab,
+            child: Padding(
+              padding: EdgeInsets.all(12),
+              child: Icon(Icons.drag_indicator, color: Color(0xFF8EA5C4)),
+            ),
+          ),
         ),
         Expanded(child: child),
         IconButton(

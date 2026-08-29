@@ -8,6 +8,8 @@ import 'package:sklad_komforta_app/features/company/company_controller.dart';
 import 'package:sklad_komforta_app/features/company/configuration_edit_guard.dart';
 import 'package:sklad_komforta_app/features/company/company_models.dart';
 import 'package:sklad_komforta_app/features/company/company_page.dart';
+import 'package:sklad_komforta_app/features/kanban/kanban_controller.dart';
+import 'package:sklad_komforta_app/features/kanban/kanban_page.dart';
 
 /// Главная оболочка авторизованной части приложения.
 final class WorkspacePage extends StatefulWidget {
@@ -16,6 +18,7 @@ final class WorkspacePage extends StatefulWidget {
     required this.authController,
     this.catalogController,
     this.companyController,
+    this.kanbanController,
     super.key,
   });
 
@@ -23,6 +26,7 @@ final class WorkspacePage extends StatefulWidget {
   final AuthController authController;
   final CatalogController? catalogController;
   final CompanyController? companyController;
+  final KanbanController? kanbanController;
 
   @override
   State<WorkspacePage> createState() => _WorkspacePageState();
@@ -33,6 +37,8 @@ class _WorkspacePageState extends State<WorkspacePage> {
   late final bool ownsCatalogController;
   late final CompanyController companyController;
   late final bool ownsCompanyController;
+  late final KanbanController kanbanController;
+  late final bool ownsKanbanController;
   int selectedIndex = 0;
   CompanySection companySection = CompanySection.settings;
   bool companyExpanded = false;
@@ -51,12 +57,18 @@ class _WorkspacePageState extends State<WorkspacePage> {
     companyController =
         widget.companyController ??
         CompanyController(widget.config, widget.authController);
+    ownsKanbanController = widget.kanbanController == null;
+    kanbanController =
+        widget.kanbanController ??
+        KanbanController(widget.config, widget.authController);
+    kanbanController.initialize();
   }
 
   @override
   void dispose() {
     if (ownsCatalogController) catalogController.dispose();
     if (ownsCompanyController) companyController.dispose();
+    if (ownsKanbanController) kanbanController.dispose();
     super.dispose();
   }
 
@@ -67,14 +79,15 @@ class _WorkspacePageState extends State<WorkspacePage> {
         builder: (context, constraints) {
           final desktop = constraints.maxWidth >= 840;
           final content = switch (selectedIndex) {
-            1 => CompanyPage(
+            1 => CatalogPage(controller: catalogController),
+            2 => CompanyPage(
               controller: companyController,
               section: companySection,
               onSectionRequested: _selectCompanySection,
               configurationEditGuard: configurationEditGuard,
             ),
-            2 => _SessionsPage(controller: widget.authController),
-            _ => CatalogPage(controller: catalogController),
+            3 => _SessionsPage(controller: widget.authController),
+            _ => KanbanPage(controller: kanbanController),
           };
           if (!desktop) {
             return Scaffold(
@@ -83,9 +96,10 @@ class _WorkspacePageState extends State<WorkspacePage> {
                 titleSpacing: 0,
                 title: Text(
                   switch (selectedIndex) {
-                    1 => companySection.label,
-                    2 => 'Активные устройства',
-                    _ => 'Каталог товаров',
+                    1 => 'Каталог товаров',
+                    2 => companySection.label,
+                    3 => 'Активные устройства',
+                    _ => 'Канбаны',
                   },
                   style: const TextStyle(
                     fontSize: 17,
@@ -146,16 +160,17 @@ class _WorkspacePageState extends State<WorkspacePage> {
     }
     if (!mounted) return;
     setState(() => selectedIndex = index);
-    if (index == 0) catalogController.reloadConfiguration();
-    if (index == 1) companyController.initialize();
-    if (index == 2) widget.authController.loadSessions();
+    if (index == 0) kanbanController.reload();
+    if (index == 1) catalogController.reloadConfiguration();
+    if (index == 2) companyController.initialize();
+    if (index == 3) widget.authController.loadSessions();
     Navigator.maybePop(context);
   }
 
   void _toggleCompany() {
     setState(() {
-      if (selectedIndex != 1) {
-        selectedIndex = 1;
+      if (selectedIndex != 2) {
+        selectedIndex = 2;
         companyExpanded = true;
       } else {
         companyExpanded = !companyExpanded;
@@ -165,13 +180,13 @@ class _WorkspacePageState extends State<WorkspacePage> {
   }
 
   Future<void> _selectCompanySection(CompanySection section) async {
-    if ((selectedIndex != 1 || section != companySection) &&
+    if ((selectedIndex != 2 || section != companySection) &&
         !await configurationEditGuard.canLeave(context)) {
       return;
     }
     if (!mounted) return;
     setState(() {
-      selectedIndex = 1;
+      selectedIndex = 2;
       companySection = section;
       companyExpanded = true;
     });
@@ -231,15 +246,21 @@ final class _Navigation extends StatelessWidget {
         ),
       ),
       _NavigationItem(
-        icon: Icons.inventory_2_outlined,
-        label: 'Каталог товаров',
+        icon: Icons.view_kanban_outlined,
+        label: 'Канбаны',
         selected: selectedIndex == 0,
         onTap: () => onSelect(0),
       ),
       _NavigationItem(
+        icon: Icons.inventory_2_outlined,
+        label: 'Каталог товаров',
+        selected: selectedIndex == 1,
+        onTap: () => onSelect(1),
+      ),
+      _NavigationItem(
         icon: Icons.business_outlined,
         label: 'Компания',
-        selected: selectedIndex == 1,
+        selected: selectedIndex == 2,
         trailing: AnimatedRotation(
           turns: companyExpanded ? .5 : 0,
           duration: const Duration(milliseconds: 160),
@@ -252,7 +273,7 @@ final class _Navigation extends StatelessWidget {
           _NavigationItem(
             icon: section.icon,
             label: section.label,
-            selected: selectedIndex == 1 && companySection == section,
+            selected: selectedIndex == 2 && companySection == section,
             indent: 24,
             compact: true,
             onTap: () => onSelectCompanySection(section),
@@ -275,8 +296,8 @@ final class _Navigation extends StatelessWidget {
       _NavigationItem(
         icon: Icons.devices_outlined,
         label: 'Активные устройства',
-        selected: selectedIndex == 2,
-        onTap: () => onSelect(2),
+        selected: selectedIndex == 3,
+        onTap: () => onSelect(3),
       ),
       const Spacer(),
       const Padding(

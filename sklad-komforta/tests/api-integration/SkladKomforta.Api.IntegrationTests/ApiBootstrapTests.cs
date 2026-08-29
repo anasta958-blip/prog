@@ -67,6 +67,37 @@ public sealed class ApiBootstrapTests : IClassFixture<ApiFactory>
     }
 
     [Fact]
+    public async Task KanbanEndpointRequiresAccessToken()
+    {
+        var response = await _client.GetAsync("/api/v1/kanbans/");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task KanbanCardsEndpointRequiresAccessToken()
+    {
+        var boardId = Guid.NewGuid();
+        var columnId = Guid.NewGuid();
+        var response = await _client.GetAsync(
+            $"/api/v1/kanbans/{boardId}/cards?columnId={columnId}");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task KanbanCardMoveEndpointRequiresAccessToken()
+    {
+        var boardId = Guid.NewGuid();
+        var cardId = Guid.NewGuid();
+        var response = await _client.PostAsJsonAsync(
+            $"/api/v1/kanbans/{boardId}/cards/{cardId}/move",
+            new { targetColumnId = Guid.NewGuid(), targetIndex = 0 });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
     public async Task CatalogImagesEndpointRequiresAccessToken()
     {
         var itemId = Guid.NewGuid();

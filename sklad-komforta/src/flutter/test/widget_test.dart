@@ -517,7 +517,7 @@ void main() {
       'base_price',
       customField.fieldCode,
     ]);
-    expect(find.text('Расчётное поле'), findsOneWidget);
+    expect(find.text('Расчётное поле'), findsNothing);
 
     final categoryFieldsToggle = find.bySemanticsLabel(
       'Свернуть поля категории',

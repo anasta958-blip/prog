@@ -267,12 +267,16 @@ final class CompanyRoleModel {
     required this.isSystem,
     required this.permissionCodes,
     required this.subordinateRoleIds,
+    this.cardVisibilityMode = 'own',
+    this.cardVisibilityMembershipIds = const [],
   });
   final String id;
   final String name;
   final bool isSystem;
   final List<String> permissionCodes;
   final List<String> subordinateRoleIds;
+  final String cardVisibilityMode;
+  final List<String> cardVisibilityMembershipIds;
   factory CompanyRoleModel.fromJson(Map<String, dynamic> json) =>
       CompanyRoleModel(
         id: json['id'] as String,
@@ -282,6 +286,10 @@ final class CompanyRoleModel {
             .cast<String>(),
         subordinateRoleIds: (json['subordinateRoleIds'] as List? ?? const [])
             .cast<String>(),
+        cardVisibilityMode: json['cardVisibilityMode'] as String? ?? 'own',
+        cardVisibilityMembershipIds:
+            (json['cardVisibilityMembershipIds'] as List? ?? const [])
+                .cast<String>(),
       );
 }
 

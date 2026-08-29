@@ -103,12 +103,12 @@ internal sealed class PostgresCompanyService(
                 ("diff", JsonSerializer.Serialize(new { before = previous, after = normalized }, JsonOptions)));
             await transaction.CommitAsync(cancellationToken);
         }
-        catch (PostgresException exception) when (exception.SqlState is "23503" or "23505")
+        catch (PostgresException exception) when (exception.SqlState is "23001" or "23503" or "23505")
         {
             throw new IdentityException(
                 409,
                 "organization_configuration_conflict",
-                exception.SqlState == "23503"
+                exception.SqlState is "23001" or "23503"
                     ? "Нельзя удалить элемент настройки, который используется в рабочих данных."
                     : "В настройках организации обнаружены повторяющиеся значения.");
         }
@@ -506,8 +506,6 @@ internal sealed class PostgresCompanyService(
             await ExecuteAsync(connection, transaction,
                 "DELETE FROM workflow_transitions WHERE from_column_id IN (SELECT id FROM workflow_columns WHERE workflow_id = @id)",
                 token, ("id", id));
-            await ExecuteAsync(connection, transaction,
-                "DELETE FROM workflow_categories WHERE workflow_id = @id", token, ("id", id));
             var oldWorkflow = oldWorkflows.FirstOrDefault(item => item.Code == workflow.Code);
             var rows = await ReadOrderedRowsAsync(connection, transaction,
                 "SELECT id, name FROM workflow_columns WHERE workflow_id = @parent ORDER BY sort_order", token, id);
@@ -540,14 +538,30 @@ internal sealed class PostgresCompanyService(
                     ("to", columnIds[transition.ToClientId]));
 
             var workflowCategories = workflow.Categories ?? [];
+            var retainedWorkflowCategoryIds = new List<Guid>();
+            await ExecuteAsync(connection, transaction, """
+                UPDATE workflow_categories
+                SET sort_order = sort_order + (
+                    SELECT COALESCE(MAX(current_category.sort_order), 0) + @category_count + 1
+                    FROM workflow_categories AS current_category
+                    WHERE current_category.workflow_id = @workflow_id)
+                WHERE workflow_id = @workflow_id
+                """, token, ("workflow_id", id), ("category_count", workflowCategories.Count));
             for (var categoryIndex = 0; categoryIndex < workflowCategories.Count; categoryIndex++)
             {
                 var selection = workflowCategories[categoryIndex];
                 var categoryId = categoryIds[selection.CategoryClientId];
+                retainedWorkflowCategoryIds.Add(categoryId);
                 await ExecuteAsync(connection, transaction, """
                     INSERT INTO workflow_categories (workflow_id, category_id, sort_order)
                     VALUES (@workflow_id, @category_id, @sort)
+                    ON CONFLICT (workflow_id, category_id)
+                    DO UPDATE SET sort_order = EXCLUDED.sort_order
                     """, token, ("workflow_id", id), ("category_id", categoryId), ("sort", categoryIndex));
+                await ExecuteAsync(connection, transaction, """
+                    DELETE FROM workflow_category_fields
+                    WHERE workflow_id = @workflow_id AND category_id = @category_id
+                    """, token, ("workflow_id", id), ("category_id", categoryId));
                 for (var fieldIndex = 0; fieldIndex < selection.FieldCodes.Count; fieldIndex++)
                     await ExecuteAsync(connection, transaction, """
                         INSERT INTO workflow_category_fields
@@ -556,6 +570,21 @@ internal sealed class PostgresCompanyService(
                         """, token, ("workflow_id", id), ("category_id", categoryId),
                         ("code", selection.FieldCodes[fieldIndex]), ("sort", fieldIndex));
             }
+            var retainedCategoryJson = JsonSerializer.Serialize(retainedWorkflowCategoryIds, JsonOptions);
+            await ExecuteAsync(connection, transaction, """
+                DELETE FROM workflow_category_fields
+                WHERE workflow_id = @workflow_id
+                  AND category_id NOT IN (
+                      SELECT CAST(value AS uuid)
+                      FROM jsonb_array_elements_text(CAST(@retained AS jsonb)) AS retained_id(value))
+                """, token, ("workflow_id", id), ("retained", retainedCategoryJson));
+            await ExecuteAsync(connection, transaction, """
+                DELETE FROM workflow_categories
+                WHERE workflow_id = @workflow_id
+                  AND category_id NOT IN (
+                      SELECT CAST(value AS uuid)
+                      FROM jsonb_array_elements_text(CAST(@retained AS jsonb)) AS retained_id(value))
+                """, token, ("workflow_id", id), ("retained", retainedCategoryJson));
         }
         await DeleteMissingAsync(connection, transaction, "workflows", retained, token);
     }

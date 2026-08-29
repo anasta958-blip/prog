@@ -188,6 +188,7 @@ public static class OnboardingValidator
                         Fail("onboarding_workflow_field_invalid",
                             $"Поле «{definition.Label}» не настроено в категории «{category.Name}».");
                 }
+
             }
         }
     }

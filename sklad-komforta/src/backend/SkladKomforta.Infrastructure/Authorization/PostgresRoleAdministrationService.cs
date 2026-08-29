@@ -72,19 +72,22 @@ internal sealed class PostgresRoleAdministrationService(
     public async Task<RoleSummary> CreateRoleAsync(Guid actorUserId, SaveRoleRequest request, CancellationToken cancellationToken)
     {
         var name = ValidateName(request.Name);
+        var visibilityMode = ValidateVisibilityMode(request.CardVisibilityMode);
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         var id = Guid.NewGuid();
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
-            command.CommandText = "INSERT INTO roles (id, name, is_system) VALUES (@id, @name, false)";
+            command.CommandText = "INSERT INTO roles (id, name, is_system, card_visibility_mode) VALUES (@id, @name, false, @visibility_mode)";
             AddParameter(command, "id", id);
             AddParameter(command, "name", name);
+            AddParameter(command, "visibility_mode", visibilityMode);
             await ExecuteWithConflictMappingAsync(command, cancellationToken);
         }
         await ReplacePermissionsAsync(connection, transaction, id, request.PermissionCodes, cancellationToken);
         await ReplaceSubordinateRolesAsync(connection, transaction, id, request.SubordinateRoleIds, cancellationToken);
+        await ReplaceVisibilityMembersAsync(connection, transaction, id, visibilityMode, request.CardVisibilityMembershipIds, cancellationToken);
         await WriteAuditAsync(connection, transaction, actorUserId, "role", id, "created", null, request, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return (await ReadRolesAsync(connection, id, cancellationToken)).Single();
@@ -94,6 +97,7 @@ internal sealed class PostgresRoleAdministrationService(
     public async Task<RoleSummary> UpdateRoleAsync(Guid actorUserId, Guid roleId, SaveRoleRequest request, CancellationToken cancellationToken)
     {
         var name = ValidateName(request.Name);
+        var visibilityMode = ValidateVisibilityMode(request.CardVisibilityMode);
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
         var before = (await ReadRolesAsync(connection, roleId, cancellationToken)).SingleOrDefault()
             ?? throw new IdentityException(404, "role_not_found", "Роль не найдена.");
@@ -101,14 +105,16 @@ internal sealed class PostgresRoleAdministrationService(
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
-            command.CommandText = "UPDATE roles SET name = @name, updated_at = now() WHERE id = @id AND NOT is_system AND deleted_at IS NULL";
+            command.CommandText = "UPDATE roles SET name = @name, card_visibility_mode = @visibility_mode, updated_at = now() WHERE id = @id AND NOT is_system AND deleted_at IS NULL";
             AddParameter(command, "name", name);
+            AddParameter(command, "visibility_mode", visibilityMode);
             AddParameter(command, "id", roleId);
             if (await ExecuteWithConflictMappingAsync(command, cancellationToken) != 1)
                 throw new IdentityException(409, "system_role_readonly", "Системную роль нельзя изменять.");
         }
         await ReplacePermissionsAsync(connection, transaction, roleId, request.PermissionCodes, cancellationToken);
         await ReplaceSubordinateRolesAsync(connection, transaction, roleId, request.SubordinateRoleIds, cancellationToken);
+        await ReplaceVisibilityMembersAsync(connection, transaction, roleId, visibilityMode, request.CardVisibilityMembershipIds, cancellationToken);
         await WriteAuditAsync(connection, transaction, actorUserId, "role", roleId, "updated", before, request, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return (await ReadRolesAsync(connection, roleId, cancellationToken)).Single();
@@ -189,11 +195,14 @@ internal sealed class PostgresRoleAdministrationService(
         await using var command = connection.CreateCommand();
         var roleFilter = roleId.HasValue ? "AND role.id = @role_id" : string.Empty;
         command.CommandText = $"""
-            SELECT role.id, role.name, role.is_system, permission.code, hierarchy.subordinate_role_id
+            SELECT role.id, role.name, role.is_system, permission.code,
+                   hierarchy.subordinate_role_id, role.card_visibility_mode,
+                   visibility.membership_id
             FROM roles AS role
             LEFT JOIN role_permissions AS role_permission ON role_permission.role_id = role.id
             LEFT JOIN permissions AS permission ON permission.id = role_permission.permission_id
             LEFT JOIN role_subordination AS hierarchy ON hierarchy.supervisor_role_id = role.id
+            LEFT JOIN role_card_visibility_members AS visibility ON visibility.role_id = role.id
             WHERE role.deleted_at IS NULL
             {roleFilter}
             ORDER BY role.is_system DESC, role.name, permission.code
@@ -206,11 +215,13 @@ internal sealed class PostgresRoleAdministrationService(
             var id = reader.GetGuid(0);
             if (!roles.TryGetValue(id, out var role))
             {
-                role = new MutableRole(id, reader.GetString(1), reader.GetBoolean(2));
+                role = new MutableRole(
+                    id, reader.GetString(1), reader.GetBoolean(2), reader.GetString(5));
                 roles.Add(id, role);
             }
             if (!reader.IsDBNull(3) && !role.PermissionCodes.Contains(reader.GetString(3))) role.PermissionCodes.Add(reader.GetString(3));
             if (!reader.IsDBNull(4) && !role.SubordinateRoleIds.Contains(reader.GetGuid(4))) role.SubordinateRoleIds.Add(reader.GetGuid(4));
+            if (!reader.IsDBNull(6) && !role.CardVisibilityMembershipIds.Contains(reader.GetGuid(6))) role.CardVisibilityMembershipIds.Add(reader.GetGuid(6));
         }
         return roles.Values.Select(role => role.ToSummary()).ToArray();
     }
@@ -332,6 +343,52 @@ internal sealed class PostgresRoleAdministrationService(
             throw new IdentityException(400, "permission_invalid", "Один или несколько кодов прав не существуют.");
     }
 
+    private async Task ReplaceVisibilityMembersAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        Guid roleId,
+        string visibilityMode,
+        IReadOnlyList<Guid>? requestedMembershipIds,
+        CancellationToken token)
+    {
+        var membershipIds = visibilityMode == "specific"
+            ? (requestedMembershipIds ?? []).Distinct().ToArray()
+            : [];
+        if (membershipIds.Length > 0)
+        {
+            await using var validate = connection.CreateCommand();
+            validate.Transaction = transaction;
+            validate.CommandText = """
+                SELECT count(*)
+                FROM public.organization_members
+                WHERE id = ANY(@ids) AND organization_id = @organization_id
+                  AND is_active AND deleted_at IS NULL
+                """;
+            AddParameter(validate, "ids", membershipIds);
+            AddParameter(validate, "organization_id", tenantContext.OrganizationId);
+            if (Convert.ToInt32(await validate.ExecuteScalarAsync(token), CultureInfo.InvariantCulture) != membershipIds.Length)
+                throw new IdentityException(400, "card_visibility_member_invalid", "Один или несколько выбранных сотрудников недоступны.");
+        }
+
+        await using (var delete = connection.CreateCommand())
+        {
+            delete.Transaction = transaction;
+            delete.CommandText = "DELETE FROM role_card_visibility_members WHERE role_id = @role_id";
+            AddParameter(delete, "role_id", roleId);
+            await delete.ExecuteNonQueryAsync(token);
+        }
+        if (membershipIds.Length == 0) return;
+        await using var insert = connection.CreateCommand();
+        insert.Transaction = transaction;
+        insert.CommandText = """
+            INSERT INTO role_card_visibility_members (role_id, membership_id)
+            SELECT @role_id, unnest(@membership_ids)
+            """;
+        AddParameter(insert, "role_id", roleId);
+        AddParameter(insert, "membership_ids", membershipIds);
+        await insert.ExecuteNonQueryAsync(token);
+    }
+
     private async Task EnsureMemberAndRolesExistAsync(DbConnection connection, DbTransaction transaction, Guid membershipId, Guid[] roleIds, CancellationToken token)
     {
         await using var member = connection.CreateCommand();
@@ -367,6 +424,14 @@ internal sealed class PostgresRoleAdministrationService(
         if (name.Length is < 2 or > 100)
             throw new IdentityException(400, "role_name_invalid", "Название роли должно содержать от 2 до 100 символов.");
         return name;
+    }
+
+    private static string ValidateVisibilityMode(string value)
+    {
+        var mode = value.Trim().ToLowerInvariant();
+        return mode is "own" or "all" or "subordinates" or "specific"
+            ? mode
+            : throw new IdentityException(400, "card_visibility_mode_invalid", "Выбран неизвестный режим видимости карточек.");
     }
 
     private static async Task<int> ExecuteWithConflictMappingAsync(DbCommand command, CancellationToken token)
@@ -408,10 +473,13 @@ internal sealed class PostgresRoleAdministrationService(
         command.Parameters.Add(parameter);
     }
 
-    private sealed class MutableRole(Guid id, string name, bool isSystem)
+    private sealed class MutableRole(Guid id, string name, bool isSystem, string cardVisibilityMode)
     {
         public List<string> PermissionCodes { get; } = [];
         public List<Guid> SubordinateRoleIds { get; } = [];
-        public RoleSummary ToSummary() => new(id, name, isSystem, PermissionCodes, SubordinateRoleIds);
+        public List<Guid> CardVisibilityMembershipIds { get; } = [];
+        public RoleSummary ToSummary() => new(
+            id, name, isSystem, PermissionCodes, SubordinateRoleIds,
+            cardVisibilityMode, CardVisibilityMembershipIds);
     }
 }

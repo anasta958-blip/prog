@@ -291,6 +291,8 @@ final class CompanyApi implements CompanyGateway, CompanyWorkspaceGateway {
             'name': value.name,
             'permissionCodes': value.permissionCodes,
             'subordinateRoleIds': value.subordinateRoleIds,
+            'cardVisibilityMode': value.cardVisibilityMode,
+            'cardVisibilityMembershipIds': value.cardVisibilityMembershipIds,
           },
         )
         as Map<String, dynamic>,

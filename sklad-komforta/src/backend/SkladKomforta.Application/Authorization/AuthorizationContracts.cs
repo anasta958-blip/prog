@@ -9,7 +9,9 @@ public sealed record RoleSummary(
     string Name,
     bool IsSystem,
     IReadOnlyList<string> PermissionCodes,
-    IReadOnlyList<Guid> SubordinateRoleIds);
+    IReadOnlyList<Guid> SubordinateRoleIds,
+    string CardVisibilityMode,
+    IReadOnlyList<Guid> CardVisibilityMembershipIds);
 
 /// <summary>Сотрудник организации и назначенные ему роли.</summary>
 public sealed record MemberAccessSummary(
@@ -24,7 +26,9 @@ public sealed record MemberAccessSummary(
 public sealed record SaveRoleRequest(
     string Name,
     IReadOnlyList<string> PermissionCodes,
-    IReadOnlyList<Guid> SubordinateRoleIds);
+    IReadOnlyList<Guid> SubordinateRoleIds,
+    string CardVisibilityMode = "own",
+    IReadOnlyList<Guid>? CardVisibilityMembershipIds = null);
 
 /// <summary>Полная замена набора ролей одного сотрудника.</summary>
 public sealed record AssignMemberAccessRequest(Guid RoleId, Guid? SupervisorMembershipId);
