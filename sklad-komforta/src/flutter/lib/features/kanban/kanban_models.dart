@@ -1,3 +1,5 @@
+import 'package:sklad_komforta_app/core/models/workflow_specialization.dart';
+
 /// Краткая запись в переключателе настроенных канбанов.
 final class KanbanBoardSummary {
   const KanbanBoardSummary({
@@ -6,6 +8,7 @@ final class KanbanBoardSummary {
     required this.name,
     required this.sortOrder,
     required this.columnCount,
+    this.specialization = WorkflowSpecialization.standard,
   });
 
   final String id;
@@ -13,6 +16,7 @@ final class KanbanBoardSummary {
   final String name;
   final int sortOrder;
   final int columnCount;
+  final WorkflowSpecialization specialization;
 
   factory KanbanBoardSummary.fromJson(Map<String, dynamic> json) =>
       KanbanBoardSummary(
@@ -21,6 +25,29 @@ final class KanbanBoardSummary {
         name: json['name'] as String,
         sortOrder: json['sortOrder'] as int,
         columnCount: json['columnCount'] as int,
+        specialization: WorkflowSpecialization.fromApi(
+          json['specialization'] as String?,
+        ),
+      );
+}
+
+/// Пользователь, карточки которого разрешено включать в текущую выборку.
+final class KanbanCardAuthor {
+  const KanbanCardAuthor({
+    required this.userId,
+    required this.displayName,
+    required this.isCurrentUser,
+  });
+
+  final String userId;
+  final String displayName;
+  final bool isCurrentUser;
+
+  factory KanbanCardAuthor.fromJson(Map<String, dynamic> json) =>
+      KanbanCardAuthor(
+        userId: json['userId'] as String,
+        displayName: json['displayName'] as String,
+        isCurrentUser: json['isCurrentUser'] as bool? ?? false,
       );
 }
 
@@ -300,6 +327,7 @@ final class KanbanBoard {
     required this.id,
     required this.code,
     required this.name,
+    this.specialization = WorkflowSpecialization.standard,
     required this.columns,
     required this.transitions,
     required this.categories,
@@ -308,6 +336,7 @@ final class KanbanBoard {
   final String id;
   final String code;
   final String name;
+  final WorkflowSpecialization specialization;
   final List<KanbanColumn> columns;
   final List<KanbanTransition> transitions;
   final List<KanbanCategory> categories;
@@ -316,6 +345,9 @@ final class KanbanBoard {
     id: json['id'] as String,
     code: json['code'] as String,
     name: json['name'] as String,
+    specialization: WorkflowSpecialization.fromApi(
+      json['specialization'] as String?,
+    ),
     columns: (json['columns'] as List<dynamic>)
         .map((item) => KanbanColumn.fromJson(item as Map<String, dynamic>))
         .toList(growable: false),

@@ -3,16 +3,27 @@ import 'dart:ui' show PointerDeviceKind;
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:sklad_komforta_app/core/config/app_config.dart';
+import 'package:sklad_komforta_app/core/models/workflow_specialization.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
+import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_card_editor.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_controller.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_models.dart';
+import 'package:sklad_komforta_app/features/quotes/quote_editor_page.dart';
 
 /// Рабочее пространство настроенных канбанов без содержимого КП/ПКП.
 final class KanbanPage extends StatefulWidget {
-  const KanbanPage({required this.controller, super.key});
+  const KanbanPage({
+    required this.controller,
+    this.config,
+    this.authController,
+    super.key,
+  });
 
   final KanbanController controller;
+  final AppConfig? config;
+  final AuthController? authController;
 
   @override
   State<KanbanPage> createState() => _KanbanPageState();
@@ -24,6 +35,7 @@ final class _KanbanPageState extends State<KanbanPage> {
   Timer? _autoScrollTimer;
   double _autoScrollDirection = 0;
   bool _mobileToolbarExpanded = false;
+  KanbanCard? _openedQuoteCard;
 
   @override
   void dispose() {
@@ -88,6 +100,16 @@ final class _KanbanPageState extends State<KanbanPage> {
   Future<void> _openEditor(KanbanColumn column, {KanbanCard? card}) async {
     final board = widget.controller.board;
     if (board == null || board.categories.isEmpty) return;
+    final opensQuoteEditor =
+        board.specialization == WorkflowSpecialization.quote ||
+        board.specialization == WorkflowSpecialization.quoteAndPrequote;
+    if (card != null &&
+        opensQuoteEditor &&
+        widget.config != null &&
+        widget.authController != null) {
+      setState(() => _openedQuoteCard = card);
+      return;
+    }
     final availableCategories = board.categories;
     final draft = card == null
         ? KanbanCardDraft.create(board, column.id)
@@ -158,6 +180,14 @@ final class _KanbanPageState extends State<KanbanPage> {
     );
   }
 
+  Future<void> _closeQuoteEditor() async {
+    final card = _openedQuoteCard;
+    if (card == null) return;
+    setState(() => _openedQuoteCard = null);
+    final currentPage = widget.controller.pageFor(card.columnId)?.page ?? 1;
+    await widget.controller.loadColumn(card.columnId, page: currentPage);
+  }
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: widget.controller,
@@ -214,6 +244,18 @@ final class _KanbanPageState extends State<KanbanPage> {
         icon: Icons.view_column_outlined,
         title: 'В канбане нет столбцов',
         message: 'Добавьте столбцы в настройках организации.',
+      );
+    }
+    final openedCard = _openedQuoteCard;
+    if (openedCard != null &&
+        widget.config != null &&
+        widget.authController != null) {
+      return QuoteEditorPage(
+        config: widget.config!,
+        authController: widget.authController!,
+        board: board,
+        card: openedCard,
+        onBack: () => unawaited(_closeQuoteEditor()),
       );
     }
     return KeyedSubtree(
@@ -299,6 +341,7 @@ final class _Toolbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final selector = _BoardSelector(controller: controller);
+    final authorSelector = _CardAuthorSelector(controller: controller);
     if (compact) {
       return DecoratedBox(
         decoration: const BoxDecoration(
@@ -342,14 +385,22 @@ final class _Toolbar extends StatelessWidget {
               firstChild: const SizedBox(width: double.infinity),
               secondChild: Padding(
                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                child: Row(
+                child: Column(
                   children: [
-                    Expanded(child: selector),
-                    const SizedBox(width: 8),
-                    IconButton.outlined(
-                      tooltip: 'Обновить',
-                      onPressed: controller.loading ? null : controller.reload,
-                      icon: const Icon(Icons.refresh),
+                    selector,
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(child: authorSelector),
+                        const SizedBox(width: 8),
+                        IconButton.outlined(
+                          tooltip: 'Обновить',
+                          onPressed: controller.loading
+                              ? null
+                              : controller.reload,
+                          icon: const Icon(Icons.refresh),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -383,6 +434,8 @@ final class _Toolbar extends StatelessWidget {
           ),
           const SizedBox(width: 24),
           SizedBox(width: 320, child: selector),
+          const SizedBox(width: 12),
+          SizedBox(width: 320, child: authorSelector),
           const Spacer(),
           if (controller.board case final board?)
             _MetaChip(
@@ -424,6 +477,43 @@ final class _BoardSelector extends StatelessWidget {
             if (value != null) controller.selectBoard(value);
           },
   );
+}
+
+final class _CardAuthorSelector extends StatelessWidget {
+  const _CardAuthorSelector({required this.controller});
+
+  final KanbanController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final users = controller.cardAuthors
+        .where((author) => !author.isCurrentUser)
+        .toList(growable: false);
+    return AppSelectField<String>(
+      value: controller.authorFilterKey,
+      label: 'Карточки пользователя',
+      isDense: true,
+      enabled: !controller.loading,
+      options: [
+        const AppSelectOption(value: 'own', label: 'Свои'),
+        for (final author in users) ...[
+          AppSelectOption(
+            value: 'user:${author.userId}',
+            label: author.displayName,
+          ),
+          AppSelectOption(
+            value: 'own:${author.userId}',
+            label: 'Свои и ${author.displayName}',
+          ),
+        ],
+      ],
+      onChanged: controller.loading
+          ? null
+          : (value) {
+              if (value != null) controller.selectAuthorFilter(value);
+            },
+    );
+  }
 }
 
 final class _KanbanColumnPanel extends StatelessWidget {

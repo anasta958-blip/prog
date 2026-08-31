@@ -87,7 +87,11 @@ class _WorkspacePageState extends State<WorkspacePage> {
               configurationEditGuard: configurationEditGuard,
             ),
             3 => _SessionsPage(controller: widget.authController),
-            _ => KanbanPage(controller: kanbanController),
+            _ => KanbanPage(
+              controller: kanbanController,
+              config: widget.config,
+              authController: widget.authController,
+            ),
           };
           if (!desktop) {
             return Scaffold(

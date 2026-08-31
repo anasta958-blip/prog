@@ -138,6 +138,38 @@ public sealed class OnboardingValidatorTests
     }
 
     [Theory]
+    [InlineData(null)]
+    [InlineData("quote")]
+    [InlineData("quote_and_prequote")]
+    [InlineData("order")]
+    public void DraftAcceptsSupportedWorkflowSpecialization(string? specialization)
+    {
+        var source = ValidDraft();
+        var workflows = source.Workflows
+            .Select(item => item with { Specialization = specialization })
+            .ToArray();
+
+        var exception = Record.Exception(() =>
+            OnboardingValidator.Validate(source with { Workflows = workflows }, false));
+
+        Assert.Null(exception);
+    }
+
+    [Fact]
+    public void DraftRejectsUnknownWorkflowSpecialization()
+    {
+        var source = ValidDraft();
+        var workflows = source.Workflows
+            .Select(item => item with { Specialization = "unknown" })
+            .ToArray();
+
+        var exception = Assert.Throws<IdentityException>(() =>
+            OnboardingValidator.Validate(source with { Workflows = workflows }, false));
+
+        Assert.Equal("onboarding_workflow_specialization_invalid", exception.Code);
+    }
+
+    [Theory]
     [InlineData("123ABC7890", null, null, null, null)]
     [InlineData(null, "123", null, null, null)]
     [InlineData(null, null, "12345678901234", null, null)]

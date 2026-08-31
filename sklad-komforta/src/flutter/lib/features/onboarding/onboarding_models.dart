@@ -1,3 +1,4 @@
+import 'package:sklad_komforta_app/core/models/workflow_specialization.dart';
 import 'package:sklad_komforta_app/features/company/company_models.dart';
 
 export 'package:sklad_komforta_app/features/company/company_models.dart';
@@ -53,12 +54,14 @@ final class WorkflowDraft {
     required this.columns,
     required this.transitions,
     List<WorkflowCategoryDraft>? categories,
+    this.specialization = WorkflowSpecialization.standard,
   }) : categories = categories ?? <WorkflowCategoryDraft>[];
   String code;
   String name;
   List<WorkflowColumnDraft> columns;
   List<WorkflowTransitionDraft> transitions;
   List<WorkflowCategoryDraft> categories;
+  WorkflowSpecialization specialization;
   factory WorkflowDraft.fromJson(Map<String, dynamic> json) => WorkflowDraft(
     code: json['code'] as String,
     name: json['name'] as String,
@@ -79,6 +82,9 @@ final class WorkflowDraft {
               WorkflowCategoryDraft.fromJson(item as Map<String, dynamic>),
         )
         .toList(),
+    specialization: WorkflowSpecialization.fromApi(
+      json['specialization'] as String?,
+    ),
   );
   Map<String, dynamic> toJson() => {
     'code': code,
@@ -86,6 +92,7 @@ final class WorkflowDraft {
     'columns': columns.map((item) => item.toJson()).toList(),
     'transitions': transitions.map((item) => item.toJson()).toList(),
     'categories': categories.map((item) => item.toJson()).toList(),
+    'specialization': specialization.apiValue,
   };
 }
 

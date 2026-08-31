@@ -496,12 +496,14 @@ internal sealed class PostgresCompanyService(
             var id = existing.GetValueOrDefault(workflow.Code, Guid.NewGuid());
             retained.Add(id);
             await ExecuteAsync(connection, transaction, """
-                INSERT INTO workflows (id, code, name, sort_order)
-                VALUES (@id, @code, @name, @sort)
+                INSERT INTO workflows (id, code, name, sort_order, specialization)
+                VALUES (@id, @code, @name, @sort, @specialization)
                 ON CONFLICT (id) DO UPDATE SET code = EXCLUDED.code, name = EXCLUDED.name,
-                                               sort_order = EXCLUDED.sort_order
+                                               sort_order = EXCLUDED.sort_order,
+                                               specialization = EXCLUDED.specialization
                 """, token, ("id", id), ("code", workflow.Code.Trim()),
-                ("name", workflow.Name.Trim()), ("sort", index));
+                ("name", workflow.Name.Trim()), ("sort", index),
+                ("specialization", Db(workflow.Specialization)));
 
             await ExecuteAsync(connection, transaction,
                 "DELETE FROM workflow_transitions WHERE from_column_id IN (SELECT id FROM workflow_columns WHERE workflow_id = @id)",

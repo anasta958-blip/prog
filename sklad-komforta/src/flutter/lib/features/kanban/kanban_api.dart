@@ -10,6 +10,7 @@ import 'package:sklad_komforta_app/features/kanban/kanban_models.dart';
 /// Заменяемый транспорт рабочего канбана для тестов контроллера.
 abstract interface class KanbanGateway {
   Future<List<KanbanBoardSummary>> getBoards(String accessToken);
+  Future<List<KanbanCardAuthor>> getCardAuthors(String accessToken);
   Future<KanbanBoard> getBoard(String accessToken, String boardId);
   Future<KanbanCardPage> getCards(
     String accessToken,
@@ -17,6 +18,8 @@ abstract interface class KanbanGateway {
     String columnId, {
     required int page,
     required int pageSize,
+    String? authorUserId,
+    bool includeOwn = true,
   });
   Future<KanbanCard> createCard(
     String accessToken,
@@ -58,6 +61,18 @@ final class KanbanApi implements KanbanGateway {
   }
 
   @override
+  Future<List<KanbanCardAuthor>> getCardAuthors(String accessToken) async {
+    final data =
+        await _send('GET', '/kanbans/card-authors', accessToken)
+            as List<dynamic>;
+    return data
+        .map(
+          (item) => KanbanCardAuthor.fromJson(item as Map<String, dynamic>),
+        )
+        .toList(growable: false);
+  }
+
+  @override
   Future<KanbanBoard> getBoard(String accessToken, String boardId) async =>
       KanbanBoard.fromJson(
         await _send(
@@ -75,6 +90,8 @@ final class KanbanApi implements KanbanGateway {
     String columnId, {
     required int page,
     required int pageSize,
+    String? authorUserId,
+    bool includeOwn = true,
   }) async => KanbanCardPage.fromJson(
     await _send(
           'GET',
@@ -84,6 +101,8 @@ final class KanbanApi implements KanbanGateway {
             'columnId': columnId,
             'page': '$page',
             'pageSize': '$pageSize',
+            'authorUserId': ?authorUserId,
+            if (authorUserId != null) 'includeOwn': '$includeOwn',
           },
         )
         as Map<String, dynamic>,

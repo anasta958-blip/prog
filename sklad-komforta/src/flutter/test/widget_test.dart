@@ -348,6 +348,21 @@ void main() {
     await tester.tap(find.bySemanticsLabel('Развернуть канбан'));
     await tester.pumpAndSettle();
     expect(find.text('Название канбана'), findsOneWidget);
+    expect(find.text('Тип канбана'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilterChip, 'КП'));
+    await tester.pumpAndSettle();
+    expect(
+      controller.onboardingDraft!.workflows.single.specialization.apiValue,
+      'quote',
+    );
+
+    await tester.tap(find.widgetWithText(FilterChip, 'КП'));
+    await tester.pumpAndSettle();
+    expect(
+      controller.onboardingDraft!.workflows.single.specialization.apiValue,
+      isNull,
+    );
 
     await tester.tap(find.bySemanticsLabel('Свернуть канбан'));
     await tester.pumpAndSettle();

@@ -75,6 +75,14 @@ public sealed class ApiBootstrapTests : IClassFixture<ApiFactory>
     }
 
     [Fact]
+    public async Task KanbanCardAuthorsEndpointRequiresAccessToken()
+    {
+        var response = await _client.GetAsync("/api/v1/kanbans/card-authors");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
     public async Task KanbanCardsEndpointRequiresAccessToken()
     {
         var boardId = Guid.NewGuid();
@@ -93,6 +101,29 @@ public sealed class ApiBootstrapTests : IClassFixture<ApiFactory>
         var response = await _client.PostAsJsonAsync(
             $"/api/v1/kanbans/{boardId}/cards/{cardId}/move",
             new { targetColumnId = Guid.NewGuid(), targetIndex = 0 });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task QuoteEndpointRequiresAccessToken()
+    {
+        var boardId = Guid.NewGuid();
+        var cardId = Guid.NewGuid();
+        var response = await _client.GetAsync(
+            $"/api/v1/kanbans/{boardId}/cards/{cardId}/quote/");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task QuoteSaveEndpointRequiresAccessToken()
+    {
+        var boardId = Guid.NewGuid();
+        var cardId = Guid.NewGuid();
+        var response = await _client.PutAsJsonAsync(
+            $"/api/v1/kanbans/{boardId}/cards/{cardId}/quote/",
+            new { });
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }

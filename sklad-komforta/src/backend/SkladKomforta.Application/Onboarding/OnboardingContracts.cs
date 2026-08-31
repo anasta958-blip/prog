@@ -29,7 +29,8 @@ public sealed record WorkflowDraft(
     string Name,
     IReadOnlyList<WorkflowColumnDraft> Columns,
     IReadOnlyList<WorkflowTransitionDraft> Transitions,
-    IReadOnlyList<WorkflowCategoryDraft>? Categories = null);
+    IReadOnlyList<WorkflowCategoryDraft>? Categories = null,
+    string? Specialization = null);
 
 /// <summary>Группа товаров внутри раздела каталога.</summary>
 public sealed record CatalogGroupDraft(string Name);

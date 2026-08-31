@@ -23,11 +23,12 @@ internal sealed class PostgresKanbanService(
         await using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT workflow.id, workflow.code, workflow.name, workflow.sort_order,
-                   count(workflow_column.id)::integer
+                   count(workflow_column.id)::integer, workflow.specialization
             FROM workflows AS workflow
             LEFT JOIN workflow_columns AS workflow_column
                    ON workflow_column.workflow_id = workflow.id
-            GROUP BY workflow.id, workflow.code, workflow.name, workflow.sort_order
+            GROUP BY workflow.id, workflow.code, workflow.name, workflow.sort_order,
+                     workflow.specialization
             ORDER BY workflow.sort_order, workflow.name, workflow.id
             """;
 
@@ -37,7 +38,45 @@ internal sealed class PostgresKanbanService(
         {
             result.Add(new KanbanBoardSummary(
                 reader.GetGuid(0), reader.GetString(1), reader.GetString(2),
-                reader.GetInt32(3), reader.GetInt32(4)));
+                reader.GetInt32(3), reader.GetInt32(4),
+                reader.IsDBNull(5) ? null : reader.GetString(5)));
+        }
+        return result;
+    }
+
+    public async Task<IReadOnlyList<KanbanCardAuthorSummary>> GetCardAuthorsAsync(
+        Guid actorUserId,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
+        var visibleUserIds = await ReadVisibleUserIdsAsync(
+            connection, null, actorUserId, cancellationToken);
+        await using var command = connection.CreateCommand();
+        var visibilityFilter = visibleUserIds is null
+            ? string.Empty
+            : "AND member.user_id = ANY(@visible_user_ids)";
+        command.CommandText = $"""
+            SELECT users.id, users.display_name
+            FROM public.organization_members AS member
+            JOIN public.users AS users ON users.id = member.user_id
+            JOIN member_roles AS member_role ON member_role.membership_id = member.id
+            JOIN roles AS role ON role.id = member_role.role_id AND role.deleted_at IS NULL
+            WHERE member.is_active AND member.deleted_at IS NULL
+              AND users.is_active AND users.deleted_at IS NULL
+              {visibilityFilter}
+            ORDER BY CASE WHEN users.id = @actor THEN 0 ELSE 1 END,
+                     users.display_name, users.id
+            """;
+        AddParameter(command, "actor", actorUserId);
+        if (visibleUserIds is not null)
+            AddParameter(command, "visible_user_ids", visibleUserIds);
+        var result = new List<KanbanCardAuthorSummary>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var userId = reader.GetGuid(0);
+            result.Add(new KanbanCardAuthorSummary(
+                userId, reader.GetString(1), userId == actorUserId));
         }
         return result;
     }
@@ -54,7 +93,8 @@ internal sealed class PostgresKanbanService(
             header.Name,
             await ReadColumnsAsync(connection, boardId, cancellationToken),
             await ReadTransitionsAsync(connection, boardId, cancellationToken),
-            await ReadCategoriesAsync(connection, boardId, cancellationToken));
+            await ReadCategoriesAsync(connection, boardId, cancellationToken),
+            header.Specialization);
     }
 
     public async Task<KanbanCardPage> GetCardsAsync(
@@ -68,11 +108,21 @@ internal sealed class PostgresKanbanService(
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
         var visibleUserIds = await ReadVisibleUserIdsAsync(
             connection, null, actorUserId, cancellationToken);
+        if (query.AuthorUserId.HasValue &&
+            visibleUserIds is null &&
+            !await IsActiveTenantMemberAsync(
+                connection, query.AuthorUserId.Value, cancellationToken))
+        {
+            throw new IdentityException(
+                403,
+                "kanban_card_author_forbidden",
+                "Карточки выбранного пользователя недоступны.");
+        }
+        var selectedUserIds = ResolveCardAuthorFilter(
+            actorUserId, visibleUserIds, query.AuthorUserId, query.IncludeOwn);
         await EnsureColumnAsync(connection, null, boardId, query.ColumnId, cancellationToken);
         await using var command = connection.CreateCommand();
-        var visibilityFilter = visibleUserIds is null
-            ? string.Empty
-            : "AND card.created_by = ANY(@visible_user_ids)";
+        const string visibilityFilter = "AND card.created_by = ANY(@visible_user_ids)";
         command.CommandText = $"""
             SELECT card.id, card.card_number, card.workflow_id, card.column_id,
                    card.category_id, card.section_id, card.title, card.values::text,
@@ -91,8 +141,7 @@ internal sealed class PostgresKanbanService(
             """;
         AddParameter(command, "workflow_id", boardId);
         AddParameter(command, "column_id", query.ColumnId);
-        if (visibleUserIds is not null)
-            AddParameter(command, "visible_user_ids", visibleUserIds);
+        AddParameter(command, "visible_user_ids", selectedUserIds);
         AddParameter(command, "limit", pageSize);
         AddParameter(command, "offset", (page - 1) * pageSize);
 
@@ -291,12 +340,13 @@ internal sealed class PostgresKanbanService(
         CancellationToken token)
     {
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT id, code, name, sort_order FROM workflows WHERE id = @id";
+        command.CommandText = "SELECT id, code, name, sort_order, specialization FROM workflows WHERE id = @id";
         AddParameter(command, "id", boardId);
         await using var reader = await command.ExecuteReaderAsync(token);
         if (!await reader.ReadAsync(token)) throw BoardNotFound();
         return new KanbanBoardSummary(
-            reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetInt32(3), 0);
+            reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetInt32(3), 0,
+            reader.IsDBNull(4) ? null : reader.GetString(4));
     }
 
     private static async Task<IReadOnlyList<KanbanColumnSummary>> ReadColumnsAsync(
@@ -834,6 +884,48 @@ internal sealed class PostgresKanbanService(
             if (!result.Contains(userId)) result.Add(userId);
         }
         return result.ToArray();
+    }
+
+    private static async Task<bool> IsActiveTenantMemberAsync(
+        DbConnection connection,
+        Guid userId,
+        CancellationToken token)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT EXISTS (
+                SELECT 1
+                FROM public.organization_members AS member
+                JOIN member_roles AS member_role ON member_role.membership_id = member.id
+                JOIN roles AS role ON role.id = member_role.role_id AND role.deleted_at IS NULL
+                JOIN public.users AS users ON users.id = member.user_id
+                WHERE member.user_id = @user_id
+                  AND member.is_active AND member.deleted_at IS NULL
+                  AND users.is_active AND users.deleted_at IS NULL
+            )
+            """;
+        AddParameter(command, "user_id", userId);
+        return await command.ExecuteScalarAsync(token) is true;
+    }
+
+    private static Guid[] ResolveCardAuthorFilter(
+        Guid actorUserId,
+        Guid[]? roleVisibleUserIds,
+        Guid? requestedUserId,
+        bool includeOwn)
+    {
+        if (!requestedUserId.HasValue) return [actorUserId];
+        if (roleVisibleUserIds is not null &&
+            !roleVisibleUserIds.Contains(requestedUserId.Value))
+        {
+            throw new IdentityException(
+                403,
+                "kanban_card_author_forbidden",
+                "Карточки выбранного пользователя недоступны.");
+        }
+        return includeOwn && requestedUserId.Value != actorUserId
+            ? [actorUserId, requestedUserId.Value]
+            : [requestedUserId.Value];
     }
 
     private static KanbanCardSummary ReadCard(DbDataReader reader) => new(

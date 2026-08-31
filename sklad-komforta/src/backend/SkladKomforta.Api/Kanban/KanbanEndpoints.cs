@@ -15,6 +15,13 @@ internal static class KanbanEndpoints
         kanbans.MapGet("/", async (IKanbanService service, CancellationToken token) =>
                 Results.Ok(ApiResponse.Success(await service.GetBoardsAsync(token))))
             .RequireTenantPermission("kanban.view");
+        kanbans.MapGet("/card-authors", async (
+                HttpContext context,
+                IKanbanService service,
+                CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.GetCardAuthorsAsync(
+                    UserId(context.User), token))))
+            .RequireTenantPermission("kanban.view");
         kanbans.MapGet("/{boardId:guid}", async (
                 Guid boardId,
                 IKanbanService service,
@@ -27,12 +34,19 @@ internal static class KanbanEndpoints
                 Guid columnId,
                 int? page,
                 int? pageSize,
+                Guid? authorUserId,
+                bool? includeOwn,
                 IKanbanService service,
                 CancellationToken token) =>
                 Results.Ok(ApiResponse.Success(await service.GetCardsAsync(
                     UserId(context.User),
                     boardId,
-                    new KanbanCardQuery(columnId, page ?? 1, pageSize ?? 20),
+                    new KanbanCardQuery(
+                        columnId,
+                        page ?? 1,
+                        pageSize ?? 20,
+                        authorUserId,
+                        includeOwn ?? true),
                     token))))
             .RequireTenantPermission("kanban.view");
         kanbans.MapGet("/{boardId:guid}/cards/{cardId:guid}", async (

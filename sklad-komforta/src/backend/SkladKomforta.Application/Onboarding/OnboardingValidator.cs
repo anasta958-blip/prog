@@ -1,4 +1,5 @@
 using SkladKomforta.Application.Identity;
+using SkladKomforta.Application.Quotes;
 using System.Diagnostics.CodeAnalysis;
 using System.Net.Mail;
 
@@ -7,6 +8,13 @@ namespace SkladKomforta.Application.Onboarding;
 /// <summary>Централизует ограничения черновика, общие для сохранения и активации.</summary>
 public static class OnboardingValidator
 {
+    private static readonly HashSet<string> WorkflowSpecializations =
+        [
+            WorkflowSpecializationCodes.Quote,
+            WorkflowSpecializationCodes.QuoteAndPrequote,
+            WorkflowSpecializationCodes.Order,
+        ];
+
     /// <summary>
     /// Проверяет размеры, уникальность кодов и ссылки переходов. При финальной
     /// активации дополнительно требует заполнения каждого обязательного раздела.
@@ -27,6 +35,13 @@ public static class OnboardingValidator
         {
             RequireText(workflow.Code, 2, 80, "Код канбана");
             RequireText(workflow.Name, 2, 120, "Название канбана");
+            if (workflow.Specialization is not null &&
+                !WorkflowSpecializations.Contains(workflow.Specialization))
+            {
+                Fail(
+                    "onboarding_workflow_specialization_invalid",
+                    $"Для канбана «{workflow.Name}» выбран неизвестный тип.");
+            }
             ValidateUnique(workflow.Columns.Select(item => item.ClientId), "Идентификаторы столбцов");
             foreach (var column in workflow.Columns)
             {

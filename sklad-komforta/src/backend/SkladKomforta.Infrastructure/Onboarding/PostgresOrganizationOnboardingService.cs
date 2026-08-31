@@ -227,9 +227,13 @@ internal sealed class PostgresOrganizationOnboardingService(
         {
             var workflow = workflows[workflowIndex];
             var workflowId = Guid.NewGuid();
-            await ExecuteAsync(connection, transaction,
-                "INSERT INTO workflows (id, code, name, sort_order) VALUES (@id, @code, @name, @sort)", token,
-                ("id", workflowId), ("code", workflow.Code.Trim()), ("name", workflow.Name.Trim()), ("sort", workflowIndex));
+            await ExecuteAsync(connection, transaction, """
+                INSERT INTO workflows (id, code, name, sort_order, specialization)
+                VALUES (@id, @code, @name, @sort, @specialization)
+                """, token,
+                ("id", workflowId), ("code", workflow.Code.Trim()),
+                ("name", workflow.Name.Trim()), ("sort", workflowIndex),
+                ("specialization", Db(workflow.Specialization)));
             var columns = new Dictionary<string, Guid>(StringComparer.Ordinal);
             for (var columnIndex = 0; columnIndex < workflow.Columns.Count; columnIndex++)
             {

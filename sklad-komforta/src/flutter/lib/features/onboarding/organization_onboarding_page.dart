@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/models/workflow_specialization.dart';
 import 'package:sklad_komforta_app/core/widgets/mobile_collapsible_navigation.dart';
 import 'package:flutter/services.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
@@ -639,6 +640,8 @@ final class _OrganizationOnboardingPageState
             setState(() => workflow.name = value);
           }),
           const SizedBox(height: 12),
+          _workflowSpecializationSelector(workflow),
+          const SizedBox(height: 16),
           for (final column in List<WorkflowColumnDraft>.of(workflow.columns))
             KeyedSubtree(
               key: ValueKey(column.clientId),
@@ -665,6 +668,49 @@ final class _OrganizationOnboardingPageState
             const SizedBox(height: 10),
             _workflowTransitionsEditor(workflow),
           ],
+        ],
+      ),
+    );
+  }
+
+  /// Выбирает не более одного подключаемого бизнес-модуля. Повторное нажатие
+  /// на активный пункт снимает специализацию и возвращает обычный канбан.
+  Widget _workflowSpecializationSelector(WorkflowDraft workflow) {
+    const options = [
+      (WorkflowSpecialization.quote, 'КП'),
+      (WorkflowSpecialization.quoteAndPrequote, 'КП + ПКП'),
+      (WorkflowSpecialization.order, 'Комплектация'),
+    ];
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Тип канбана', style: Theme.of(context).textTheme.labelLarge),
+          const SizedBox(height: 4),
+          Text(
+            'Если ничего не выбрано, канбан остаётся стандартным.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final option in options)
+                FilterChip(
+                  label: Text(option.$2),
+                  selected: workflow.specialization == option.$1,
+                  onSelected: (selected) => setState(() {
+                    workflow.specialization = selected
+                        ? option.$1
+                        : WorkflowSpecialization.standard;
+                  }),
+                ),
+            ],
+          ),
         ],
       ),
     );

@@ -8,7 +8,8 @@ public sealed record KanbanBoardSummary(
     string Code,
     string Name,
     int SortOrder,
-    int ColumnCount);
+    int ColumnCount,
+    string? Specialization);
 
 /// <summary>Столбец рабочего канбана в порядке, заданном настройками организации.</summary>
 public sealed record KanbanColumnSummary(
@@ -54,7 +55,8 @@ public sealed record KanbanBoard(
     string Name,
     IReadOnlyList<KanbanColumnSummary> Columns,
     IReadOnlyList<KanbanTransitionSummary> Transitions,
-    IReadOnlyList<KanbanCategorySummary> Categories);
+    IReadOnlyList<KanbanCategorySummary> Categories,
+    string? Specialization = null);
 
 /// <summary>Одна универсальная карточка рабочего канбана.</summary>
 public sealed record KanbanCardSummary(
@@ -80,8 +82,19 @@ public sealed record KanbanCardPage(
     int PageSize,
     int Total);
 
+/// <summary>Автор карточек, доступный текущему пользователю для фильтрации.</summary>
+public sealed record KanbanCardAuthorSummary(
+    Guid UserId,
+    string DisplayName,
+    bool IsCurrentUser);
+
 /// <summary>Фильтры серверной страницы карточек.</summary>
-public sealed record KanbanCardQuery(Guid ColumnId, int Page = 1, int PageSize = 20);
+public sealed record KanbanCardQuery(
+    Guid ColumnId,
+    int Page = 1,
+    int PageSize = 20,
+    Guid? AuthorUserId = null,
+    bool IncludeOwn = true);
 
 /// <summary>Данные создания или полной замены универсальной карточки.</summary>
 public sealed record SaveKanbanCardRequest(
@@ -101,6 +114,7 @@ public sealed record MoveKanbanCardRequest(Guid TargetColumnId, int TargetIndex)
 public interface IKanbanService
 {
     Task<IReadOnlyList<KanbanBoardSummary>> GetBoardsAsync(CancellationToken cancellationToken);
+    Task<IReadOnlyList<KanbanCardAuthorSummary>> GetCardAuthorsAsync(Guid actorUserId, CancellationToken cancellationToken);
     Task<KanbanBoard> GetBoardAsync(Guid boardId, CancellationToken cancellationToken);
     Task<KanbanCardPage> GetCardsAsync(Guid actorUserId, Guid boardId, KanbanCardQuery query, CancellationToken cancellationToken);
     Task<KanbanCardSummary> GetCardAsync(Guid actorUserId, Guid boardId, Guid cardId, CancellationToken cancellationToken);

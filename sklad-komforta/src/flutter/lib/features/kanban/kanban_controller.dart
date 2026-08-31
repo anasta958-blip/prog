@@ -21,7 +21,10 @@ final class KanbanController extends ChangeNotifier {
   final int pageSize;
 
   List<KanbanBoardSummary> boards = const [];
+  List<KanbanCardAuthor> cardAuthors = const [];
   KanbanBoard? board;
+  String? selectedAuthorUserId;
+  bool includeOwnCards = true;
   final Map<String, KanbanCardPage> _columnPages = {};
   final Set<String> _loadingColumns = {};
   bool loading = false;
@@ -30,6 +33,12 @@ final class KanbanController extends ChangeNotifier {
 
   KanbanCardPage? pageFor(String columnId) => _columnPages[columnId];
   bool isColumnLoading(String columnId) => _loadingColumns.contains(columnId);
+
+  String get authorFilterKey => selectedAuthorUserId == null
+      ? 'own'
+      : includeOwnCards
+      ? 'own:${selectedAuthorUserId!}'
+      : 'user:${selectedAuthorUserId!}';
 
   /// Переупорядочивание внутри столбца разрешено всегда. Между столбцами
   /// клиент использует ту же направленную матрицу переходов, что и backend.
@@ -55,7 +64,17 @@ final class KanbanController extends ChangeNotifier {
     error = null;
     notifyListeners();
     try {
-      boards = await _authorized(_gateway.getBoards);
+      final initialData = await Future.wait([
+        _authorized(_gateway.getBoards),
+        _authorized(_gateway.getCardAuthors),
+      ]);
+      boards = initialData[0] as List<KanbanBoardSummary>;
+      cardAuthors = initialData[1] as List<KanbanCardAuthor>;
+      if (selectedAuthorUserId != null &&
+          !cardAuthors.any((item) => item.userId == selectedAuthorUserId)) {
+        selectedAuthorUserId = null;
+        includeOwnCards = true;
+      }
       if (boards.isEmpty) {
         board = null;
       } else {
@@ -71,6 +90,40 @@ final class KanbanController extends ChangeNotifier {
       error = exception.message;
     } on Object {
       error = 'Не удалось загрузить канбаны. Проверьте подключение.';
+    } finally {
+      loading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Меняет только фильтр авторов и заново загружает первые страницы столбцов.
+  Future<void> selectAuthorFilter(String value) async {
+    if (loading || value == authorFilterKey) return;
+    if (value == 'own') {
+      selectedAuthorUserId = null;
+      includeOwnCards = true;
+    } else {
+      final separator = value.indexOf(':');
+      if (separator < 0) return;
+      final mode = value.substring(0, separator);
+      final userId = value.substring(separator + 1);
+      if (!cardAuthors.any(
+        (item) => !item.isCurrentUser && item.userId == userId,
+      )) {
+        return;
+      }
+      selectedAuthorUserId = userId;
+      includeOwnCards = mode == 'own';
+    }
+    loading = true;
+    error = null;
+    notifyListeners();
+    try {
+      await _loadAllColumns();
+    } on ApiException catch (exception) {
+      error = exception.message;
+    } on Object {
+      error = 'Не удалось применить фильтр карточек.';
     } finally {
       loading = false;
       notifyListeners();
@@ -111,6 +164,8 @@ final class KanbanController extends ChangeNotifier {
           columnId,
           page: page,
           pageSize: pageSize,
+          authorUserId: selectedAuthorUserId,
+          includeOwn: includeOwnCards,
         ),
       );
     } on ApiException catch (exception) {
@@ -258,6 +313,8 @@ final class KanbanController extends ChangeNotifier {
             column.id,
             page: 1,
             pageSize: pageSize,
+            authorUserId: selectedAuthorUserId,
+            includeOwn: includeOwnCards,
           ),
         ),
     ]);
@@ -280,6 +337,8 @@ final class KanbanController extends ChangeNotifier {
         columnId,
         page: targetPage,
         pageSize: pageSize,
+        authorUserId: selectedAuthorUserId,
+        includeOwn: includeOwnCards,
       ),
     );
     if (result.items.isEmpty && result.total > 0 && targetPage > 1) {
@@ -291,6 +350,8 @@ final class KanbanController extends ChangeNotifier {
           columnId,
           page: targetPage,
           pageSize: pageSize,
+          authorUserId: selectedAuthorUserId,
+          includeOwn: includeOwnCards,
         ),
       );
     }

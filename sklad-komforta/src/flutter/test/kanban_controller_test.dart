@@ -53,6 +53,28 @@ void main() {
     auth.dispose();
   });
 
+  test('фильтр карточек передаёт выбранного пользователя на сервер', () async {
+    final auth = _authorizedController(config);
+    final gateway = _MemoryKanbanGateway();
+    final controller = KanbanController(config, auth, gateway: gateway);
+    await controller.initialize();
+
+    await controller.selectAuthorFilter('user:manager-user');
+
+    expect(controller.authorFilterKey, 'user:manager-user');
+    expect(gateway.lastAuthorUserId, 'manager-user');
+    expect(gateway.lastIncludeOwn, isFalse);
+
+    await controller.selectAuthorFilter('own:manager-user');
+
+    expect(controller.authorFilterKey, 'own:manager-user');
+    expect(gateway.lastAuthorUserId, 'manager-user');
+    expect(gateway.lastIncludeOwn, isTrue);
+
+    controller.dispose();
+    auth.dispose();
+  });
+
   testWidgets('экран показывает настроенные столбцы', (tester) async {
     final auth = _authorizedController(config);
     final controller = KanbanController(
@@ -73,7 +95,7 @@ void main() {
     expect(find.text('Составить КП'), findsOneWidget);
     expect(find.text('Согласование'), findsOneWidget);
     expect(find.text('В этом столбце пока нет карточек'), findsWidgets);
-    expect(find.byType(AppSelectField<String>), findsOneWidget);
+    expect(find.byType(AppSelectField<String>), findsNWidgets(2));
 
     controller.dispose();
     auth.dispose();
@@ -221,6 +243,8 @@ final class _MemoryKanbanGateway implements KanbanGateway {
   int nextNumber = 1;
   final Map<String, int> cardRequests = {};
   final Map<String, List<KanbanCard>> cards = {};
+  String? lastAuthorUserId;
+  bool? lastIncludeOwn;
 
   static const boards = [
     KanbanBoardSummary(
@@ -244,6 +268,21 @@ final class _MemoryKanbanGateway implements KanbanGateway {
     listRequests++;
     return boards;
   }
+
+  @override
+  Future<List<KanbanCardAuthor>> getCardAuthors(String accessToken) async =>
+      const [
+        KanbanCardAuthor(
+          userId: 'current-user',
+          displayName: 'Текущий пользователь',
+          isCurrentUser: true,
+        ),
+        KanbanCardAuthor(
+          userId: 'manager-user',
+          displayName: 'Иван Бочаров',
+          isCurrentUser: false,
+        ),
+      ];
 
   @override
   Future<KanbanBoard> getBoard(String accessToken, String boardId) async {
@@ -307,7 +346,11 @@ final class _MemoryKanbanGateway implements KanbanGateway {
     String columnId, {
     required int page,
     required int pageSize,
+    String? authorUserId,
+    bool includeOwn = true,
   }) async {
+    lastAuthorUserId = authorUserId;
+    lastIncludeOwn = includeOwn;
     cardRequests[columnId] = (cardRequests[columnId] ?? 0) + 1;
     final source = cards[columnId] ?? const [];
     final start = (page - 1) * pageSize;

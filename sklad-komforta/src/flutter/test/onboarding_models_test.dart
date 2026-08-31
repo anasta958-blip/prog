@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sklad_komforta_app/core/models/workflow_specialization.dart';
 import 'package:sklad_komforta_app/features/onboarding/onboarding_field_registry.dart';
 import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
 
@@ -126,6 +127,21 @@ void main() {
     final restored = WorkflowDraft.fromJson(source);
 
     expect(restored.categories, isEmpty);
+    expect(restored.specialization.apiValue, isNull);
+  });
+
+  test('специализация канбана сохраняется в JSON', () {
+    final source = WorkflowDraft(
+      code: 'quote',
+      name: 'КП и ПКП',
+      columns: [],
+      transitions: [],
+      specialization: WorkflowSpecialization.quoteAndPrequote,
+    );
+
+    final restored = WorkflowDraft.fromJson(source.toJson());
+
+    expect(restored.specialization, WorkflowSpecialization.quoteAndPrequote);
   });
 
   test('канбан сохраняет категории и порядок полей карточки', () {
