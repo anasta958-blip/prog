@@ -60,7 +60,10 @@ void main() {
       );
       expect(configurationSaved, isTrue);
       expect(gateway.savedConfiguration, isNotNull);
-      expect(controller.configuration!.rules.single.clientId, 'rule-save-check');
+      expect(
+        controller.configuration!.rules.single.clientId,
+        'rule-save-check',
+      );
       expect(gateway.deletedCategoryData, const ['category-1']);
 
       controller.approveCategoryDataDeletion('category-2');
@@ -363,6 +366,10 @@ final class _PartialWorkspaceGateway implements CompanyWorkspaceGateway {
     createdAt: DateTime(2026),
     activeUntil: DateTime(2027),
   );
+
+  @override
+  Future<CompanyProfileDraft> getProfile(String accessToken) async =>
+      CompanyProfileDraft(organizationName: 'Склад Комфорта');
 
   @override
   Future<OrganizationLifecycle> getLifecycle(String accessToken) async =>

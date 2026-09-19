@@ -1,5 +1,6 @@
 using SkladKomforta.Application.Identity;
 using SkladKomforta.Application.Onboarding;
+using SkladKomforta.Application.Quotes;
 
 namespace SkladKomforta.Domain.Tests.Onboarding;
 
@@ -146,13 +147,65 @@ public sealed class OnboardingValidatorTests
     {
         var source = ValidDraft();
         var workflows = source.Workflows
-            .Select(item => item with { Specialization = specialization })
+            .Select(item => item with
+            {
+                Specialization = specialization,
+                Columns =
+                [
+                    item.Columns[0] with
+                    {
+                        CreationActions = specialization switch
+                        {
+                            "quote" => [WorkflowCreationActionCodes.Quote],
+                            "quote_and_prequote" =>
+                                [WorkflowCreationActionCodes.Quote, WorkflowCreationActionCodes.Prequote],
+                            "order" => [WorkflowCreationActionCodes.Order],
+                            _ => [],
+                        },
+                    },
+                ],
+            })
             .ToArray();
 
         var exception = Record.Exception(() =>
             OnboardingValidator.Validate(source with { Workflows = workflows }, false));
 
         Assert.Null(exception);
+    }
+
+    [Fact]
+    public void SpecializedWorkflowRequiresConfiguredCreationColumn()
+    {
+        var source = ValidDraft();
+        var workflow = source.Workflows[0] with
+        {
+            Specialization = WorkflowSpecializationCodes.Quote,
+        };
+
+        var exception = Assert.Throws<IdentityException>(() =>
+            OnboardingValidator.Validate(source with { Workflows = [workflow] }, false));
+
+        Assert.Equal("onboarding_creation_action_required", exception.Code);
+    }
+
+    [Fact]
+    public void CreationActionCannotBeDuplicatedAcrossColumns()
+    {
+        var source = ValidDraft();
+        var workflow = source.Workflows[0] with
+        {
+            Specialization = WorkflowSpecializationCodes.Quote,
+            Columns =
+            [
+                new WorkflowColumnDraft("first", "Первый", "#4D8DFF", [WorkflowCreationActionCodes.Quote]),
+                new WorkflowColumnDraft("second", "Второй", "#4D8DFF", [WorkflowCreationActionCodes.Quote]),
+            ],
+        };
+
+        var exception = Assert.Throws<IdentityException>(() =>
+            OnboardingValidator.Validate(source with { Workflows = [workflow] }, false));
+
+        Assert.Equal("onboarding_duplicate", exception.Code);
     }
 
     [Fact]

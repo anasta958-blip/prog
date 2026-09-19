@@ -240,6 +240,7 @@ final _category = CatalogCategory(
 
 const _dependency = CatalogDependency(
   id: '44444444-4444-4444-4444-444444444444',
+  clientId: 'works-to-equipment',
   sourceCategoryId: '55555555-5555-5555-5555-555555555555',
   targetCategoryId: '11111111-1111-1111-1111-111111111111',
   targetFieldCode: 'linked_services',

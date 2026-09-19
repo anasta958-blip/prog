@@ -58,18 +58,24 @@ final class KanbanColumn {
     required this.name,
     required this.color,
     required this.sortOrder,
+    this.creationActions = const [],
   });
 
   final String id;
   final String name;
   final String color;
   final int sortOrder;
+  final List<WorkflowCreationAction> creationActions;
 
   factory KanbanColumn.fromJson(Map<String, dynamic> json) => KanbanColumn(
     id: json['id'] as String,
     name: json['name'] as String,
     color: json['color'] as String,
     sortOrder: json['sortOrder'] as int,
+    creationActions: ((json['creationActions'] as List<dynamic>?) ?? const [])
+        .map((item) => WorkflowCreationAction.tryFromApi('$item'))
+        .whereType<WorkflowCreationAction>()
+        .toList(growable: false),
   );
 }
 
@@ -201,7 +207,7 @@ final class KanbanCard {
     required this.number,
     required this.workflowId,
     required this.columnId,
-    required this.categoryId,
+    this.categoryId,
     this.sectionId,
     required this.title,
     required this.values,
@@ -217,7 +223,7 @@ final class KanbanCard {
   final int number;
   final String workflowId;
   final String columnId;
-  final String categoryId;
+  final String? categoryId;
   final String? sectionId;
   final String title;
   final Map<String, dynamic> values;
@@ -233,7 +239,7 @@ final class KanbanCard {
     number: json['number'] as int,
     workflowId: json['workflowId'] as String,
     columnId: json['columnId'] as String,
-    categoryId: json['categoryId'] as String,
+    categoryId: json['categoryId'] as String?,
     sectionId: json['sectionId'] as String?,
     title: json['title'] as String,
     values: Map<String, dynamic>.from(
@@ -306,7 +312,7 @@ final class KanbanCardDraft {
 
   factory KanbanCardDraft.fromCard(KanbanCard card) => KanbanCardDraft(
     columnId: card.columnId,
-    categoryId: card.categoryId,
+    categoryId: card.categoryId ?? '',
     sectionId: card.sectionId,
     title: card.title,
     values: card.values,

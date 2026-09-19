@@ -1,14 +1,23 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/core/network/api_response_decoder.dart';
+import 'package:sklad_komforta_app/core/network/content_disposition.dart';
 import 'package:sklad_komforta_app/core/network/http_client_factory.dart'
     if (dart.library.js_interop) 'package:sklad_komforta_app/core/network/http_client_factory_web.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_models.dart';
 
 /// Заменяемый transport специализированной части КП/ПКП.
 abstract interface class QuoteGateway {
+  Future<QuoteDraft> createQuote(
+    String accessToken,
+    String boardId,
+    String columnId,
+    QuoteDraft draft,
+  );
+
   Future<QuoteDraft> getQuote(
     String accessToken,
     String boardId,
@@ -22,6 +31,12 @@ abstract interface class QuoteGateway {
     QuoteDraft draft,
   );
 
+  Future<QuotePdfDownload> downloadPdf(
+    String accessToken,
+    String boardId,
+    String cardId,
+  );
+
   void close();
 }
 
@@ -31,6 +46,30 @@ final class QuoteApi implements QuoteGateway {
 
   final AppConfig _config;
   final http.Client _client;
+
+  @override
+  Future<QuoteDraft> createQuote(
+    String accessToken,
+    String boardId,
+    String columnId,
+    QuoteDraft draft,
+  ) async {
+    final path = '/kanbans/${Uri.encodeComponent(boardId)}/quotes';
+    final request =
+        http.Request('POST', Uri.parse('${_config.apiBaseUrl}$path'))
+          ..headers.addAll({
+            'Authorization': 'Bearer $accessToken',
+            'Accept': 'application/json',
+            'Content-Type': 'application/json; charset=utf-8',
+          });
+    request.body = jsonEncode({'columnId': columnId, 'quote': draft.toJson()});
+    final response = await http.Response.fromStream(
+      await _client.send(request),
+    );
+    return QuoteDraft.fromJson(
+      decodeApiResponse(response) as Map<String, dynamic>,
+    );
+  }
 
   @override
   Future<QuoteDraft> getQuote(
@@ -51,6 +90,33 @@ final class QuoteApi implements QuoteGateway {
     await _send('PUT', boardId, cardId, accessToken, body: draft.toJson())
         as Map<String, dynamic>,
   );
+
+  @override
+  Future<QuotePdfDownload> downloadPdf(
+    String accessToken,
+    String boardId,
+    String cardId,
+  ) async {
+    final path =
+        '/kanbans/${Uri.encodeComponent(boardId)}/cards/'
+        '${Uri.encodeComponent(cardId)}/quote/pdf';
+    final response = await _client.get(
+      Uri.parse('${_config.apiBaseUrl}$path'),
+      headers: {
+        'Authorization': 'Bearer $accessToken',
+        'Accept': 'application/pdf',
+      },
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      decodeApiResponse(response);
+    }
+    return QuotePdfDownload(
+      fileName:
+          contentDispositionFileName(response.headers['content-disposition']) ??
+          'Коммерческое предложение.pdf',
+      bytes: response.bodyBytes,
+    );
+  }
 
   Future<dynamic> _send(
     String method,
@@ -78,4 +144,12 @@ final class QuoteApi implements QuoteGateway {
 
   @override
   void close() => _client.close();
+}
+
+/// Бинарный официальный документ, готовый для сохранения на устройстве.
+final class QuotePdfDownload {
+  const QuotePdfDownload({required this.fileName, required this.bytes});
+
+  final String fileName;
+  final Uint8List bytes;
 }

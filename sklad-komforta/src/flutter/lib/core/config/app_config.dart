@@ -5,7 +5,11 @@
 /// захардкоженных платформенных адресов.
 final class AppConfig {
   /// Создаёт уже проверенный набор параметров запуска.
-  const AppConfig({required this.apiBaseUrl, required this.environment});
+  const AppConfig({
+    required this.apiBaseUrl,
+    required this.environment,
+    this.publicAppBaseUrl = '',
+  });
 
   /// Читает параметры из compile-time environment и использует безопасные
   /// локальные значения только для development-запуска без аргументов.
@@ -18,6 +22,10 @@ final class AppConfig {
       'APP_ENVIRONMENT',
       defaultValue: 'development',
     ),
+    publicAppBaseUrl: String.fromEnvironment(
+      'PUBLIC_APP_BASE_URL',
+      defaultValue: '',
+    ),
   );
 
   /// Базовый URL версионированного REST API.
@@ -25,4 +33,20 @@ final class AppConfig {
 
   /// Логическое имя среды, используемое диагностикой и выбором конфигурации.
   final String environment;
+
+  /// Публичный адрес Web-приложения, который передаётся внешнему клиенту.
+  final String publicAppBaseUrl;
+
+  /// Использует явный Web-адрес либо безопасно выводит его из адреса API.
+  /// Для локального API на 8080 Flutter Web запускается на согласованном 3000.
+  String get resolvedPublicAppBaseUrl {
+    final configured = publicAppBaseUrl.trim();
+    if (configured.isNotEmpty) return configured;
+    final api = Uri.parse(apiBaseUrl);
+    return Uri(
+      scheme: api.scheme,
+      host: api.host,
+      port: api.hasPort ? (api.port == 8080 ? 3000 : api.port) : null,
+    ).toString();
+  }
 }

@@ -13,6 +13,7 @@ RUN flutter build web --release \
     --dart-define=APP_ENVIRONMENT=${APP_ENVIRONMENT}
 
 FROM nginx:1.29-alpine
-COPY docker/nginx/default.conf.template /etc/nginx/templates/default.conf.template
+ARG NGINX_TEMPLATE=docker/nginx/default.conf.template
+COPY ${NGINX_TEMPLATE} /etc/nginx/templates/default.conf.template
 COPY --from=build /app/build/web /usr/share/nginx/html
 EXPOSE 80 443

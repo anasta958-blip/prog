@@ -2,6 +2,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_models.dart';
 
 void main() {
+  test('новый вариант получает актуальную ставку НДС организации', () {
+    final type = QuoteProposalTypeDraft.create(initialVatRate: 22);
+
+    expect(type.variants.single.vatRate, 22);
+  });
+
   test(
     'строка считается в фиксированном порядке цена-наценка-скидка-количество',
     () {
@@ -21,6 +27,40 @@ void main() {
       expect(position.lineTotal, 486);
     },
   );
+
+  test('сумма строки округляется независимо от цены единицы', () {
+    final position = _position(basePrice: 99.995, quantity: 2);
+
+    expect(position.unitPrice, 100);
+    expect(position.lineTotal, 199.99);
+  });
+
+  test('денежные итоги округляются до копеек на каждом уровне', () {
+    final section = QuoteSectionDraft(
+      id: 'section-rounding',
+      name: 'Раздел',
+      positions: [
+        _position(basePrice: 33.335, quantity: 3),
+        _position(basePrice: 10.005, quantity: 2),
+      ],
+    );
+    final category = QuoteCategoryDraft(
+      id: 'category-rounding',
+      name: 'Категория',
+      sections: [section],
+    );
+    final variant = QuoteVariantDraft(
+      id: 'variant-rounding',
+      name: 'Вариант',
+      vatRate: 20,
+      categories: [category],
+    );
+
+    expect(section.clientTotal, 120.02);
+    expect(category.clientTotal, 120.02);
+    expect(variant.clientTotal, 120.02);
+    expect(variant.vatAmount, 20);
+  });
 
   test('исключённая позиция не входит в итоги раздела и варианта', () {
     final included = _position(basePrice: 120, quantity: 2);
@@ -50,14 +90,25 @@ void main() {
     expect(variant.clientTotal, 240);
   });
 
-  test('сводка типа использует максимальную сумму среди его вариантов', () {
+  test('сводка типа суммирует все входящие варианты', () {
     final type = QuoteProposalTypeDraft(
       id: 'type-1',
       name: 'Кондиционеры',
       variants: [_variant('Бюджетный', 100), _variant('Премиальный', 350)],
     );
 
-    expect(type.clientTotal, 350);
+    expect(type.clientTotal, 450);
+    expect(type.purchaseTotal, 0);
+    expect(type.margin, 450);
+    expect(type.marginPercent, 0);
+  });
+
+  test('отрицательная расчётная цена распознаётся до сохранения', () {
+    final position = _position(basePrice: 100, discountPercent: 150);
+
+    expect(position.hasValidCalculatedPrice, isFalse);
+    expect(position.unitPrice, -50);
+    expect(position.lineTotal, -50);
   });
 
   test('JSON сохраняет типы, варианты, разделы и дополнительные данные', () {
@@ -80,12 +131,31 @@ void main() {
       ],
     );
 
-    final restored = QuoteDraft.fromJson({'id': source.id, ...source.toJson()});
+    final restored = QuoteDraft.fromJson({
+      'id': source.id,
+      ...source.toJson(),
+      'clientSelectedProposalTypeId': 'type-1',
+      'clientSelectionSubmittedAt': '2026-09-09T18:30:00Z',
+      'proposalTypes': [
+        {
+          ...source.toJson()['proposalTypes'][0] as Map<String, dynamic>,
+          'selectedByClient': true,
+        },
+      ],
+    });
 
     expect(restored.kind, QuoteKind.prequote);
     expect(restored.selectionMode, 'proposal_type');
     expect(restored.additionalInformation, 'Срок поставки 14 дней');
+    expect(restored.clientSelectedProposalTypeId, 'type-1');
+    expect(restored.clientSelectionSubmittedAt, DateTime.utc(2026, 9, 9, 18, 30));
+    expect(source.toJson(), isNot(contains('clientSelectedProposalTypeId')));
     expect(restored.proposalTypes.single.name, 'Кондиционеры');
+    expect(restored.proposalTypes.single.selectedByClient, isTrue);
+    expect(
+      restored.proposalTypes.single.toJson(),
+      isNot(contains('selectedByClient')),
+    );
     expect(restored.proposalTypes.single.variants.single.clientTotal, 275);
   });
 }

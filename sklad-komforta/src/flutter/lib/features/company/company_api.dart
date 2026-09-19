@@ -28,6 +28,7 @@ abstract interface class CompanyGateway {
 
 /// REST-операции рабочих подпространств компании.
 abstract interface class CompanyWorkspaceGateway {
+  Future<CompanyProfileDraft> getProfile(String accessToken);
   Future<OrganizationLifecycle> getLifecycle(String accessToken);
   Future<List<CompanyAuditEntryModel>> getAudit(String accessToken);
   Future<List<LegalEntityModel>> getLegalEntities(String accessToken);

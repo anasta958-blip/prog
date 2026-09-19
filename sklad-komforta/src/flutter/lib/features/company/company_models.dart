@@ -115,6 +115,7 @@ final class LegalEntityModel {
   String? corrAccount;
   String? introDefault;
   String? footerDefault;
+  List<double?> vatRates = [20];
   bool isDefault = false;
 
   factory LegalEntityModel.fromJson(Map<String, dynamic> json) =>
@@ -140,6 +141,9 @@ final class LegalEntityModel {
         ..corrAccount = json['corrAccount'] as String?
         ..introDefault = json['introDefault'] as String?
         ..footerDefault = json['footerDefault'] as String?
+        ..vatRates = ((json['vatRates'] as List<dynamic>?) ?? const [20])
+            .map((value) => (value as num?)?.toDouble())
+            .toList()
         ..isDefault = json['isDefault'] as bool? ?? false;
 
   Map<String, dynamic> toJson() => {
@@ -162,6 +166,7 @@ final class LegalEntityModel {
     'corrAccount': corrAccount,
     'introDefault': introDefault,
     'footerDefault': footerDefault,
+    'vatRates': vatRates,
     'isDefault': isDefault,
   };
 }

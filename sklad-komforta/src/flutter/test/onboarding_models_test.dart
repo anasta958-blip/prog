@@ -4,6 +4,40 @@ import 'package:sklad_komforta_app/features/onboarding/onboarding_field_registry
 import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
 
 void main() {
+  test('юридическое лицо сохраняет собственную ставку НДС', () {
+    final entity = LegalEntityModel(
+      id: 'entity-1',
+      name: 'Исполнитель',
+      companyType: 'ООО',
+    )..vatRates = [null, 10, 22];
+
+    final restored = LegalEntityModel.fromJson({
+      ...entity.toJson(),
+      'id': entity.id,
+    });
+
+    expect(restored.vatRates, [null, 10, 22]);
+  });
+
+  test('столбец сохраняет назначенные действия создания документов', () {
+    final source = WorkflowColumnDraft(
+      clientId: 'quote-first',
+      name: 'Составить предложение',
+      color: '#4D8DFF',
+      creationActions: const [
+        WorkflowCreationAction.quote,
+        WorkflowCreationAction.prequote,
+      ],
+    );
+
+    final restored = WorkflowColumnDraft.fromJson(source.toJson());
+
+    expect(restored.creationActions, const [
+      WorkflowCreationAction.quote,
+      WorkflowCreationAction.prequote,
+    ]);
+  });
+
   test('категория сохраняет устойчивый id и упорядоченные системные поля', () {
     final source = CatalogCategoryDraft(
       clientId: 'equipment',

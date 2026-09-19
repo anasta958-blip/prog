@@ -13,7 +13,11 @@ public sealed record CompanyProfileDraft(
     string? Email);
 
 /// <summary>Один столбец настраиваемого канбана.</summary>
-public sealed record WorkflowColumnDraft(string ClientId, string Name, string Color);
+public sealed record WorkflowColumnDraft(
+    string ClientId,
+    string Name,
+    string Color,
+    IReadOnlyList<string>? CreationActions = null);
 
 /// <summary>Разрешённый переход между двумя клиентскими идентификаторами столбцов.</summary>
 public sealed record WorkflowTransitionDraft(string FromClientId, string ToClientId);

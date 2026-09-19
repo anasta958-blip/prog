@@ -15,6 +15,18 @@ public sealed class ApiBootstrapTests : IClassFixture<ApiFactory>
     public ApiBootstrapTests(ApiFactory factory) =>
         _client = factory.CreateClient();
 
+    [Theory]
+    [InlineData("{\"accessToken\":")]
+    [InlineData("null")]
+    public async Task MalformedClientLoginReturnsInputError(string body)
+    {
+        using var content = new StringContent(body, System.Text.Encoding.UTF8, "application/json");
+        var response = await _client.PostAsync("/api/v1/client/quotes/login", content);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var envelope = await response.Content.ReadFromJsonAsync<ApiResponse<object>>();
+        Assert.Equal("invalid_request", envelope?.Error?.Code);
+    }
+
     [Fact]
     public async Task LiveHealthEndpointReturnsSuccess()
     {
@@ -124,6 +136,17 @@ public sealed class ApiBootstrapTests : IClassFixture<ApiFactory>
         var response = await _client.PutAsJsonAsync(
             $"/api/v1/kanbans/{boardId}/cards/{cardId}/quote/",
             new { });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task QuoteCreateEndpointRequiresAccessToken()
+    {
+        var boardId = Guid.NewGuid();
+        var response = await _client.PostAsJsonAsync(
+            $"/api/v1/kanbans/{boardId}/quotes",
+            new { columnId = Guid.NewGuid(), quote = new { } });
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }

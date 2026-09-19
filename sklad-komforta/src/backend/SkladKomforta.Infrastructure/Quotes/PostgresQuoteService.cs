@@ -4,6 +4,7 @@ using Npgsql;
 using SkladKomforta.Application.Abstractions.Persistence;
 using SkladKomforta.Application.Identity;
 using SkladKomforta.Application.Kanban;
+using SkladKomforta.Application.Onboarding;
 using SkladKomforta.Application.Quotes;
 
 namespace SkladKomforta.Infrastructure.Quotes;
@@ -33,6 +34,51 @@ internal sealed class PostgresQuoteService(
     }
 
     /// <inheritdoc />
+    public async Task<QuoteDetails> CreateAsync(
+        Guid actorUserId,
+        Guid boardId,
+        CreateQuoteRequest request,
+        CancellationToken cancellationToken)
+    {
+        QuoteRequestValidator.Validate(request.Quote);
+        try
+        {
+            await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            var cardId = await CreateSpecializedCardAsync(
+                connection, transaction, actorUserId, boardId, request.ColumnId,
+                request.Quote, cancellationToken);
+            await EnsureTenantReferencesAsync(connection, transaction, request.Quote, cancellationToken);
+
+            var quoteId = await UpsertHeaderAsync(
+                connection, transaction, actorUserId, boardId, cardId,
+                Guid.NewGuid(), request.Quote, cancellationToken);
+            await ReplaceProposalTreeAsync(
+                connection, transaction, actorUserId, quoteId,
+                request.Quote.ProposalTypes, null, null, cancellationToken);
+            var created = await ReadQuoteAsync(connection, transaction, boardId, cardId, cancellationToken)
+                ?? throw new InvalidOperationException("Созданное предложение не найдено в текущей транзакции.");
+            await WriteAuditAsync(
+                connection, transaction, actorUserId, quoteId,
+                "created", null, created, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return created;
+        }
+        catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.ForeignKeyViolation)
+        {
+            throw new IdentityException(400, "quote_reference_invalid", "Предложение ссылается на удалённый или недоступный объект.");
+        }
+        catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.UniqueViolation)
+        {
+            throw new IdentityException(409, "quote_entity_conflict", "Идентификатор элемента предложения уже используется в другом документе.");
+        }
+        catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.CheckViolation)
+        {
+            throw new IdentityException(409, "quote_workflow_incompatible", "Тип предложения несовместим с выбранным канбаном.");
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<QuoteDetails> SaveAsync(
         Guid actorUserId,
         Guid boardId,
@@ -56,7 +102,17 @@ internal sealed class PostgresQuoteService(
                 connection, transaction, actorUserId, boardId, cardId,
                 before?.Id ?? Guid.NewGuid(), request, cancellationToken);
             await ReplaceProposalTreeAsync(
-                connection, transaction, actorUserId, quoteId, request.ProposalTypes, cancellationToken);
+                connection, transaction, actorUserId, quoteId, request.ProposalTypes,
+                before?.ProposalTypes
+                    .Where(type => type.SelectedByClient && type.SelectedVariantId.HasValue)
+                    .ToDictionary(type => type.Id, type => type.SelectedVariantId!.Value),
+                before?.ClientSelectionSubmittedAt,
+                cancellationToken);
+            await RestoreClientTypeSelectionAsync(
+                connection, transaction, quoteId, request.SelectionMode,
+                before?.ClientSelectedProposalTypeId,
+                before?.ClientSelectionSubmittedAt,
+                cancellationToken);
 
             var after = await ReadQuoteAsync(connection, transaction, boardId, cardId, cancellationToken)
                 ?? throw new InvalidOperationException("Сохранённое предложение не найдено в текущей транзакции.");
@@ -84,6 +140,79 @@ internal sealed class PostgresQuoteService(
                 409, "quote_workflow_incompatible",
                 "Тип предложения несовместим с выбранным канбаном или содержит недопустимое значение.");
         }
+    }
+
+    /// <summary>
+    /// Создаёт общую рабочую сущность и карточку только после полной проверки команды.
+    /// Ошибка в любом следующем шаге откатывает обе записи вместе с предложением.
+    /// </summary>
+    private static async Task<Guid> CreateSpecializedCardAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        Guid actorUserId,
+        Guid boardId,
+        Guid columnId,
+        SaveQuoteRequest request,
+        CancellationToken token)
+    {
+        string? specialization;
+        bool actionAllowed;
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = """
+                SELECT workflow.specialization,
+                       EXISTS (
+                           SELECT 1
+                           FROM workflow_column_creation_actions AS action
+                           WHERE action.workflow_id = workflow.id
+                             AND action.column_id = @column_id
+                             AND action.action_kind = @action_kind)
+                FROM workflows AS workflow
+                WHERE workflow.id = @workflow_id
+                FOR UPDATE
+                """;
+            Add(command, "workflow_id", boardId);
+            Add(command, "column_id", columnId);
+            Add(command, "action_kind", request.QuoteKind);
+            await using var reader = await command.ExecuteReaderAsync(token);
+            if (!await reader.ReadAsync(token))
+                throw new IdentityException(404, "kanban_board_not_found", "Канбан не найден.");
+            specialization = reader.IsDBNull(0) ? null : reader.GetString(0);
+            actionAllowed = reader.GetBoolean(1);
+        }
+
+        var compatible = request.QuoteKind switch
+        {
+            QuoteKindCodes.Quote => specialization is
+                WorkflowSpecializationCodes.Quote or WorkflowSpecializationCodes.QuoteAndPrequote,
+            QuoteKindCodes.Prequote => specialization == WorkflowSpecializationCodes.QuoteAndPrequote,
+            _ => false,
+        };
+        if (!compatible || !actionAllowed)
+            throw new IdentityException(
+                409,
+                "quote_creation_column_invalid",
+                "В выбранном столбце не разрешено создание этого вида предложения.");
+        var cardId = Guid.NewGuid();
+        await ExecuteAsync(connection, transaction,
+            "INSERT INTO work_items (id, created_by) VALUES (@id, @actor)",
+            token, ("id", cardId), ("actor", actorUserId));
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO kanban_cards
+                (id, work_item_id, workflow_id, column_id, category_id, title, values,
+                 sort_order, created_by, updated_by)
+            VALUES
+                (@id, @id, @workflow_id, @column_id, NULL, @title, '{}'::jsonb,
+                 COALESCE((SELECT max(sort_order) + 1 FROM kanban_cards
+                           WHERE workflow_id = @workflow_id
+                             AND column_id = @column_id
+                             AND deleted_at IS NULL), 0),
+                 @actor, @actor)
+            """, token,
+            ("id", cardId), ("workflow_id", boardId), ("column_id", columnId),
+            ("title", request.Title.Trim()), ("actor", actorUserId));
+        return cardId;
     }
 
     /// <summary>Блокирует карточку и повторно проверяет её тип непосредственно перед записью.</summary>
@@ -144,6 +273,17 @@ internal sealed class PostgresQuoteService(
                 "SELECT EXISTS (SELECT 1 FROM companies WHERE id = @id AND deleted_at IS NULL)",
                 request.ExecutorCompanyId, token))
             throw new IdentityException(400, "quote_executor_invalid", "Выбранный исполнитель не найден.");
+        var allowedVatRates = await ReadExecutorVatRatesAsync(
+            connection, transaction, request.ExecutorCompanyId, token);
+        var requestedVatRates = request.ProposalTypes
+            .SelectMany(type => type.Variants)
+            .Select(variant => variant.VatRate)
+            .Distinct();
+        if (requestedVatRates.Any(rate => !allowedVatRates.Contains(rate)))
+            throw new IdentityException(
+                400,
+                "quote_vat_rate_not_allowed",
+                "В предложении выбрана ставка НДС, которая не настроена у исполнителя.");
 
         foreach (var userId in new[] { request.ManagerUserId, request.SalesHeadUserId }
                      .Where(item => item.HasValue).Select(item => item!.Value).Distinct())
@@ -209,6 +349,22 @@ internal sealed class PostgresQuoteService(
         command.CommandText = sql;
         Add(command, "id", id);
         return await command.ExecuteScalarAsync(token) is true;
+    }
+
+    private static async Task<HashSet<decimal?>> ReadExecutorVatRatesAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        Guid executorId,
+        CancellationToken token)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText =
+            "SELECT vat_rates::text FROM companies WHERE id = @id AND deleted_at IS NULL";
+        Add(command, "id", executorId);
+        var json = await command.ExecuteScalarAsync(token) as string;
+        return JsonSerializer.Deserialize<decimal?[]>(json ?? "[]", JsonOptions)
+            ?.ToHashSet() ?? [];
     }
 
     private static async Task<bool> ExistsPairAsync(
@@ -328,8 +484,11 @@ internal sealed class PostgresQuoteService(
         Guid actorUserId,
         Guid quoteId,
         IReadOnlyList<SaveQuoteProposalTypeRequest> proposalTypes,
+        Dictionary<Guid, Guid>? clientVariantSelections,
+        DateTimeOffset? clientSelectionSubmittedAt,
         CancellationToken token)
     {
+        var runtime = await ReadCalculationConfigurationAsync(connection, transaction, token);
         await ExecuteAsync(connection, transaction,
             "DELETE FROM quote_proposal_types WHERE quote_id = @quote_id",
             token, ("quote_id", quoteId));
@@ -391,7 +550,16 @@ internal sealed class PostgresQuoteService(
                         for (var positionIndex = 0; positionIndex < section.Positions.Count; positionIndex++)
                         {
                             var position = section.Positions[positionIndex];
-                            var calculation = QuoteCalculationEngine.Calculate(position);
+                            var categoryClientId = category.CatalogCategoryId.HasValue
+                                ? runtime.CategoryClientIds.GetValueOrDefault(category.CatalogCategoryId.Value)
+                                : null;
+                            var calculation = categoryClientId is null
+                                ? null
+                                : QuoteConfiguredCalculationEngine.Calculate(
+                                    position, categoryClientId, runtime.Rules, runtime.Pipelines);
+                            var legacyCalculation = calculation is null
+                                ? QuoteCalculationEngine.Calculate(position)
+                                : null;
                             await ExecuteAsync(connection, transaction, """
                                 INSERT INTO quote_positions
                                     (id, variant_section_id, catalog_item_id, name_snapshot,
@@ -409,12 +577,17 @@ internal sealed class PostgresQuoteService(
                                 ("id", position.Id ?? Guid.NewGuid()), ("section_id", sectionId),
                                 ("catalog_item_id", Db(position.CatalogItemId)), ("name", position.Name.Trim()),
                                 ("marking", position.Marking?.Trim() ?? string.Empty),
-                                ("unit", position.Unit?.Trim() ?? string.Empty), ("quantity", position.Quantity),
-                                ("purchase_price", Db(position.PurchasePrice)), ("base_price", position.BasePrice),
-                                ("manual_price", Db(position.ManualPrice)), ("markup_percent", Db(position.MarkupPercent)),
-                                ("discount_percent", Db(position.DiscountPercent)), ("line_total", calculation.LineTotal),
-                                ("exclude", position.ExcludeFromTotals),
-                                ("values", JsonSerializer.Serialize(position.Values ?? new Dictionary<string, JsonElement>(), JsonOptions)),
+                                ("unit", position.Unit?.Trim() ?? string.Empty),
+                                ("quantity", calculation?.Quantity ?? position.Quantity),
+                                ("purchase_price", Db(calculation?.PurchasePrice ?? position.PurchasePrice)),
+                                ("base_price", calculation?.BasePrice ?? position.BasePrice),
+                                ("manual_price", Db(calculation?.ManualPrice ?? position.ManualPrice)),
+                                ("markup_percent", Db(calculation?.MarkupPercent ?? position.MarkupPercent)),
+                                ("discount_percent", Db(calculation?.DiscountPercent ?? position.DiscountPercent)),
+                                ("line_total", calculation?.LineTotal ?? legacyCalculation!.LineTotal),
+                                ("exclude", calculation?.ExcludeFromTotals ?? position.ExcludeFromTotals),
+                                ("values", JsonSerializer.Serialize(
+                                    calculation?.Values ?? position.Values ?? new Dictionary<string, JsonElement>(), JsonOptions)),
                                 ("sort_order", positionIndex), ("actor", actorUserId));
                         }
                     }
@@ -423,16 +596,80 @@ internal sealed class PostgresQuoteService(
 
             if (type.SelectedVariantId.HasValue)
             {
+                var selectedByClient = clientVariantSelections?.TryGetValue(typeId, out var clientVariantId) == true &&
+                                       clientVariantId == type.SelectedVariantId.Value;
                 await ExecuteAsync(connection, transaction, """
                     INSERT INTO quote_proposal_type_selections
-                        (proposal_type_id, variant_id, selected_by)
-                    VALUES (@type_id, @variant_id, @actor)
+                        (proposal_type_id, variant_id, selected_by, selected_at)
+                    VALUES (@type_id, @variant_id, @actor, @selected_at)
                     """, token,
                     ("type_id", typeId), ("variant_id", type.SelectedVariantId.Value),
-                    ("actor", actorUserId));
+                    ("actor", Db(selectedByClient ? null : actorUserId)),
+                    ("selected_at", selectedByClient
+                        ? clientSelectionSubmittedAt ?? DateTimeOffset.UtcNow
+                        : DateTimeOffset.UtcNow));
             }
         }
     }
+
+    /// <summary>
+    /// Полная замена дерева каскадно удаляет выбор типа. Восстанавливаем его,
+    /// только если менеджер сохранил тот же режим и выбранный тип ещё существует.
+    /// </summary>
+    private static async Task RestoreClientTypeSelectionAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        Guid quoteId,
+        string selectionMode,
+        Guid? proposalTypeId,
+        DateTimeOffset? selectedAt,
+        CancellationToken token)
+    {
+        if (selectionMode != "proposal_type" || !proposalTypeId.HasValue) return;
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO quote_client_type_selections (quote_id, proposal_type_id, selected_at)
+            SELECT @quote_id, proposal_type.id, @selected_at
+              FROM quote_proposal_types AS proposal_type
+             WHERE proposal_type.id = @type_id
+               AND proposal_type.quote_id = @quote_id
+            """, token,
+            ("quote_id", quoteId),
+            ("type_id", proposalTypeId.Value),
+            ("selected_at", selectedAt ?? DateTimeOffset.UtcNow));
+    }
+
+    private static async Task<QuoteCalculationConfiguration> ReadCalculationConfigurationAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        CancellationToken token)
+    {
+        var categoryClientIds = new Dictionary<Guid, string>();
+        await using (var categories = connection.CreateCommand())
+        {
+            categories.Transaction = transaction;
+            categories.CommandText = "SELECT id, client_id FROM catalog_categories";
+            await using var reader = await categories.ExecuteReaderAsync(token);
+            while (await reader.ReadAsync(token))
+                categoryClientIds[reader.GetGuid(0)] = reader.GetString(1);
+        }
+
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT payload FROM onboarding_draft WHERE singleton";
+        var payload = await command.ExecuteScalarAsync(token) as string;
+        if (string.IsNullOrWhiteSpace(payload))
+            return new QuoteCalculationConfiguration(categoryClientIds, [], []);
+        var draft = JsonSerializer.Deserialize<OrganizationOnboardingDraft>(payload, JsonOptions);
+        return new QuoteCalculationConfiguration(
+            categoryClientIds,
+            draft?.Rules?.Where(item => item.IsEnabled).ToArray() ?? [],
+            draft?.MoneyPipelines?.ToArray() ?? []);
+    }
+
+    private sealed record QuoteCalculationConfiguration(
+        IReadOnlyDictionary<Guid, string> CategoryClientIds,
+        IReadOnlyList<CalculationRuleDraft> Rules,
+        IReadOnlyList<MoneyPipelineDraft> Pipelines);
 
     private static async Task ExecuteAsync(
         DbConnection connection,
@@ -543,11 +780,19 @@ internal sealed class PostgresQuoteService(
         {
             command.Transaction = transaction;
             command.CommandText = """
-                SELECT id, workflow_id, card_id, quote_kind, title, client_id,
-                       executor_company_id, manager_user_id, sales_head_user_id,
-                       selection_mode, additional_information, created_at, updated_at
-                FROM quotes
-                WHERE workflow_id = @workflow_id AND card_id = @card_id AND deleted_at IS NULL
+                SELECT quote.id, quote.workflow_id, quote.card_id, quote.quote_kind,
+                       quote.title, quote.client_id, quote.executor_company_id,
+                       quote.manager_user_id, quote.sales_head_user_id,
+                       quote.selection_mode, quote.additional_information,
+                       quote.created_at, quote.updated_at,
+                       selected_type.proposal_type_id,
+                       quote.client_selection_submitted_at
+                  FROM quotes AS quote
+                  LEFT JOIN quote_client_type_selections AS selected_type
+                         ON selected_type.quote_id = quote.id
+                 WHERE quote.workflow_id = @workflow_id
+                   AND quote.card_id = @card_id
+                   AND quote.deleted_at IS NULL
                 """;
             Add(command, "workflow_id", boardId);
             Add(command, "card_id", cardId);
@@ -559,7 +804,9 @@ internal sealed class PostgresQuoteService(
                 reader.IsDBNull(7) ? null : reader.GetGuid(7),
                 reader.IsDBNull(8) ? null : reader.GetGuid(8), reader.GetString(9),
                 reader.IsDBNull(10) ? null : reader.GetString(10),
-                ReadTimestamp(reader, 11), ReadTimestamp(reader, 12));
+                ReadTimestamp(reader, 11), ReadTimestamp(reader, 12),
+                reader.IsDBNull(13) ? null : reader.GetGuid(13),
+                reader.IsDBNull(14) ? null : ReadTimestamp(reader, 14));
         }
 
         var types = new List<MutableType>();
@@ -569,7 +816,7 @@ internal sealed class PostgresQuoteService(
             command.Transaction = transaction;
             command.CommandText = """
                 SELECT proposal_type.id, proposal_type.name, proposal_type.sort_order,
-                       selection.variant_id
+                       selection.variant_id, selection.selected_by
                 FROM quote_proposal_types AS proposal_type
                 LEFT JOIN quote_proposal_type_selections AS selection
                        ON selection.proposal_type_id = proposal_type.id
@@ -582,7 +829,8 @@ internal sealed class PostgresQuoteService(
             {
                 var item = new MutableType(
                     reader.GetGuid(0), reader.GetString(1), reader.GetInt32(2),
-                    reader.IsDBNull(3) ? null : reader.GetGuid(3));
+                    reader.IsDBNull(3) ? null : reader.GetGuid(3),
+                    !reader.IsDBNull(3) && reader.IsDBNull(4));
                 types.Add(item);
                 typesById[item.Id] = item;
             }
@@ -707,21 +955,29 @@ internal sealed class PostgresQuoteService(
             header.Id, header.WorkflowId, header.CardId, header.QuoteKind, header.Title,
             header.ClientId, header.ExecutorCompanyId, header.ManagerUserId,
             header.SalesHeadUserId, header.SelectionMode, header.AdditionalInformation,
-            types.Select(type => type.ToDetails()).ToArray(), header.CreatedAt, header.UpdatedAt);
+            types.Select(type => type.ToDetails()).ToArray(), header.CreatedAt, header.UpdatedAt,
+            header.ClientSelectedProposalTypeId, header.ClientSelectionSubmittedAt);
     }
 
     private sealed record QuoteHeader(
         Guid Id, Guid WorkflowId, Guid CardId, string QuoteKind, string Title,
         Guid ClientId, Guid ExecutorCompanyId, Guid? ManagerUserId, Guid? SalesHeadUserId,
         string SelectionMode, string? AdditionalInformation,
-        DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
+        DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt,
+        Guid? ClientSelectedProposalTypeId, DateTimeOffset? ClientSelectionSubmittedAt);
 
-    private sealed class MutableType(Guid id, string name, int sortOrder, Guid? selectedVariantId)
+    private sealed class MutableType(
+        Guid id,
+        string name,
+        int sortOrder,
+        Guid? selectedVariantId,
+        bool selectedByClient)
     {
         public Guid Id { get; } = id;
         public List<MutableVariant> Variants { get; } = [];
         public QuoteProposalTypeDetails ToDetails() =>
-            new(Id, name, sortOrder, selectedVariantId, Variants.Select(item => item.ToDetails()).ToArray());
+            new(Id, name, sortOrder, selectedVariantId,
+                Variants.Select(item => item.ToDetails()).ToArray(), selectedByClient);
     }
 
     private sealed class MutableVariant(Guid id, string name, string? subtitle, decimal? vatRate, int sortOrder)

@@ -203,13 +203,16 @@ internal sealed class PostgresOrganizationOnboardingService(
     private static Task SaveProfileAsync(DbConnection connection, DbTransaction transaction, Guid userId, CompanyProfileDraft profile, CancellationToken token) =>
         ExecuteAsync(connection, transaction, """
             INSERT INTO organization_profile
-                (singleton, organization_name, company_type, legal_name, inn, kpp, ogrn, address, phone, email, updated_by, updated_at)
-            VALUES (true, @name, @type, @legal, @inn, @kpp, @ogrn, @address, @phone, @email, @user_id, now())
+                (singleton, organization_name, company_type, legal_name, inn, kpp, ogrn,
+                 address, phone, email, updated_by, updated_at)
+            VALUES (true, @name, @type, @legal, @inn, @kpp, @ogrn, @address, @phone,
+                    @email, @user_id, now())
             ON CONFLICT (singleton) DO UPDATE SET
                 organization_name = EXCLUDED.organization_name, company_type = EXCLUDED.company_type,
                 legal_name = EXCLUDED.legal_name, inn = EXCLUDED.inn, kpp = EXCLUDED.kpp,
                 ogrn = EXCLUDED.ogrn, address = EXCLUDED.address, phone = EXCLUDED.phone,
-                email = EXCLUDED.email, updated_by = EXCLUDED.updated_by, updated_at = now()
+                email = EXCLUDED.email,
+                updated_by = EXCLUDED.updated_by, updated_at = now()
             """, token,
             ("name", profile.OrganizationName.Trim()), ("type", Db(profile.CompanyType)),
             ("legal", Db(profile.LegalName)), ("inn", Db(profile.Inn)), ("kpp", Db(profile.Kpp)),
@@ -243,6 +246,12 @@ internal sealed class PostgresOrganizationOnboardingService(
                 await ExecuteAsync(connection, transaction,
                     "INSERT INTO workflow_columns (id, workflow_id, name, color, sort_order) VALUES (@id, @workflow_id, @name, @color, @sort)", token,
                     ("id", columnId), ("workflow_id", workflowId), ("name", column.Name.Trim()), ("color", column.Color), ("sort", columnIndex));
+                foreach (var action in column.CreationActions ?? [])
+                    await ExecuteAsync(connection, transaction, """
+                        INSERT INTO workflow_column_creation_actions (workflow_id, column_id, action_kind)
+                        VALUES (@workflow_id, @column_id, @action_kind)
+                        """, token,
+                        ("workflow_id", workflowId), ("column_id", columnId), ("action_kind", action));
             }
             foreach (var transition in workflow.Transitions)
                 await ExecuteAsync(connection, transaction,
@@ -285,8 +294,9 @@ internal sealed class PostgresOrganizationOnboardingService(
             var categoryId = Guid.NewGuid();
             categoryIds.Add(category.ClientId, categoryId);
             await ExecuteAsync(connection, transaction,
-                "INSERT INTO catalog_categories (id, name, sort_order) VALUES (@id, @name, @sort)", token,
-                ("id", categoryId), ("name", category.Name.Trim()), ("sort", categoryIndex));
+                "INSERT INTO catalog_categories (id, client_id, name, sort_order) VALUES (@id, @client_id, @name, @sort)", token,
+                ("id", categoryId), ("client_id", category.ClientId),
+                ("name", category.Name.Trim()), ("sort", categoryIndex));
             for (var fieldIndex = 0; fieldIndex < category.Fields.Count; fieldIndex++)
             {
                 var field = category.Fields[fieldIndex];
@@ -330,10 +340,11 @@ internal sealed class PostgresOrganizationOnboardingService(
             var dependency = dependencies[index];
             await ExecuteAsync(connection, transaction, """
                 INSERT INTO catalog_category_dependencies
-                    (id, source_category_id, target_category_id, target_field_code, sort_order)
-                VALUES (@id, @source_id, @target_id, @field_code, @sort)
+                    (id, client_id, source_category_id, target_category_id, target_field_code, sort_order)
+                VALUES (@id, @client_id, @source_id, @target_id, @field_code, @sort)
                 """, token,
                 ("id", Guid.NewGuid()),
+                ("client_id", dependency.ClientId.Trim()),
                 ("source_id", categoryIds[dependency.SourceCategoryClientId]),
                 ("target_id", categoryIds[dependency.TargetCategoryClientId]),
                 ("field_code", dependency.TargetFieldCode.Trim()),

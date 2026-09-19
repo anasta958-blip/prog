@@ -35,11 +35,22 @@ dotnet run --project src/backend/SkladKomforta.Api
 
 ```powershell
 cd src/flutter
-flutter run -d windows --dart-define=API_BASE_URL=http://localhost:8080/api/v1
-flutter run -d chrome --dart-define=API_BASE_URL=http://localhost:8080/api/v1
-flutter run -d macos --dart-define=API_BASE_URL=http://localhost:8080/api/v1
+flutter run -d windows --dart-define=API_BASE_URL=http://localhost:8080/api/v1 --dart-define=PUBLIC_APP_BASE_URL=http://localhost:3000
+flutter run -d chrome --web-port=3000 --dart-define=API_BASE_URL=http://localhost:8080/api/v1 --dart-define=PUBLIC_APP_BASE_URL=http://localhost:3000
+flutter run -d macos --dart-define=API_BASE_URL=http://localhost:8080/api/v1 --dart-define=PUBLIC_APP_BASE_URL=http://localhost:3000
 flutter run -d 24095PCADG
 ```
+
+Обычный `docker compose up -d` также запускает готовую Flutter Web-сборку на
+`http://localhost:3000`. Она обслуживает клиентские ссылки КП/ПКП и проксирует
+`/api/v1` в контейнер API, поэтому отдельный `flutter run -d chrome` для открытия
+ссылки не требуется.
+
+Для ссылки, открываемой с телефона или другого компьютера, `API_BASE_URL` и
+`PUBLIC_APP_BASE_URL` настольной/мобильной сборки должны использовать LAN-IP
+компьютера, например `http://192.168.0.105:8080/api/v1` и
+`http://192.168.0.105:3000`. Адрес `localhost` работает только на том компьютере,
+где запущен Docker Compose.
 
 Для Android URL локального API обычно указывается как `http://10.0.2.2:8080/api/v1`. macOS и iOS собираются только на компьютере Apple с Xcode, хотя общий Dart-код и платформенный каркас хранятся и разрабатываются в этом репозитории на Windows.
 

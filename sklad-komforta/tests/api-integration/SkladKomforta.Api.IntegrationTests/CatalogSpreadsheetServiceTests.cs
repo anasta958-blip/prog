@@ -13,7 +13,7 @@ public sealed class CatalogSpreadsheetServiceTests
     [Fact]
     public async Task TemplateRequiresAtLeastOneConfiguredCategory()
     {
-        var gateway = new SpreadsheetCatalogStub(new CatalogConfiguration([], [], []));
+        var gateway = new SpreadsheetCatalogStub(new CatalogConfiguration([], [], [], [], []));
         var service = new CatalogSpreadsheetService(gateway);
 
         var exception = await Assert.ThrowsAsync<SkladKomforta.Application.Identity.IdentityException>(
@@ -106,6 +106,7 @@ public sealed class CatalogSpreadsheetServiceTests
             [
                 new CatalogCategorySummary(
                     CategoryId,
+                    "equipment",
                     "Оборудование",
                     0,
                     [
@@ -115,10 +116,12 @@ public sealed class CatalogSpreadsheetServiceTests
                         new CatalogFieldSummary("work_link", "Связанные работы", "relation", true, false, 3, null),
                     ],
                     []),
-                new CatalogCategorySummary(SourceCategoryId, "Работы", 1, [], []),
+                new CatalogCategorySummary(SourceCategoryId, "works", "Работы", 1, [], []),
             ],
             [],
-            [new CatalogDependencySummary(DependencyId, SourceCategoryId, CategoryId, "work_link", 0)]);
+            [new CatalogDependencySummary(DependencyId, "works-to-products", SourceCategoryId, CategoryId, "work_link", 0)],
+            [],
+            []);
 
         private readonly CatalogConfiguration configuration;
 

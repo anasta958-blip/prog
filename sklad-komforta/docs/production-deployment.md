@@ -68,8 +68,8 @@ Web собирается файлом `src/flutter/Dockerfile.web`. Нативн
 тот же Dart-код, но получают production-адрес API во время своей сборки:
 
 ```powershell
-flutter build windows --release --dart-define=API_BASE_URL=https://app.example.com/api/v1 --dart-define=APP_ENVIRONMENT=production
-flutter build apk --release --dart-define=API_BASE_URL=https://app.example.com/api/v1 --dart-define=APP_ENVIRONMENT=production
+flutter build windows --release --dart-define=API_BASE_URL=https://app.example.com/api/v1 --dart-define=PUBLIC_APP_BASE_URL=https://app.example.com --dart-define=APP_ENVIRONMENT=production
+flutter build apk --release --dart-define=API_BASE_URL=https://app.example.com/api/v1 --dart-define=PUBLIC_APP_BASE_URL=https://app.example.com --dart-define=APP_ENVIRONMENT=production
 ```
 
 Перед распространением необходимо отдельно настроить подпись Android/iOS и

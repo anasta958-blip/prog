@@ -16,7 +16,8 @@ public sealed record KanbanColumnSummary(
     Guid Id,
     string Name,
     string Color,
-    int SortOrder);
+    int SortOrder,
+    IReadOnlyList<string> CreationActions);
 
 /// <summary>Разрешённое направленное перемещение между двумя столбцами.</summary>
 public sealed record KanbanTransitionSummary(Guid FromColumnId, Guid ToColumnId);
@@ -64,7 +65,7 @@ public sealed record KanbanCardSummary(
     long Number,
     Guid WorkflowId,
     Guid ColumnId,
-    Guid CategoryId,
+    Guid? CategoryId,
     Guid? SectionId,
     string Title,
     IReadOnlyDictionary<string, JsonElement> Values,

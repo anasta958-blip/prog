@@ -87,10 +87,11 @@ internal sealed class PostgresCompanyWorkspaceService(
         command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO companies
-                (id, name, company_type, legal_name, inn, kpp, ogrn, address, phone, email, details, is_default, created_by)
+                (id, name, company_type, legal_name, inn, kpp, ogrn, address, phone, email,
+                 details, vat_rates, is_default, created_by)
             VALUES
                 (@id, @name, @type, @legal_name, @inn, @kpp, @ogrn, @address, @phone, @email, CAST(@details AS jsonb),
-                 @is_default OR NOT EXISTS (SELECT 1 FROM companies WHERE deleted_at IS NULL), @actor)
+                 CAST(@vat_rates AS jsonb), @is_default OR NOT EXISTS (SELECT 1 FROM companies WHERE deleted_at IS NULL), @actor)
             """;
         BindLegalEntity(command, id, actorUserId, request);
         await command.ExecuteNonQueryAsync(cancellationToken);
@@ -114,6 +115,7 @@ internal sealed class PostgresCompanyWorkspaceService(
             UPDATE companies SET name = @name, company_type = @type, legal_name = @legal_name,
                 inn = @inn, kpp = @kpp, ogrn = @ogrn, address = @address, phone = @phone,
                 email = @email, details = details || CAST(@details AS jsonb),
+                vat_rates = CAST(@vat_rates AS jsonb),
                 is_default = @is_default, updated_at = now()
             WHERE id = @id AND deleted_at IS NULL
             """;
@@ -336,7 +338,7 @@ internal sealed class PostgresCompanyWorkspaceService(
     private static async Task<IReadOnlyList<LegalEntity>> ReadLegalEntitiesAsync(DbConnection connection, Guid? id, CancellationToken token)
     {
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT id, name, company_type, legal_name, inn, kpp, ogrn, address, phone, email, details, is_default FROM companies WHERE deleted_at IS NULL AND (CAST(@id AS uuid) IS NULL OR id = CAST(@id AS uuid)) ORDER BY is_default DESC, name";
+        command.CommandText = "SELECT id, name, company_type, legal_name, inn, kpp, ogrn, address, phone, email, details, vat_rates, is_default FROM companies WHERE deleted_at IS NULL AND (CAST(@id AS uuid) IS NULL OR id = CAST(@id AS uuid)) ORDER BY is_default DESC, name";
         Add(command, "id", (object?)id ?? DBNull.Value);
         var result = new List<LegalEntity>();
         await using var reader = await command.ExecuteReaderAsync(token);
@@ -347,7 +349,9 @@ internal sealed class PostgresCompanyWorkspaceService(
                 reader.GetGuid(0), reader.GetString(1), reader.GetString(2), Text(reader, 3), Text(reader, 4), Text(reader, 5),
                 Text(reader, 6), Text(reader, 7), Text(reader, 8), Text(reader, 9), details.Website, details.DirectorName,
                 details.SignatoryName, details.SignatoryTitle, details.BankName, details.BankBik, details.BankAccount,
-                details.CorrAccount, details.IntroDefault, details.FooterDefault, reader.GetBoolean(11)));
+                details.CorrAccount, details.IntroDefault, details.FooterDefault,
+                JsonSerializer.Deserialize<decimal?[]>(reader.GetString(11), JsonOptions) ?? [],
+                reader.GetBoolean(12)));
         }
         return result;
     }
@@ -515,6 +519,14 @@ internal sealed class PostgresCompanyWorkspaceService(
         RequiredDigits(request.BankBik, [9], "БИК должен содержать 9 цифр.");
         RequiredDigits(request.BankAccount, [20], "Расчётный счёт должен содержать 20 цифр.");
         RequiredDigits(request.CorrAccount, [20], "Корреспондентский счёт должен содержать 20 цифр.");
+        if (request.VatRates is null ||
+            request.VatRates.Count is < 1 or > 20 ||
+            request.VatRates.Any(rate => rate is < 0 or > 100) ||
+            request.VatRates.Distinct().Count() != request.VatRates.Count)
+            throw new IdentityException(
+                400,
+                "vat_rates_invalid",
+                "Укажите от 1 до 20 уникальных ставок НДС в диапазоне от 0 до 100 процентов.");
     }
 
     private static void BindLegalEntity(DbCommand command, Guid id, Guid actor, SaveLegalEntityRequest request)
@@ -531,6 +543,7 @@ internal sealed class PostgresCompanyWorkspaceService(
             IntroDefault = request.IntroDefault, FooterDefault = request.FooterDefault,
         }, JsonOptions));
         Add(command, "is_default", request.IsDefault);
+        Add(command, "vat_rates", JsonSerializer.Serialize(request.VatRates, JsonOptions));
     }
 
     private static void BindClient(DbCommand command, Guid id, Guid actor, SaveCompanyClientRequest request)

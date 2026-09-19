@@ -4,6 +4,7 @@ import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/l10n/app_localizations.dart';
 import 'package:sklad_komforta_app/features/auth/auth_flow_page.dart';
 import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
+import 'package:sklad_komforta_app/features/quotes/quote_client_access_page.dart';
 
 /// Корневой виджет общего Windows, macOS, Web, Android и iOS приложения.
 ///
@@ -30,6 +31,7 @@ class SkladKomfortaApp extends StatelessWidget {
   /// Формирует MaterialApp с русской локалью и общей премиальной тёмной темой.
   @override
   Widget build(BuildContext context) {
+    final quoteAccessToken = Uri.base.queryParameters['quoteAccessToken'];
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       onGenerateTitle: (context) => AppLocalizations.of(context).appTitle,
@@ -42,11 +44,16 @@ class SkladKomfortaApp extends StatelessWidget {
       supportedLocales: AppLocalizations.supportedLocales,
       locale: const Locale('ru'),
       theme: buildAppTheme(),
-      home: AuthFlowPage(
-        config: config,
-        controller: authController,
-        initializeController: initializeAuthController,
-      ),
+      home: quoteAccessToken?.trim().isNotEmpty == true
+          ? QuoteClientAccessPage(
+              config: config,
+              accessToken: quoteAccessToken!,
+            )
+          : AuthFlowPage(
+              config: config,
+              controller: authController,
+              initializeController: initializeAuthController,
+            ),
     );
   }
 }

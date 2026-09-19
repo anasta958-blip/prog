@@ -108,6 +108,21 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  web:
+    build:
+      context: src/flutter
+      dockerfile: Dockerfile.web
+      args:
+        API_BASE_URL: /api/v1
+        APP_ENVIRONMENT: development
+        NGINX_TEMPLATE: docker/nginx/development.conf.template
+    ports:
+      - "${FLUTTER_WEB_PORT:-3000}:80"
+    depends_on:
+      api:
+        condition: service_started
+    restart: unless-stopped
+
   worker:
     build:
       context: .

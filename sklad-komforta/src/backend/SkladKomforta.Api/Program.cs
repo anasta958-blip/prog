@@ -89,11 +89,19 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
 {
     var exception = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
     var identityError = exception as IdentityException;
-    context.Response.StatusCode = identityError?.StatusCode ?? StatusCodes.Status500InternalServerError;
+    var requestError = exception as BadHttpRequestException;
+    context.Response.StatusCode = identityError?.StatusCode ?? requestError?.StatusCode ?? StatusCodes.Status500InternalServerError;
     await context.Response.WriteAsJsonAsync(
         ApiResponse.Failure<object>(
-            identityError?.Code ?? "internal_error",
-            identityError?.Message ?? "Внутренняя ошибка сервера."));
+            identityError?.Code ?? (requestError is null ? "internal_error" : "invalid_request"),
+            identityError?.Message ?? (requestError is null
+                ? "Внутренняя ошибка сервера."
+                : requestError.StatusCode switch
+                {
+                    StatusCodes.Status413PayloadTooLarge => "Размер запроса превышает допустимый предел.",
+                    StatusCodes.Status415UnsupportedMediaType => "Неподдерживаемый формат запроса.",
+                    _ => "Запрос содержит некорректные данные. Проверьте заполненные поля.",
+                })));
 }));
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseCors("FlutterClients");

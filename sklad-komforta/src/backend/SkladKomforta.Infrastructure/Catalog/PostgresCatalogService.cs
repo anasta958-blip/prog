@@ -40,7 +40,20 @@ internal sealed class PostgresCatalogService(
         var categories = await ReadCategoriesAsync(connection, cancellationToken);
         var dictionaries = await ReadDictionariesAsync(connection, cancellationToken);
         var dependencies = await ReadDependenciesAsync(connection, cancellationToken);
-        return new CatalogConfiguration(categories, dictionaries, dependencies);
+        var rules = Array.Empty<CalculationRuleDraft>();
+        var pipelines = Array.Empty<MoneyPipelineDraft>();
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT payload FROM onboarding_draft WHERE singleton";
+            var payload = await command.ExecuteScalarAsync(cancellationToken) as string;
+            if (!string.IsNullOrWhiteSpace(payload))
+            {
+                var draft = JsonSerializer.Deserialize<OrganizationOnboardingDraft>(payload, JsonOptions);
+                rules = draft?.Rules?.Where(item => item.IsEnabled).ToArray() ?? [];
+                pipelines = draft?.MoneyPipelines?.ToArray() ?? [];
+            }
+        }
+        return new CatalogConfiguration(categories, dictionaries, dependencies, rules, pipelines);
     }
 
     /// <inheritdoc />
@@ -695,7 +708,7 @@ internal sealed class PostgresCatalogService(
         await using (var fields = connection.CreateCommand())
         {
             fields.CommandText = """
-                SELECT category.id, category.name, category.sort_order,
+                SELECT category.id, category.client_id, category.name, category.sort_order,
                        field.field_code, field.label, field.is_visible, field.is_required,
                        field.sort_order, field.dictionary_code, field.field_type
                 FROM catalog_categories AS category
@@ -708,23 +721,24 @@ internal sealed class PostgresCatalogService(
                 var id = reader.GetGuid(0);
                 if (!categories.TryGetValue(id, out var category))
                 {
-                    category = new MutableCategory(id, reader.GetString(1), reader.GetInt32(2));
+                    category = new MutableCategory(
+                        id, reader.GetString(1), reader.GetString(2), reader.GetInt32(3));
                     categories.Add(id, category);
                 }
-                if (!reader.IsDBNull(3))
+                if (!reader.IsDBNull(4))
                 {
-                    var code = reader.GetString(3);
+                    var code = reader.GetString(4);
                     var systemDefinition = OnboardingFieldRegistry.IsSystemField(code)
                         ? OnboardingFieldRegistry.Get(code)
                         : null;
                     category.Fields.Add(new CatalogFieldSummary(
                         code,
-                        reader.IsDBNull(4) ? systemDefinition?.Label ?? code : reader.GetString(4),
-                        reader.GetString(9),
-                        reader.GetBoolean(5),
+                        reader.IsDBNull(5) ? systemDefinition?.Label ?? code : reader.GetString(5),
+                        reader.GetString(10),
                         reader.GetBoolean(6),
-                        reader.GetInt32(7),
-                        reader.IsDBNull(8) ? null : reader.GetString(8)));
+                        reader.GetBoolean(7),
+                        reader.GetInt32(8),
+                        reader.IsDBNull(9) ? null : reader.GetString(9)));
                 }
             }
         }
@@ -791,7 +805,7 @@ internal sealed class PostgresCatalogService(
     {
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT id, source_category_id, target_category_id, target_field_code, sort_order
+            SELECT id, client_id, source_category_id, target_category_id, target_field_code, sort_order
             FROM catalog_category_dependencies
             ORDER BY sort_order, id
             """;
@@ -799,8 +813,8 @@ internal sealed class PostgresCatalogService(
         await using var reader = await command.ExecuteReaderAsync(token);
         while (await reader.ReadAsync(token))
             result.Add(new CatalogDependencySummary(
-                reader.GetGuid(0), reader.GetGuid(1), reader.GetGuid(2),
-                reader.GetString(3), reader.GetInt32(4)));
+                reader.GetGuid(0), reader.GetString(1), reader.GetGuid(2), reader.GetGuid(3),
+                reader.GetString(4), reader.GetInt32(5)));
         return result;
     }
 
@@ -1089,7 +1103,8 @@ internal sealed class PostgresCatalogService(
         command.Transaction = transaction;
         command.CommandText = """
             SELECT relation.dependency_id, source.id, source.name, source.marking,
-                   relation.sort_order
+                   relation.sort_order, source.category_id, source.section_id,
+                   source.group_id, source.values::text
             FROM catalog_item_relations AS relation
             JOIN catalog_items AS source
               ON source.id = relation.source_item_id AND source.deleted_at IS NULL
@@ -1102,7 +1117,12 @@ internal sealed class PostgresCatalogService(
         while (await reader.ReadAsync(token))
             result.Add(new CatalogItemRelationSummary(
                 reader.GetGuid(0), reader.GetGuid(1), reader.GetString(2),
-                reader.GetString(3), reader.GetInt32(4)));
+                reader.GetString(3), reader.GetInt32(4), reader.GetGuid(5),
+                reader.IsDBNull(6) ? null : reader.GetGuid(6),
+                reader.IsDBNull(7) ? null : reader.GetGuid(7),
+                JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                    reader.GetString(8), JsonOptions) ??
+                new Dictionary<string, JsonElement>(StringComparer.Ordinal)));
         return result;
     }
 
@@ -1281,15 +1301,16 @@ internal sealed class PostgresCatalogService(
         string ObjectKey,
         bool IsReady);
 
-    private sealed class MutableCategory(Guid id, string name, int sortOrder)
+    private sealed class MutableCategory(Guid id, string clientId, string name, int sortOrder)
     {
         public Guid Id { get; } = id;
+        public string ClientId { get; } = clientId;
         public string Name { get; } = name;
         public int SortOrder { get; } = sortOrder;
         public List<CatalogFieldSummary> Fields { get; } = [];
         public Dictionary<Guid, MutableSection> Sections { get; } = [];
         public CatalogCategorySummary ToSummary() =>
-            new(Id, Name, SortOrder, Fields, Sections.Values.OrderBy(item => item.SortOrder).Select(item => item.ToSummary()).ToArray());
+            new(Id, ClientId, Name, SortOrder, Fields, Sections.Values.OrderBy(item => item.SortOrder).Select(item => item.ToSummary()).ToArray());
     }
 
     private sealed class MutableSection(Guid id, string name, int sortOrder)

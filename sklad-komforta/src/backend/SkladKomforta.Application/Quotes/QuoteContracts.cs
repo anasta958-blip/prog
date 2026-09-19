@@ -20,6 +20,14 @@ public static class QuoteKindCodes
     public const string Prequote = "prequote";
 }
 
+/// <summary>Действия создания, которые можно назначить столбцу специализированного канбана.</summary>
+public static class WorkflowCreationActionCodes
+{
+    public const string Quote = "quote";
+    public const string Prequote = "prequote";
+    public const string Order = "order";
+}
+
 /// <summary>Одна позиция варианта с типизированными расчётными и динамическими полями.</summary>
 public sealed record QuotePositionDetails(
     Guid Id,
@@ -71,7 +79,8 @@ public sealed record QuoteProposalTypeDetails(
     string Name,
     int SortOrder,
     Guid? SelectedVariantId,
-    IReadOnlyList<QuoteVariantDetails> Variants);
+    IReadOnlyList<QuoteVariantDetails> Variants,
+    bool SelectedByClient = false);
 
 /// <summary>
 /// Полная специализированная часть КП/ПКП. Статус и колонка остаются в
@@ -91,7 +100,9 @@ public sealed record QuoteDetails(
     string? AdditionalInformation,
     IReadOnlyList<QuoteProposalTypeDetails> ProposalTypes,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    Guid? ClientSelectedProposalTypeId = null,
+    DateTimeOffset? ClientSelectionSubmittedAt = null);
 
 /// <summary>Данные одной позиции при атомарном сохранении предложения.</summary>
 public sealed record SaveQuotePositionRequest(
@@ -158,9 +169,20 @@ public sealed record SaveQuoteRequest(
     string? AdditionalInformation,
     IReadOnlyList<SaveQuoteProposalTypeRequest> ProposalTypes);
 
+/// <summary>Атомарная команда создания карточки и связанного с ней КП/ПКП.</summary>
+public sealed record CreateQuoteRequest(
+    Guid ColumnId,
+    SaveQuoteRequest Quote);
+
 /// <summary>Use case-контракт специализированных данных карточки КП/ПКП.</summary>
 public interface IQuoteService
 {
+    Task<QuoteDetails> CreateAsync(
+        Guid actorUserId,
+        Guid boardId,
+        CreateQuoteRequest request,
+        CancellationToken cancellationToken);
+
     Task<QuoteDetails> GetAsync(
         Guid actorUserId,
         Guid boardId,
@@ -172,5 +194,23 @@ public interface IQuoteService
         Guid boardId,
         Guid cardId,
         SaveQuoteRequest request,
+        CancellationToken cancellationToken);
+}
+
+/// <summary>Готовый официальный PDF предложения и безопасное имя файла.</summary>
+public sealed record QuotePdfFile(
+    string FileName,
+    byte[] Content);
+
+/// <summary>
+/// Формирует печатную версию сохранённого КП/ПКП. Реализация повторно проверяет
+/// доступ пользователя к карточке через <see cref="IQuoteService"/>.
+/// </summary>
+public interface IQuotePdfService
+{
+    Task<QuotePdfFile> GenerateAsync(
+        Guid actorUserId,
+        Guid boardId,
+        Guid cardId,
         CancellationToken cancellationToken);
 }

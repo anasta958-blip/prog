@@ -47,12 +47,12 @@ internal sealed partial class PostgresIdentityService : IIdentityService
         AuthenticationClientContext client,
         CancellationToken cancellationToken)
     {
-        var normalizedLogin = request.Login.Trim();
-        if (normalizedLogin.Length == 0 || request.Password.Length == 0)
+        if (string.IsNullOrWhiteSpace(request.Login) || string.IsNullOrEmpty(request.Password))
         {
             throw Failure(400, "invalid_credentials", "Введите логин и пароль.");
         }
 
+        var normalizedLogin = request.Login.Trim();
         await EnforceLoginRateLimitAsync(normalizedLogin, client.IpAddress);
         var user = await FindUserByLoginAsync(normalizedLogin, cancellationToken);
         if (user is null || !user.IsActive || !VerifyPassword(user, request.Password))

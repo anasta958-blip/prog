@@ -22,4 +22,16 @@ void main() {
       'http://localhost:9000/catalog/item-1/image.webp',
     );
   });
+
+  test('dependency accepts responses created before clientId was added', () {
+    final dependency = CatalogDependency.fromJson({
+      'id': 'dependency-id',
+      'sourceCategoryId': 'source-id',
+      'targetCategoryId': 'target-id',
+      'targetFieldCode': 'related_items',
+      'sortOrder': 0,
+    });
+
+    expect(dependency.clientId, 'dependency-id');
+  });
 }

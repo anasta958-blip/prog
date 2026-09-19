@@ -9,21 +9,29 @@ final class WorkflowColumnDraft {
     required this.clientId,
     required this.name,
     required this.color,
-  });
+    List<WorkflowCreationAction>? creationActions,
+  }) : creationActions = creationActions ?? <WorkflowCreationAction>[];
   String clientId;
   String name;
   String color;
+  List<WorkflowCreationAction> creationActions;
 
   factory WorkflowColumnDraft.fromJson(Map<String, dynamic> json) =>
       WorkflowColumnDraft(
         clientId: json['clientId'] as String,
         name: json['name'] as String,
         color: json['color'] as String,
+        creationActions:
+            ((json['creationActions'] as List<dynamic>?) ?? const [])
+                .map((item) => WorkflowCreationAction.tryFromApi('$item'))
+                .whereType<WorkflowCreationAction>()
+                .toList(),
       );
   Map<String, dynamic> toJson() => {
     'clientId': clientId,
     'name': name,
     'color': color,
+    'creationActions': creationActions.map((item) => item.apiValue).toList(),
   };
 }
 

@@ -171,7 +171,8 @@ internal sealed class PostgresCompanyService(
             UPDATE organization_profile SET
                 organization_name = @name, company_type = @type, legal_name = @legal,
                 inn = @inn, kpp = @kpp, ogrn = @ogrn, address = @address,
-                phone = @phone, email = @email, updated_by = @user_id, updated_at = now()
+                phone = @phone, email = @email,
+                updated_by = @user_id, updated_at = now()
             WHERE singleton
             """, cancellationToken,
             ("name", profile.OrganizationName.Trim()), ("type", Db(profile.CompanyType)),
@@ -333,13 +334,15 @@ internal sealed class PostgresCompanyService(
             UPDATE organization_profile SET
                 organization_name = @name, company_type = @type, legal_name = @legal,
                 inn = @inn, kpp = @kpp, ogrn = @ogrn, address = @address,
-                phone = @phone, email = @email, updated_by = @user_id, updated_at = now()
+                phone = @phone, email = @email,
+                updated_by = @user_id, updated_at = now()
             WHERE singleton
             """, token,
             ("name", profile.OrganizationName.Trim()), ("type", Db(profile.CompanyType)),
             ("legal", Db(profile.LegalName)), ("inn", Db(profile.Inn)), ("kpp", Db(profile.Kpp)),
             ("ogrn", Db(profile.Ogrn)), ("address", Db(profile.Address)),
-            ("phone", Db(profile.Phone)), ("email", Db(profile.Email)), ("user_id", userId));
+            ("phone", Db(profile.Phone)), ("email", Db(profile.Email)),
+            ("user_id", userId));
         await ExecuteAsync(connection, transaction,
             "UPDATE public.organizations SET name = @name, updated_at = now() WHERE id = @organization_id",
             token, ("name", profile.OrganizationName.Trim()), ("organization_id", tenantContext.OrganizationId));
@@ -384,9 +387,8 @@ internal sealed class PostgresCompanyService(
         IReadOnlyList<CatalogCategoryDraft> categories,
         CancellationToken token)
     {
-        var existingRows = await ReadOrderedRowsAsync(connection, transaction,
-            "SELECT id, name FROM catalog_categories ORDER BY sort_order", token);
-        var existingByClientId = MatchByPreviousOrder(oldCategories.Select(item => item.ClientId), existingRows);
+        var existingByClientId = await ReadKeyedIdsAsync(connection, transaction,
+            "SELECT client_id, id FROM catalog_categories", token);
         var retained = new HashSet<Guid>();
         var result = new Dictionary<string, Guid>(StringComparer.Ordinal);
 
@@ -397,9 +399,12 @@ internal sealed class PostgresCompanyService(
             retained.Add(id);
             result[category.ClientId] = id;
             await ExecuteAsync(connection, transaction, """
-                INSERT INTO catalog_categories (id, name, sort_order) VALUES (@id, @name, @sort)
-                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, sort_order = EXCLUDED.sort_order
-                """, token, ("id", id), ("name", category.Name.Trim()), ("sort", index));
+                INSERT INTO catalog_categories (id, client_id, name, sort_order)
+                VALUES (@id, @client_id, @name, @sort)
+                ON CONFLICT (id) DO UPDATE SET client_id = EXCLUDED.client_id,
+                    name = EXCLUDED.name, sort_order = EXCLUDED.sort_order
+                """, token, ("id", id), ("client_id", category.ClientId),
+                ("name", category.Name.Trim()), ("sort", index));
             var oldCategory = oldCategories.FirstOrDefault(item => item.ClientId == category.ClientId);
             await SyncSectionsAsync(connection, transaction, id, oldCategory?.Sections ?? [], category.Sections, token);
             await ExecuteAsync(connection, transaction,
@@ -508,6 +513,9 @@ internal sealed class PostgresCompanyService(
             await ExecuteAsync(connection, transaction,
                 "DELETE FROM workflow_transitions WHERE from_column_id IN (SELECT id FROM workflow_columns WHERE workflow_id = @id)",
                 token, ("id", id));
+            await ExecuteAsync(connection, transaction,
+                "DELETE FROM workflow_column_creation_actions WHERE workflow_id = @id",
+                token, ("id", id));
             var oldWorkflow = oldWorkflows.FirstOrDefault(item => item.Code == workflow.Code);
             var rows = await ReadOrderedRowsAsync(connection, transaction,
                 "SELECT id, name FROM workflow_columns WHERE workflow_id = @parent ORDER BY sort_order", token, id);
@@ -529,6 +537,12 @@ internal sealed class PostgresCompanyService(
                                                    sort_order = EXCLUDED.sort_order
                     """, token, ("id", columnId), ("parent", id), ("name", column.Name.Trim()),
                     ("color", column.Color), ("sort", columnIndex));
+                foreach (var action in column.CreationActions ?? [])
+                    await ExecuteAsync(connection, transaction, """
+                        INSERT INTO workflow_column_creation_actions (workflow_id, column_id, action_kind)
+                        VALUES (@workflow_id, @column_id, @action_kind)
+                        """, token,
+                        ("workflow_id", id), ("column_id", columnId), ("action_kind", action));
             }
             await DeleteMissingAsync(connection, transaction, "workflow_columns", retainedColumns,
                 token, "workflow_id", id);
@@ -603,9 +617,10 @@ internal sealed class PostgresCompanyService(
             var dependency = dependencies[index];
             await ExecuteAsync(connection, transaction, """
                 INSERT INTO catalog_category_dependencies
-                    (id, source_category_id, target_category_id, target_field_code, sort_order)
-                VALUES (@id, @source, @target, @field, @sort)
+                    (id, client_id, source_category_id, target_category_id, target_field_code, sort_order)
+                VALUES (@id, @client_id, @source, @target, @field, @sort)
                 """, token, ("id", Guid.NewGuid()),
+                ("client_id", dependency.ClientId.Trim()),
                 ("source", categoryIds[dependency.SourceCategoryClientId]),
                 ("target", categoryIds[dependency.TargetCategoryClientId]),
                 ("field", dependency.TargetFieldCode.Trim()), ("sort", index));

@@ -176,17 +176,26 @@ internal sealed class PostgresKanbanService(
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         await LockBoardMoveAsync(connection, transaction, boardId, cancellationToken);
+        await EnsureStandardWorkflowAsync(connection, transaction, boardId, cancellationToken);
         var normalized = await ValidateCardAsync(connection, transaction, boardId, request, cancellationToken);
         var cardId = Guid.NewGuid();
+        await using (var workItem = connection.CreateCommand())
+        {
+            workItem.Transaction = transaction;
+            workItem.CommandText = "INSERT INTO work_items (id, created_by) VALUES (@id, @actor)";
+            AddParameter(workItem, "id", cardId);
+            AddParameter(workItem, "actor", actorUserId);
+            await workItem.ExecuteNonQueryAsync(cancellationToken);
+        }
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
             command.CommandText = """
                 INSERT INTO kanban_cards
-                    (id, workflow_id, column_id, category_id, section_id, title, values,
+                    (id, work_item_id, workflow_id, column_id, category_id, section_id, title, values,
                      sort_order, created_by, updated_by)
                 VALUES
-                    (@id, @workflow_id, @column_id, @category_id, @section_id, @title,
+                    (@id, @id, @workflow_id, @column_id, @category_id, @section_id, @title,
                      CAST(@values AS jsonb),
                      COALESCE((SELECT max(sort_order) + 1 FROM kanban_cards
                                WHERE workflow_id = @workflow_id
@@ -318,6 +327,22 @@ internal sealed class PostgresKanbanService(
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         await LockBoardMoveAsync(connection, transaction, boardId, cancellationToken);
         var before = await ReadVisibleCardAsync(connection, transaction, actorUserId, boardId, cardId, cancellationToken);
+        await using (var specializedDocument = connection.CreateCommand())
+        {
+            specializedDocument.Transaction = transaction;
+            specializedDocument.CommandText = """
+                UPDATE quotes
+                SET deleted_by = @actor, deleted_at = now(),
+                    updated_by = @actor, updated_at = now()
+                WHERE card_id = @id
+                  AND workflow_id = @workflow_id
+                  AND deleted_at IS NULL
+                """;
+            AddParameter(specializedDocument, "actor", actorUserId);
+            AddParameter(specializedDocument, "id", cardId);
+            AddParameter(specializedDocument, "workflow_id", boardId);
+            await specializedDocument.ExecuteNonQueryAsync(cancellationToken);
+        }
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
@@ -356,17 +381,50 @@ internal sealed class PostgresKanbanService(
     {
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT id, name, color, sort_order
-            FROM workflow_columns
-            WHERE workflow_id = @workflow_id
-            ORDER BY sort_order, id
+            SELECT workflow_column.id, workflow_column.name, workflow_column.color,
+                   workflow_column.sort_order,
+                   COALESCE(
+                       array_agg(action.action_kind ORDER BY action.action_kind)
+                           FILTER (WHERE action.action_kind IS NOT NULL),
+                       ARRAY[]::varchar[])
+            FROM workflow_columns AS workflow_column
+            LEFT JOIN workflow_column_creation_actions AS action
+                   ON action.column_id = workflow_column.id
+                  AND action.workflow_id = workflow_column.workflow_id
+            WHERE workflow_column.workflow_id = @workflow_id
+            GROUP BY workflow_column.id, workflow_column.name, workflow_column.color,
+                     workflow_column.sort_order
+            ORDER BY workflow_column.sort_order, workflow_column.id
             """;
         AddParameter(command, "workflow_id", boardId);
         var result = new List<KanbanColumnSummary>();
         await using var reader = await command.ExecuteReaderAsync(token);
         while (await reader.ReadAsync(token))
-            result.Add(new KanbanColumnSummary(reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetInt32(3)));
+            result.Add(new KanbanColumnSummary(
+                reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetInt32(3),
+                reader.GetFieldValue<string[]>(4)));
         return result;
+    }
+
+    /// <summary>Универсальный endpoint не создаёт пустые карточки специализированных модулей.</summary>
+    private static async Task EnsureStandardWorkflowAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        Guid boardId,
+        CancellationToken token)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT specialization FROM workflows WHERE id = @id FOR UPDATE";
+        AddParameter(command, "id", boardId);
+        var specialization = await command.ExecuteScalarAsync(token);
+        if (specialization is null)
+            throw new IdentityException(404, "kanban_board_not_found", "Канбан не найден.");
+        if (specialization is not DBNull)
+            throw new IdentityException(
+                409,
+                "specialized_card_create_forbidden",
+                "Карточка специализированного канбана создаётся только после сохранения документа.");
     }
 
     private static async Task<IReadOnlyList<KanbanTransitionSummary>> ReadTransitionsAsync(
@@ -933,7 +991,7 @@ internal sealed class PostgresKanbanService(
         reader.GetInt64(1),
         reader.GetGuid(2),
         reader.GetGuid(3),
-        reader.GetGuid(4),
+        reader.IsDBNull(4) ? null : reader.GetGuid(4),
         reader.IsDBNull(5) ? null : reader.GetGuid(5),
         reader.GetString(6),
         JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(reader.GetString(7), JsonOptions)

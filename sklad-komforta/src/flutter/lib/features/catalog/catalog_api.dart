@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/core/network/api_exception.dart';
 import 'package:sklad_komforta_app/core/network/api_response_decoder.dart';
+import 'package:sklad_komforta_app/core/network/content_disposition.dart';
 import 'package:sklad_komforta_app/core/network/http_client_factory.dart'
     if (dart.library.js_interop) 'package:sklad_komforta_app/core/network/http_client_factory_web.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_models.dart';
@@ -422,23 +423,10 @@ final class CatalogApi
     }
     return CatalogSpreadsheetDownload(
       fileName:
-          _downloadName(response.headers['content-disposition']) ??
+          contentDispositionFileName(response.headers['content-disposition']) ??
           fallbackName,
       bytes: response.bodyBytes,
     );
-  }
-
-  static String? _downloadName(String? disposition) {
-    if (disposition == null) return null;
-    final encoded = RegExp(
-      r"filename\*=UTF-8''([^;]+)",
-      caseSensitive: false,
-    ).firstMatch(disposition)?.group(1);
-    if (encoded != null) return Uri.decodeComponent(encoded);
-    return RegExp(
-      r'filename="?([^";]+)',
-      caseSensitive: false,
-    ).firstMatch(disposition)?.group(1);
   }
 
   Future<dynamic> _send(

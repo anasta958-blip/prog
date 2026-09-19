@@ -75,7 +75,7 @@
 ### Ручной Dart-код
 
 - `main` инициализирует binding, читает compile-time конфигурацию и запускает приложение.
-- `AppConfig.fromEnvironment` читает `API_BASE_URL` и `APP_ENVIRONMENT` из `--dart-define`.
+- `AppConfig.fromEnvironment` читает `API_BASE_URL`, `PUBLIC_APP_BASE_URL` и `APP_ENVIRONMENT` из `--dart-define`.
 - `SkladKomfortaApp.build` подключает русскую локализацию, общую тему и техническую стартовую страницу.
 - `_buildTheme` централизует только базовые цвета и типографику; стили бизнес-модулей появятся после согласования дизайна.
 - `_BootstrapPage.build` показывает среду и API для диагностики ошибочной сборки.

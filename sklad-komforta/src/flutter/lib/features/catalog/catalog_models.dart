@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
+
 /// Настроенное поле карточки товара одной категории.
 final class CatalogField {
   const CatalogField({
@@ -72,12 +74,14 @@ final class CatalogSection {
 final class CatalogCategory {
   const CatalogCategory({
     required this.id,
+    this.clientId = '',
     required this.name,
     required this.sortOrder,
     required this.fields,
     required this.sections,
   });
   final String id;
+  final String clientId;
   final String name;
   final int sortOrder;
   final List<CatalogField> fields;
@@ -85,6 +89,7 @@ final class CatalogCategory {
   factory CatalogCategory.fromJson(Map<String, dynamic> json) =>
       CatalogCategory(
         id: json['id'] as String,
+        clientId: json['clientId'] as String? ?? json['id'] as String,
         name: json['name'] as String,
         sortOrder: json['sortOrder'] as int,
         fields: (json['fields'] as List<dynamic>)
@@ -149,6 +154,7 @@ final class CatalogDictionary {
 final class CatalogDependency {
   const CatalogDependency({
     required this.id,
+    required this.clientId,
     required this.sourceCategoryId,
     required this.targetCategoryId,
     required this.targetFieldCode,
@@ -156,6 +162,7 @@ final class CatalogDependency {
   });
 
   final String id;
+  final String clientId;
   final String sourceCategoryId;
   final String targetCategoryId;
   final String targetFieldCode;
@@ -164,6 +171,7 @@ final class CatalogDependency {
   factory CatalogDependency.fromJson(Map<String, dynamic> json) =>
       CatalogDependency(
         id: json['id'] as String,
+        clientId: json['clientId'] as String? ?? json['id'] as String,
         sourceCategoryId: json['sourceCategoryId'] as String,
         targetCategoryId: json['targetCategoryId'] as String,
         targetFieldCode: json['targetFieldCode'] as String,
@@ -177,10 +185,14 @@ final class CatalogConfiguration {
     required this.categories,
     required this.dictionaries,
     this.dependencies = const [],
+    this.rules = const [],
+    this.moneyPipelines = const [],
   });
   final List<CatalogCategory> categories;
   final List<CatalogDictionary> dictionaries;
   final List<CatalogDependency> dependencies;
+  final List<CalculationRuleDraft> rules;
+  final List<MoneyPipelineDraft> moneyPipelines;
   factory CatalogConfiguration.fromJson(
     Map<String, dynamic> json,
   ) => CatalogConfiguration(
@@ -192,6 +204,16 @@ final class CatalogConfiguration {
         .toList(growable: false),
     dependencies: ((json['dependencies'] as List<dynamic>?) ?? const [])
         .map((item) => CatalogDependency.fromJson(item as Map<String, dynamic>))
+        .toList(growable: false),
+    rules: ((json['rules'] as List<dynamic>?) ?? const [])
+        .map(
+          (item) => CalculationRuleDraft.fromJson(item as Map<String, dynamic>),
+        )
+        .toList(growable: false),
+    moneyPipelines: ((json['moneyPipelines'] as List<dynamic>?) ?? const [])
+        .map(
+          (item) => MoneyPipelineDraft.fromJson(item as Map<String, dynamic>),
+        )
         .toList(growable: false),
   );
 }
@@ -353,6 +375,10 @@ final class CatalogItemRelation {
     required this.sourceName,
     required this.sourceMarking,
     required this.sortOrder,
+    this.sourceCategoryId,
+    this.sourceSectionId,
+    this.sourceGroupId,
+    this.sourceValues = const {},
   });
 
   final String dependencyId;
@@ -360,6 +386,10 @@ final class CatalogItemRelation {
   final String sourceName;
   final String sourceMarking;
   final int sortOrder;
+  final String? sourceCategoryId;
+  final String? sourceSectionId;
+  final String? sourceGroupId;
+  final Map<String, dynamic> sourceValues;
 
   factory CatalogItemRelation.fromJson(Map<String, dynamic> json) =>
       CatalogItemRelation(
@@ -368,6 +398,12 @@ final class CatalogItemRelation {
         sourceName: json['sourceName'] as String,
         sourceMarking: json['sourceMarking'] as String,
         sortOrder: json['sortOrder'] as int,
+        sourceCategoryId: json['sourceCategoryId'] as String?,
+        sourceSectionId: json['sourceSectionId'] as String?,
+        sourceGroupId: json['sourceGroupId'] as String?,
+        sourceValues: Map<String, dynamic>.from(
+          (json['sourceValues'] as Map<String, dynamic>?) ?? const {},
+        ),
       );
 
   Map<String, dynamic> toSaveJson() => {

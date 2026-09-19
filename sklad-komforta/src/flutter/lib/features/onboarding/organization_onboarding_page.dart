@@ -707,6 +707,9 @@ final class _OrganizationOnboardingPageState
                     workflow.specialization = selected
                         ? option.$1
                         : WorkflowSpecialization.standard;
+                    for (final column in workflow.columns) {
+                      column.creationActions.clear();
+                    }
                   }),
                 ),
             ],
@@ -735,42 +738,85 @@ final class _OrganizationOnboardingPageState
               transition.toClientId == column.clientId,
         );
       }),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: _textField(
-              'Столбец ${columnIndex + 1}',
-              column.name,
-              (value) => setState(() => column.name = value),
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: _textField(
+                  'Столбец ${columnIndex + 1}',
+                  column.name,
+                  (value) => setState(() => column.name = value),
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 148,
+                child: AppSelectField<String>(
+                  key: ValueKey('${column.clientId}-${column.color}'),
+                  value: column.color,
+                  label: 'Цвет',
+                  options: _workflowColors
+                      .map(
+                        (color) => AppSelectOption(
+                          value: color,
+                          label: color,
+                          color: Color(
+                            int.parse(color.substring(1), radix: 16) |
+                                0xFF000000,
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value != null) setState(() => column.color = value);
+                  },
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 148,
-            child: AppSelectField<String>(
-              key: ValueKey('${column.clientId}-${column.color}'),
-              value: column.color,
-              label: 'Цвет',
-              options: _workflowColors
-                  .map(
-                    (color) => AppSelectOption(
-                      value: color,
-                      label: color,
-                      color: Color(
-                        int.parse(color.substring(1), radix: 16) | 0xFF000000,
-                      ),
-                    ),
-                  )
-                  .toList(),
-              onChanged: (value) {
-                if (value != null) setState(() => column.color = value);
-              },
+          if (workflow.specialization != WorkflowSpecialization.standard) ...[
+            const SizedBox(height: 12),
+            Text(
+              'Кнопки создания в этом столбце',
+              style: Theme.of(context).textTheme.labelMedium,
             ),
-          ),
+            const SizedBox(height: 7),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final action in _actionsFor(workflow.specialization))
+                  FilterChip(
+                    label: Text(action.label),
+                    selected: column.creationActions.contains(action),
+                    onSelected: (selected) => setState(() {
+                      for (final item in workflow.columns) {
+                        item.creationActions.remove(action);
+                      }
+                      if (selected) column.creationActions.add(action);
+                    }),
+                  ),
+              ],
+            ),
+          ],
         ],
       ),
     );
   }
+
+  List<WorkflowCreationAction> _actionsFor(
+    WorkflowSpecialization specialization,
+  ) => switch (specialization) {
+    WorkflowSpecialization.quote => const [WorkflowCreationAction.quote],
+    WorkflowSpecialization.quoteAndPrequote => const [
+      WorkflowCreationAction.quote,
+      WorkflowCreationAction.prequote,
+    ],
+    WorkflowSpecialization.order => const [WorkflowCreationAction.order],
+    WorkflowSpecialization.standard => const [],
+  };
 
   Widget _workflowTransitionsEditor(WorkflowDraft workflow) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,

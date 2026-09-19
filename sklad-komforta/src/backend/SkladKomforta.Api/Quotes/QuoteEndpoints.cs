@@ -16,6 +16,17 @@ internal static class QuoteEndpoints
     /// </summary>
     public static IEndpointRouteBuilder MapQuoteEndpoints(this IEndpointRouteBuilder endpoints)
     {
+        endpoints.MapPost("/api/v1/kanbans/{boardId:guid}/quotes", async (
+                HttpContext context,
+                Guid boardId,
+                CreateQuoteRequest request,
+                IQuoteService service,
+                CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.CreateAsync(
+                    UserId(context.User), boardId, request, token))))
+            .RequireAuthorization()
+            .RequireTenantPermission("quotes.manage");
+
         var quotes = endpoints
             .MapGroup("/api/v1/kanbans/{boardId:guid}/cards/{cardId:guid}/quote")
             .RequireAuthorization();
@@ -30,6 +41,56 @@ internal static class QuoteEndpoints
                     UserId(context.User), boardId, cardId, token))))
             .RequireTenantPermission("quotes.view");
 
+        quotes.MapGet("/pdf", async (
+                HttpContext context,
+                Guid boardId,
+                Guid cardId,
+                IQuotePdfService service,
+                CancellationToken token) =>
+            {
+                var file = await service.GenerateAsync(
+                    UserId(context.User), boardId, cardId, token);
+                return Results.File(
+                    file.Content,
+                    "application/pdf",
+                    file.FileName,
+                    enableRangeProcessing: false);
+            })
+            .RequireTenantPermission("quotes.view");
+
+        quotes.MapPost("/client-access", async (
+                HttpContext context,
+                Guid boardId,
+                Guid cardId,
+                CreateQuoteClientAccessRequest request,
+                IQuoteClientAccessService service,
+                CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.CreateAsync(
+                    UserId(context.User), boardId, cardId, request, token))))
+            .RequireTenantPermission("quotes.manage");
+
+        quotes.MapGet("/client-access", async (
+                HttpContext context,
+                Guid boardId,
+                Guid cardId,
+                IQuoteClientAccessService service,
+                CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.GetStatusAsync(
+                    UserId(context.User), boardId, cardId, token))))
+            .RequireTenantPermission("quotes.manage");
+
+        quotes.MapDelete("/client-access", async (
+                HttpContext context,
+                Guid boardId,
+                Guid cardId,
+                IQuoteClientAccessService service,
+                CancellationToken token) =>
+            {
+                await service.RevokeAsync(UserId(context.User), boardId, cardId, token);
+                return Results.Ok(ApiResponse.Success(new { revoked = true }));
+            })
+            .RequireTenantPermission("quotes.manage");
+
         quotes.MapPut("/", async (
                 HttpContext context,
                 Guid boardId,
@@ -41,6 +102,27 @@ internal static class QuoteEndpoints
                     UserId(context.User), boardId, cardId, request, token))))
             .RequireTenantPermission("quotes.manage");
 
+        var client = endpoints.MapGroup("/api/v1/client/quotes");
+        client.MapPost("/login", async (
+                HttpContext context,
+                QuoteClientLoginRequest request,
+                IQuoteClientAccessService service,
+                CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.LoginAsync(
+                    request, context.Connection.RemoteIpAddress?.ToString(), token))));
+        client.MapGet("/current", async (
+                HttpContext context,
+                IQuoteClientAccessService service,
+                CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.GetAsync(ClientSession(context), token))));
+        client.MapPut("/current/selection", async (
+                HttpContext context,
+                SubmitQuoteClientSelectionRequest request,
+                IQuoteClientAccessService service,
+                CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.SubmitSelectionAsync(
+                    ClientSession(context), request, token))));
+
         return endpoints;
     }
 
@@ -51,5 +133,13 @@ internal static class QuoteEndpoints
         return Guid.TryParse(value, out var id)
             ? id
             : throw new IdentityException(401, "token_invalid", "Токен доступа недействителен.");
+    }
+
+    private static string ClientSession(HttpContext context)
+    {
+        var value = context.Request.Headers["X-Quote-Client-Session"].ToString();
+        return string.IsNullOrWhiteSpace(value)
+            ? throw new IdentityException(401, "quote_client_session_invalid", "Введите пароль для доступа к предложению.")
+            : value;
     }
 }

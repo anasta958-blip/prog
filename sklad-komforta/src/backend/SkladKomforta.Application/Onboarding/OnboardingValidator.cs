@@ -49,7 +49,16 @@ public static class OnboardingValidator
                 RequireText(column.Name, 1, 120, "Название столбца");
                 if (column.Color.Length != 7 || column.Color[0] != '#' || !column.Color[1..].All(Uri.IsHexDigit))
                     Fail("onboarding_color_invalid", "Цвет столбца должен иметь формат #RRGGBB.");
+                foreach (var action in column.CreationActions ?? [])
+                {
+                    if (action is not WorkflowCreationActionCodes.Quote and
+                        not WorkflowCreationActionCodes.Prequote and
+                        not WorkflowCreationActionCodes.Order)
+                        Fail("onboarding_creation_action_invalid", "Столбец содержит неизвестное действие создания.");
+                }
             }
+
+            ValidateCreationActions(workflow);
 
             var columnIds = workflow.Columns.Select(item => item.ClientId).ToHashSet(StringComparer.Ordinal);
             if (workflow.Transitions.Any(item => item.FromClientId == item.ToClientId ||
@@ -115,6 +124,36 @@ public static class OnboardingValidator
                  item.Categories.Any(category => category.FieldCodes.Count == 0)) ||
              draft.Dictionaries.Count == 0))
             Fail("onboarding_incomplete", "Заполните канбаны, каталог, поля и справочники перед активацией.");
+    }
+
+    /// <summary>
+    /// Гарантирует единственную кнопку каждого вида и запрещает действия,
+    /// несовместимые с выбранной специализацией канбана.
+    /// </summary>
+    private static void ValidateCreationActions(WorkflowDraft workflow)
+    {
+        var actions = workflow.Columns
+            .SelectMany(column => column.CreationActions ?? [])
+            .ToArray();
+        ValidateUnique(actions, $"Действия создания канбана «{workflow.Name}»");
+
+        var required = workflow.Specialization switch
+        {
+            WorkflowSpecializationCodes.Quote => new[] { WorkflowCreationActionCodes.Quote },
+            WorkflowSpecializationCodes.QuoteAndPrequote =>
+                new[] { WorkflowCreationActionCodes.Quote, WorkflowCreationActionCodes.Prequote },
+            WorkflowSpecializationCodes.Order => new[] { WorkflowCreationActionCodes.Order },
+            _ => Array.Empty<string>(),
+        };
+
+        if (actions.Except(required, StringComparer.Ordinal).Any())
+            Fail(
+                "onboarding_creation_action_incompatible",
+                $"Действие создания несовместимо с типом канбана «{workflow.Name}».");
+        if (required.Except(actions, StringComparer.Ordinal).Any())
+            Fail(
+                "onboarding_creation_action_required",
+                $"Выберите столбец для каждой кнопки создания в канбане «{workflow.Name}».");
     }
 
     /// <summary>Разрешает назначать существующий справочник только полю типа dictionary.</summary>

@@ -11,6 +11,7 @@ import 'package:sklad_komforta_app/features/kanban/kanban_card_editor.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_controller.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_models.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_editor_page.dart';
+import 'package:sklad_komforta_app/features/quotes/quote_models.dart';
 
 /// Рабочее пространство настроенных канбанов без содержимого КП/ПКП.
 final class KanbanPage extends StatefulWidget {
@@ -36,6 +37,8 @@ final class _KanbanPageState extends State<KanbanPage> {
   double _autoScrollDirection = 0;
   bool _mobileToolbarExpanded = false;
   KanbanCard? _openedQuoteCard;
+  String? _newQuoteColumnId;
+  QuoteKind? _newQuoteKind;
 
   @override
   void dispose() {
@@ -95,6 +98,51 @@ final class _KanbanPageState extends State<KanbanPage> {
         ),
       );
     }
+  }
+
+  Future<void> _deleteCard(KanbanCard card) async {
+    final board = widget.controller.board;
+    if (board == null || widget.controller.saving) return;
+    final specialized = board.specialization != WorkflowSpecialization.standard;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        icon: const Icon(Icons.delete_outline, color: Color(0xFFEF6674)),
+        title: Text(specialized ? 'Удалить документ?' : 'Удалить карточку?'),
+        content: Text(
+          specialized
+              ? 'Карточка и связанное содержимое будут удалены из рабочего канбана. '
+                    'Действие сохранится в аудите.'
+              : 'Карточка будет удалена из рабочего канбана. '
+                    'Действие сохранится в аудите.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFB83A4B),
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            icon: const Icon(Icons.delete_outline, size: 18),
+            label: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    final deleted = await widget.controller.deleteCard(card);
+    if (!mounted || deleted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          widget.controller.error ?? 'Не удалось удалить карточку.',
+        ),
+      ),
+    );
   }
 
   Future<void> _openEditor(KanbanColumn column, {KanbanCard? card}) async {
@@ -180,12 +228,41 @@ final class _KanbanPageState extends State<KanbanPage> {
     );
   }
 
+  void _openSpecializedEditor(
+    KanbanColumn column,
+    WorkflowCreationAction action,
+  ) {
+    if (action == WorkflowCreationAction.order) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Редактор комплектации будет подключён отдельным этапом.',
+          ),
+        ),
+      );
+      return;
+    }
+    setState(() {
+      _openedQuoteCard = null;
+      _newQuoteColumnId = column.id;
+      _newQuoteKind = action == WorkflowCreationAction.prequote
+          ? QuoteKind.prequote
+          : QuoteKind.quote;
+    });
+  }
+
   Future<void> _closeQuoteEditor() async {
     final card = _openedQuoteCard;
-    if (card == null) return;
-    setState(() => _openedQuoteCard = null);
-    final currentPage = widget.controller.pageFor(card.columnId)?.page ?? 1;
-    await widget.controller.loadColumn(card.columnId, page: currentPage);
+    final newColumnId = _newQuoteColumnId;
+    if (card == null && newColumnId == null) return;
+    final columnId = card?.columnId ?? newColumnId!;
+    setState(() {
+      _openedQuoteCard = null;
+      _newQuoteColumnId = null;
+      _newQuoteKind = null;
+    });
+    final currentPage = widget.controller.pageFor(columnId)?.page ?? 1;
+    await widget.controller.loadColumn(columnId, page: currentPage);
   }
 
   @override
@@ -247,7 +324,7 @@ final class _KanbanPageState extends State<KanbanPage> {
       );
     }
     final openedCard = _openedQuoteCard;
-    if (openedCard != null &&
+    if ((openedCard != null || _newQuoteColumnId != null) &&
         widget.config != null &&
         widget.authController != null) {
       return QuoteEditorPage(
@@ -255,6 +332,8 @@ final class _KanbanPageState extends State<KanbanPage> {
         authController: widget.authController!,
         board: board,
         card: openedCard,
+        creationColumnId: _newQuoteColumnId,
+        createKind: _newQuoteKind,
         onBack: () => unawaited(_closeQuoteEditor()),
       );
     }
@@ -287,10 +366,18 @@ final class _KanbanPageState extends State<KanbanPage> {
                         board: board,
                         column: board.columns[index],
                         isFirst: index == 0,
-                        canCreate: board.categories.isNotEmpty,
+                        canCreate:
+                            board.categories.isNotEmpty &&
+                            board.specialization ==
+                                WorkflowSpecialization.standard,
                         onCreate: () => _openEditor(board.columns[index]),
+                        onCreateSpecialized: (action) => _openSpecializedEditor(
+                          board.columns[index],
+                          action,
+                        ),
                         onOpen: (card) =>
                             _openEditor(board.columns[index], card: card),
+                        onDelete: _deleteCard,
                         onDrop: (card, targetIndex) => _dropCard(
                           card,
                           board.columns[index].id,
@@ -524,7 +611,9 @@ final class _KanbanColumnPanel extends StatelessWidget {
     required this.isFirst,
     required this.canCreate,
     required this.onCreate,
+    required this.onCreateSpecialized,
     required this.onOpen,
+    required this.onDelete,
     required this.onDrop,
     required this.onDragMove,
     required this.onDragEnd,
@@ -536,7 +625,9 @@ final class _KanbanColumnPanel extends StatelessWidget {
   final bool isFirst;
   final bool canCreate;
   final VoidCallback onCreate;
+  final ValueChanged<WorkflowCreationAction> onCreateSpecialized;
   final ValueChanged<KanbanCard> onOpen;
+  final ValueChanged<KanbanCard> onDelete;
   final Future<void> Function(KanbanCard card, int targetIndex) onDrop;
   final ValueChanged<Offset> onDragMove;
   final VoidCallback onDragEnd;
@@ -586,17 +677,44 @@ final class _KanbanColumnPanel extends StatelessWidget {
                 ),
                 _CountBadge(count: page?.total ?? 0),
                 const SizedBox(width: 4),
-                IconButton(
-                  tooltip: !canCreate
-                      ? 'Создание карточек отключено настройками канбана'
-                      : 'Добавить карточку',
-                  onPressed: !canCreate || controller.saving ? null : onCreate,
-                  visualDensity: VisualDensity.compact,
-                  icon: const Icon(Icons.add, size: 20),
-                ),
+                if (board.specialization == WorkflowSpecialization.standard)
+                  IconButton(
+                    tooltip: !canCreate
+                        ? 'Создание карточек отключено настройками канбана'
+                        : 'Добавить карточку',
+                    onPressed: !canCreate || controller.saving
+                        ? null
+                        : onCreate,
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.add, size: 20),
+                  ),
               ],
             ),
           ),
+          if (column.creationActions.isNotEmpty) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 11),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final action in column.creationActions)
+                    OutlinedButton.icon(
+                      onPressed: controller.saving
+                          ? null
+                          : () => onCreateSpecialized(action),
+                      icon: Icon(
+                        action == WorkflowCreationAction.order
+                            ? Icons.inventory_2_outlined
+                            : Icons.description_outlined,
+                        size: 17,
+                      ),
+                      label: Text(action.label),
+                    ),
+                ],
+              ),
+            ),
+          ],
           const Divider(height: 1),
           Expanded(
             child: busy && page == null
@@ -637,6 +755,7 @@ final class _KanbanColumnPanel extends StatelessWidget {
                           board: board,
                           accent: accent,
                           onTap: () => onOpen(card),
+                          onDelete: () => onDelete(card),
                           onDragMove: onDragMove,
                           onDragEnd: onDragEnd,
                         ),
@@ -787,6 +906,7 @@ final class _KanbanCardTile extends StatelessWidget {
     required this.board,
     required this.accent,
     required this.onTap,
+    required this.onDelete,
     required this.onDragMove,
     required this.onDragEnd,
     this.dragPreview = false,
@@ -796,6 +916,7 @@ final class _KanbanCardTile extends StatelessWidget {
   final KanbanBoard board;
   final Color accent;
   final VoidCallback onTap;
+  final VoidCallback onDelete;
   final ValueChanged<Offset> onDragMove;
   final VoidCallback onDragEnd;
   final bool dragPreview;
@@ -838,15 +959,37 @@ final class _KanbanCardTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    card.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w800,
-                      height: 1.25,
-                    ),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          card.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            height: 1.25,
+                          ),
+                        ),
+                      ),
+                      if (!dragPreview) ...[
+                        const SizedBox(width: 6),
+                        IconButton(
+                          tooltip: 'Удалить',
+                          onPressed: onDelete,
+                          visualDensity: VisualDensity.compact,
+                          constraints: const BoxConstraints.tightFor(
+                            width: 30,
+                            height: 30,
+                          ),
+                          padding: EdgeInsets.zero,
+                          color: const Color(0xFFEF6674),
+                          icon: const Icon(Icons.delete_outline, size: 17),
+                        ),
+                      ],
+                    ],
                   ),
                   const SizedBox(height: 5),
                   Text(
@@ -925,6 +1068,7 @@ final class _KanbanCardTile extends StatelessWidget {
               board: board,
               accent: accent,
               onTap: () {},
+              onDelete: () {},
               onDragMove: (_) {},
               onDragEnd: () {},
               dragPreview: true,
@@ -941,6 +1085,7 @@ final class _KanbanCardTile extends StatelessWidget {
           board: board,
           accent: accent,
           onTap: () {},
+          onDelete: () {},
           onDragMove: (_) {},
           onDragEnd: () {},
           dragPreview: true,

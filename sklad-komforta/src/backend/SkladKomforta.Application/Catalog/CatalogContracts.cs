@@ -1,4 +1,5 @@
 using System.Text.Json;
+using SkladKomforta.Application.Onboarding;
 
 namespace SkladKomforta.Application.Catalog;
 
@@ -25,6 +26,7 @@ public sealed record CatalogSectionSummary(
 /// <summary>Категория и её материализованная onboarding-конфигурация.</summary>
 public sealed record CatalogCategorySummary(
     Guid Id,
+    string ClientId,
     string Name,
     int SortOrder,
     IReadOnlyList<CatalogFieldSummary> Fields,
@@ -44,6 +46,7 @@ public sealed record CatalogDictionarySummary(
 /// <summary>Разрешённое направление связи между двумя категориями.</summary>
 public sealed record CatalogDependencySummary(
     Guid Id,
+    string ClientId,
     Guid SourceCategoryId,
     Guid TargetCategoryId,
     string TargetFieldCode,
@@ -53,7 +56,9 @@ public sealed record CatalogDependencySummary(
 public sealed record CatalogConfiguration(
     IReadOnlyList<CatalogCategorySummary> Categories,
     IReadOnlyList<CatalogDictionarySummary> Dictionaries,
-    IReadOnlyList<CatalogDependencySummary> Dependencies);
+    IReadOnlyList<CatalogDependencySummary> Dependencies,
+    IReadOnlyList<CalculationRuleDraft> Rules,
+    IReadOnlyList<MoneyPipelineDraft> MoneyPipelines);
 
 /// <summary>Карточка каталога с системными и настроенными значениями.</summary>
 public sealed record CatalogItemSummary(
@@ -112,7 +117,11 @@ public sealed record CatalogItemRelationSummary(
     Guid SourceItemId,
     string SourceName,
     string SourceMarking,
-    int SortOrder);
+    int SortOrder,
+    Guid? SourceCategoryId = null,
+    Guid? SourceSectionId = null,
+    Guid? SourceGroupId = null,
+    IReadOnlyDictionary<string, JsonElement>? SourceValues = null);
 
 /// <summary>Одна строка полной замены зависимых позиций карточки.</summary>
 public sealed record SaveCatalogItemRelationRequest(

@@ -67,6 +67,7 @@ public sealed record LegalEntity(
     string? CorrAccount,
     string? IntroDefault,
     string? FooterDefault,
+    IReadOnlyList<decimal?> VatRates,
     bool IsDefault);
 
 /// <summary>Данные создания или изменения юридического лица.</summary>
@@ -90,6 +91,7 @@ public sealed record SaveLegalEntityRequest(
     string? CorrAccount,
     string? IntroDefault,
     string? FooterDefault,
+    IReadOnlyList<decimal?> VatRates,
     bool IsDefault);
 
 /// <summary>Клиент текущей организации.</summary>
