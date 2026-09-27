@@ -4,18 +4,23 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Extensions.Options;
 using Npgsql;
 using StackExchange.Redis;
 using SkladKomforta.Application.Abstractions.Tenancy;
 using SkladKomforta.Application.Identity;
 using SkladKomforta.Application.Quotes;
 using SkladKomforta.Domain.Tenancy;
+using SkladKomforta.Infrastructure.Configuration;
+using SkladKomforta.Infrastructure.Identity;
 
 namespace SkladKomforta.Infrastructure.Quotes;
 
 /// <summary>
 /// Обслуживает внешние парольные ссылки без создания пользователя, роли или
-/// tenant-JWT. Открытые токены и пароли никогда не записываются в PostgreSQL.
+/// tenant-JWT. Открытые токены и пароли не записываются в PostgreSQL: вход
+/// проверяется по хешам, а для повторного показа сотруднику хранятся копии,
+/// зашифрованные AES-GCM отдельным ключом, выведенным из TOTP-ключа.
 /// </summary>
 internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessService
 {
@@ -23,23 +28,29 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
     private static readonly TimeSpan LoginAttemptWindow = TimeSpan.FromMinutes(15);
     private const int MaximumLoginAttempts = 8;
     private const string PasswordAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+    private const string SecretKeyPurpose = "quote-client-access";
 
     private readonly NpgsqlDataSource _dataSource;
     private readonly IDatabase _redis;
     private readonly ITenantContext _tenantContext;
     private readonly IQuoteService _quoteService;
     private readonly PasswordHasher<string> _passwordHasher = new();
+    private readonly byte[] _secretKey;
 
     public PostgresQuoteClientAccessService(
         NpgsqlDataSource dataSource,
         IConnectionMultiplexer redis,
         ITenantContext tenantContext,
-        IQuoteService quoteService)
+        IQuoteService quoteService,
+        IOptions<SecurityOptions> securityOptions)
     {
         _dataSource = dataSource;
         _redis = redis.GetDatabase();
         _tenantContext = tenantContext;
         _quoteService = quoteService;
+        _secretKey = IdentitySecurity.DeriveKey(
+            Convert.FromBase64String(securityOptions.Value.TotpEncryptionKey),
+            SecretKeyPurpose);
     }
 
     /// <inheritdoc />
@@ -83,10 +94,10 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
         await using (var insert = new NpgsqlCommand("""
             INSERT INTO public.quote_client_access_links
                 (id, organization_id, quote_id, token_hash, password_hash,
-                 expires_at, created_by)
+                 token_ciphertext, password_ciphertext, expires_at, created_by)
             VALUES
                 (@id, @organization_id, @quote_id, @token_hash, @password_hash,
-                 @expires_at, @created_by)
+                 @token_ciphertext, @password_ciphertext, @expires_at, @created_by)
             """, connection, transaction))
         {
             insert.Parameters.AddWithValue("id", linkId);
@@ -94,6 +105,8 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
             insert.Parameters.AddWithValue("quote_id", quote.Id);
             insert.Parameters.AddWithValue("token_hash", HashToken(accessToken));
             insert.Parameters.AddWithValue("password_hash", passwordHash);
+            insert.Parameters.AddWithValue("token_ciphertext", Protect(accessToken));
+            insert.Parameters.AddWithValue("password_ciphertext", Protect(password));
             insert.Parameters.AddWithValue("expires_at", expiresAt);
             insert.Parameters.AddWithValue("created_by", actorUserId);
             await insert.ExecuteNonQueryAsync(cancellationToken);
@@ -111,9 +124,10 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
         CancellationToken cancellationToken)
     {
         var quote = await _quoteService.GetAsync(actorUserId, boardId, cardId, cancellationToken);
-        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
-        await using var command = new NpgsqlCommand("""
-            SELECT created_at, expires_at, last_accessed_at
+        QuoteClientAccessStatus status;
+        await using (var connection = await _dataSource.OpenConnectionAsync(cancellationToken))
+        await using (var command = new NpgsqlCommand("""
+            SELECT created_at, expires_at, last_accessed_at, token_ciphertext, password_ciphertext
               FROM public.quote_client_access_links
              WHERE organization_id = @organization_id
                AND quote_id = @quote_id
@@ -121,17 +135,36 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
                AND expires_at > now()
              ORDER BY created_at DESC
              LIMIT 1
-            """, connection);
-        command.Parameters.AddWithValue("organization_id", _tenantContext.OrganizationId);
-        command.Parameters.AddWithValue("quote_id", quote.Id);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        if (!await reader.ReadAsync(cancellationToken))
-            return new QuoteClientAccessStatus(false, null, null, null);
-        return new QuoteClientAccessStatus(
-            true,
-            ReadTimestamp(reader, 0),
-            ReadTimestamp(reader, 1),
-            reader.IsDBNull(2) ? null : ReadTimestamp(reader, 2));
+            """, connection))
+        {
+            command.Parameters.AddWithValue("organization_id", _tenantContext.OrganizationId);
+            command.Parameters.AddWithValue("quote_id", quote.Id);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+                return new QuoteClientAccessStatus(false, null, null, null);
+            status = new QuoteClientAccessStatus(
+                true,
+                ReadTimestamp(reader, 0),
+                ReadTimestamp(reader, 1),
+                reader.IsDBNull(2) ? null : ReadTimestamp(reader, 2),
+                reader.IsDBNull(3) ? null : Unprotect(reader.GetFieldValue<byte[]>(3)),
+                reader.IsDBNull(4) ? null : Unprotect(reader.GetFieldValue<byte[]>(4)));
+        }
+
+        // Каждый показ пароля сотруднику фиксируется в журнале организации.
+        if (status.Password is not null)
+        {
+            await using var tenant = await OpenTenantConnectionAsync(_tenantContext.SchemaName, cancellationToken);
+            await using var audit = new NpgsqlCommand("""
+                INSERT INTO audit_log (actor_user_id, entity_type, entity_id, action)
+                VALUES (@actor_user_id, 'quote', @quote_id, 'client_link_secret_viewed')
+                """, tenant);
+            audit.Parameters.AddWithValue("actor_user_id", actorUserId);
+            audit.Parameters.AddWithValue("quote_id", quote.Id);
+            await audit.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        return status;
     }
 
     /// <inheritdoc />
@@ -601,6 +634,12 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
         }
         await command.ExecuteNonQueryAsync(token);
     }
+
+    private byte[] Protect(string value) =>
+        IdentitySecurity.ProtectSecret(Encoding.UTF8.GetBytes(value), _secretKey);
+
+    private string Unprotect(byte[] value) =>
+        Encoding.UTF8.GetString(IdentitySecurity.UnprotectSecret(value, _secretKey));
 
     private static string CreateToken(int byteCount) =>
         WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(byteCount));

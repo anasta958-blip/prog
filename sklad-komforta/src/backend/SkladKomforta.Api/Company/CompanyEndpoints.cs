@@ -69,6 +69,13 @@ internal static class CompanyEndpoints
             })
             .RequireTenantPermission("company.legal_entities.manage");
 
+        // Поиск по ИНН доступен тем, кто может редактировать соответствующий раздел;
+        // поэтому один и тот же обработчик зарегистрирован под двумя правами.
+        company.MapGet("/legal-entities/registry-lookup", LookupByInn)
+            .RequireTenantPermission("company.legal_entities.manage");
+        company.MapGet("/clients/registry-lookup", LookupByInn)
+            .RequireTenantPermission("company.clients.manage");
+
         company.MapGet("/clients", async (ICompanyWorkspaceService service, CancellationToken token) =>
                 Results.Ok(ApiResponse.Success(await service.GetClientsAsync(token))))
             .RequireTenantPermission("company.clients.view");
@@ -102,6 +109,13 @@ internal static class CompanyEndpoints
             .RequireTenantPermission("company.employees.manage");
         return endpoints;
     }
+
+    /// <summary>Возвращает реквизиты из ЕГРЮЛ/ЕГРИП для предзаполнения формы, ничего не сохраняя.</summary>
+    private static async Task<IResult> LookupByInn(
+        string? inn,
+        ICompanyRegistryLookup registry,
+        CancellationToken token) =>
+        Results.Ok(ApiResponse.Success(await registry.FindByInnAsync(inn ?? string.Empty, token)));
 
     private static Guid UserId(ClaimsPrincipal user)
     {

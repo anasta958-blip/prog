@@ -3,6 +3,7 @@ import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
 import 'package:flutter/services.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
 import 'package:sklad_komforta_app/core/widgets/mobile_collapsible_navigation.dart';
+import 'package:sklad_komforta_app/features/company/company_api.dart';
 import 'package:sklad_komforta_app/features/company/company_controller.dart';
 import 'package:sklad_komforta_app/features/company/company_models.dart';
 import 'package:sklad_komforta_app/features/company/company_audit.dart';
@@ -873,7 +874,8 @@ final class _LegalEntityDialog extends StatefulWidget {
   State<_LegalEntityDialog> createState() => _LegalEntityDialogState();
 }
 
-final class _LegalEntityDialogState extends State<_LegalEntityDialog> {
+final class _LegalEntityDialogState extends State<_LegalEntityDialog>
+    with _RegistryLookupMixin<_LegalEntityDialog> {
   final key = GlobalKey<FormState>();
   bool submitting = false;
   String? submitError;
@@ -901,6 +903,9 @@ final class _LegalEntityDialogState extends State<_LegalEntityDialog> {
         key: key,
         child: SingleChildScrollView(
           child: Column(
+            // Новый ключ после поиска по ИНН пересоздаёт поля с обновлёнными
+            // initialValue, не превращая всю форму в набор контроллеров.
+            key: ValueKey(formRevision),
             mainAxisSize: MainAxisSize.min,
             children: [
               _formField(
@@ -943,6 +948,15 @@ final class _LegalEntityDialogState extends State<_LegalEntityDialog> {
                       lengths: widget.item.companyType == 'ip'
                           ? const [12]
                           : const [10],
+                      suffix: registryLookupButton(
+                        () => lookupRegistry(
+                          controller: widget.controller,
+                          inn: widget.item.inn,
+                          scope: CompanyRegistryScope.legalEntity,
+                          apply: (record) =>
+                              record.applyToLegalEntity(widget.item),
+                        ),
+                      ),
                     ),
                   ),
                   if (widget.item.companyType != 'ip') ...[
@@ -971,6 +985,7 @@ final class _LegalEntityDialogState extends State<_LegalEntityDialog> {
                   ),
                 ],
               ),
+              ...registryLookupMessages(),
               const SizedBox(height: 12),
               _formField(
                 'Адрес',
@@ -1207,7 +1222,8 @@ final class _ClientDialog extends StatefulWidget {
   State<_ClientDialog> createState() => _ClientDialogState();
 }
 
-final class _ClientDialogState extends State<_ClientDialog> {
+final class _ClientDialogState extends State<_ClientDialog>
+    with _RegistryLookupMixin<_ClientDialog> {
   final formKey = GlobalKey<FormState>();
   CompanyClientModel get item => widget.item;
   bool submitting = false;
@@ -1225,6 +1241,7 @@ final class _ClientDialogState extends State<_ClientDialog> {
           key: formKey,
           child: SingleChildScrollView(
             child: Column(
+              key: ValueKey(formRevision),
               mainAxisSize: MainAxisSize.min,
               children: [
                 AppSelectField<String>(
@@ -1320,6 +1337,14 @@ final class _ClientDialogState extends State<_ClientDialog> {
                             ? const [12]
                             : const [10],
                         required: true,
+                        suffix: registryLookupButton(
+                          () => lookupRegistry(
+                            controller: widget.controller,
+                            inn: item.inn,
+                            scope: CompanyRegistryScope.client,
+                            apply: (record) => record.applyToClient(item),
+                          ),
+                        ),
                       ),
                       if (item.companyType != 'ip')
                         _digitsField(
@@ -1340,6 +1365,7 @@ final class _ClientDialogState extends State<_ClientDialog> {
                       ),
                     ],
                   ),
+                  ...registryLookupMessages(),
                   const SizedBox(height: 12),
                   _DialogFieldGrid(
                     columns: 3,
@@ -2256,6 +2282,116 @@ final class _DialogError extends StatelessWidget {
   );
 }
 
+/// Кнопка «Заполнить по ИНН» и её сообщения для диалогов юрлица и клиента.
+/// Реквизиты только подставляются в форму; сохранение остаётся явным действием.
+mixin _RegistryLookupMixin<T extends StatefulWidget> on State<T> {
+  bool lookingUp = false;
+
+  /// Увеличивается после успешного поиска, чтобы поля перечитали модель.
+  int formRevision = 0;
+  String? lookupNotice;
+  String? lookupError;
+
+  Future<void> lookupRegistry({
+    required CompanyController controller,
+    required String? inn,
+    required CompanyRegistryScope scope,
+    required void Function(CompanyRegistryRecord record) apply,
+  }) async {
+    if (lookingUp) return;
+    final digits = _onlyDigits(inn ?? '');
+    if (digits.length != 10 && digits.length != 12) {
+      setState(() {
+        lookupNotice = null;
+        lookupError =
+            'Введите ИНН: 10 цифр для организации или 12 цифр для ИП.';
+      });
+      return;
+    }
+    setState(() {
+      lookingUp = true;
+      lookupError = null;
+      lookupNotice = null;
+    });
+    final result = await controller.lookupByInn(digits, scope);
+    if (!mounted) return;
+    setState(() {
+      lookingUp = false;
+      final record = result.record;
+      if (record == null) {
+        lookupError = result.error;
+        return;
+      }
+      apply(record);
+      formRevision++;
+      lookupNotice = registryLookupNotice(record);
+    });
+  }
+
+  Widget registryLookupButton(VoidCallback onPressed) => lookingUp
+      ? const Padding(
+          padding: EdgeInsets.all(12),
+          child: SizedBox.square(
+            dimension: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        )
+      : IconButton(
+          tooltip: 'Заполнить по ИНН',
+          icon: const Icon(Icons.manage_search),
+          onPressed: onPressed,
+        );
+
+  List<Widget> registryLookupMessages() => [
+    if (lookupError != null) ...[
+      const SizedBox(height: 10),
+      _DialogError(message: lookupError!),
+    ],
+    if (lookupNotice != null) ...[
+      const SizedBox(height: 10),
+      _DialogInfo(message: lookupNotice!),
+    ],
+  ];
+}
+
+/// Подсказка после заполнения: что взято из реестра и что нужно дописать вручную.
+@visibleForTesting
+String registryLookupNotice(CompanyRegistryRecord record) {
+  final source = record.companyType == 'ip' ? 'ЕГРИП' : 'ЕГРЮЛ';
+  final address = record.address != null
+      ? ''
+      : record.companyType == 'ip'
+      ? ' Адрес ИП в реестре не публикуется — укажите его вручную.'
+      : ' Адрес получить не удалось — укажите его вручную.';
+  return 'Реквизиты заполнены из $source — проверьте их перед сохранением.'
+      '$address Банковские реквизиты в реестре отсутствуют.';
+}
+
+final class _DialogInfo extends StatelessWidget {
+  const _DialogInfo({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    decoration: BoxDecoration(
+      color: const Color(0xFF101D2B),
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: const Color(0xFF29415F)),
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Icon(Icons.info_outline, size: 18, color: Color(0xFF6EA3FF)),
+        const SizedBox(width: 8),
+        Expanded(child: Text(message)),
+      ],
+    ),
+  );
+}
+
 Widget _formField(
   String label,
   String value,
@@ -2287,6 +2423,7 @@ Widget _digitsField(
   ValueChanged<String> changed, {
   List<int> lengths = const [],
   bool required = false,
+  Widget? suffix,
 }) => TextFormField(
   key: ValueKey(label),
   initialValue: value,
@@ -2310,7 +2447,10 @@ Widget _digitsField(
         ? '$label должен содержать ${lengths.first} цифр'
         : '$label имеет неверную длину';
   },
-  decoration: InputDecoration(labelText: required ? '$label *' : label),
+  decoration: InputDecoration(
+    labelText: required ? '$label *' : label,
+    suffixIcon: suffix,
+  ),
 );
 
 Widget _emailField(String label, String value, ValueChanged<String> changed) =>

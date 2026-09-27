@@ -31,11 +31,15 @@ abstract interface class QuoteGateway {
     QuoteDraft draft,
   );
 
+  /// Скачивает PDF сохранённого предложения. Если указан [variantId], в документ
+  /// попадают только этот вариант и его тип; иначе печатается весь документ.
   Future<QuotePdfDownload> downloadPdf(
     String accessToken,
     String boardId,
-    String cardId,
-  );
+    String cardId, {
+    String? proposalTypeId,
+    String? variantId,
+  });
 
   void close();
 }
@@ -95,13 +99,21 @@ final class QuoteApi implements QuoteGateway {
   Future<QuotePdfDownload> downloadPdf(
     String accessToken,
     String boardId,
-    String cardId,
-  ) async {
+    String cardId, {
+    String? proposalTypeId,
+    String? variantId,
+  }) async {
     final path =
         '/kanbans/${Uri.encodeComponent(boardId)}/cards/'
         '${Uri.encodeComponent(cardId)}/quote/pdf';
+    final uri = Uri.parse('${_config.apiBaseUrl}$path').replace(
+      queryParameters: {
+        'proposalTypeId': ?proposalTypeId,
+        'variantId': ?variantId,
+      },
+    );
     final response = await _client.get(
-      Uri.parse('${_config.apiBaseUrl}$path'),
+      uri,
       headers: {
         'Authorization': 'Bearer $accessToken',
         'Accept': 'application/pdf',

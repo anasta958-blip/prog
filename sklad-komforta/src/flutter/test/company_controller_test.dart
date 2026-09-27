@@ -273,6 +273,178 @@ void main() {
     controller.dispose();
     auth.dispose();
   });
+
+  group('заполнение реквизитов по ИНН', () {
+    const sberbank = CompanyRegistryRecord(
+      companyType: 'ooo',
+      name: 'ПАО СБЕРБАНК',
+      legalName: 'ПУБЛИЧНОЕ АКЦИОНЕРНОЕ ОБЩЕСТВО "СБЕРБАНК РОССИИ"',
+      inn: '7707083893',
+      kpp: '773601001',
+      ogrn: '1027700132195',
+      address: '117312, Г.МОСКВА, УЛ. ВАВИЛОВА, Д.19',
+      email: 'info@sberbank.ru',
+      directorName: 'Греф Герман Оскарович',
+      directorTitle: 'Президент, председатель правления',
+    );
+
+    test('юрлицо получает реквизиты, а заполненный подписант сохраняется', () {
+      final entity = LegalEntityModel(id: '', name: '', companyType: 'ooo')
+        ..signatoryName = 'Иванов И. И.'
+        ..bankBik = '044525225';
+
+      sberbank.applyToLegalEntity(entity);
+
+      expect(entity.name, 'ПАО СБЕРБАНК');
+      expect(entity.legalName, sberbank.legalName);
+      expect(entity.kpp, '773601001');
+      expect(entity.address, sberbank.address);
+      expect(entity.email, 'info@sberbank.ru');
+      expect(entity.directorName, 'Греф Герман Оскарович');
+      expect(entity.signatoryName, 'Иванов И. И.');
+      expect(entity.signatoryTitle, 'Президент, председатель правления');
+      expect(entity.bankBik, '044525225');
+    });
+
+    test('ИП не получает КПП, а пустой адрес не стирает введённый', () {
+      final client = CompanyClientModel(id: '', name: '', companyType: 'ooo')
+        ..kpp = '123456789'
+        ..address = 'Введённый адрес'
+        ..email = 'old@example.ru';
+      const individual = CompanyRegistryRecord(
+        companyType: 'ip',
+        name: 'ИП Иванов Иван Иванович',
+        legalName: 'Иванов Иван Иванович',
+        inn: '500123456750',
+        ogrn: '304500116000157',
+        email: 'aircooling_skornyakov@mail.ru',
+      );
+
+      individual.applyToClient(client);
+
+      expect(client.companyType, 'ip');
+      expect(client.name, 'ИП Иванов Иван Иванович');
+      expect(client.companyName, client.name);
+      expect(client.kpp, isNull);
+      expect(client.address, 'Введённый адрес');
+      expect(client.email, 'aircooling_skornyakov@mail.ru');
+      expect(registryLookupNotice(individual), contains('ЕГРИП'));
+      expect(registryLookupNotice(individual), contains('не публикуется'));
+    });
+
+    test(
+      'контроллер возвращает ошибку сервера, не меняя общее состояние',
+      () async {
+        final registry = _MemoryRegistryGateway()
+          ..failure = const ApiException(
+            'registry_not_found',
+            'В ЕГРЮЛ/ЕГРИП нет записи с таким ИНН.',
+            404,
+          );
+        final auth = AuthController(
+          config,
+          api: _NoopAuthGateway(),
+          tokens: _MemoryTokenRepository(),
+        )..accessToken = 'access-token';
+        final controller = CompanyController(
+          config,
+          auth,
+          api: _MemoryCompanyGateway(),
+          registryApi: registry,
+        );
+
+        final missing = await controller.lookupByInn(
+          '7707083893',
+          CompanyRegistryScope.client,
+        );
+        expect(missing.record, isNull);
+        expect(missing.error, 'В ЕГРЮЛ/ЕГРИП нет записи с таким ИНН.');
+        expect(controller.error, isNull);
+        expect(registry.lastScope, CompanyRegistryScope.client);
+
+        registry
+          ..failure = null
+          ..record = sberbank;
+        final found = await controller.lookupByInn(
+          '7707083893',
+          CompanyRegistryScope.legalEntity,
+        );
+        expect(found.record?.name, 'ПАО СБЕРБАНК');
+        expect(registry.lastInn, '7707083893');
+
+        controller.dispose();
+        auth.dispose();
+      },
+    );
+
+    testWidgets('кнопка в карточке юрлица заполняет поля формы', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1400, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final auth = AuthController(
+        config,
+        api: _NoopAuthGateway(),
+        tokens: _MemoryTokenRepository(),
+      )..accessToken = 'access-token';
+      final controller = CompanyController(
+        config,
+        auth,
+        api: _MemoryCompanyGateway(),
+        workspaceApi: _PartialWorkspaceGateway(),
+        registryApi: _MemoryRegistryGateway()..record = sberbank,
+      );
+      await controller.initialize();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: CompanyPage(controller: controller)),
+        ),
+      );
+      await tester.tap(find.text('Добавить юридическое лицо'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'ИНН *'),
+        '7707083893',
+      );
+      await tester.tap(find.byTooltip('Заполнить по ИНН'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('ПАО СБЕРБАНК'), findsOneWidget);
+      expect(find.text('773601001'), findsOneWidget);
+      expect(find.text('info@sberbank.ru'), findsOneWidget);
+      expect(find.text('117312, Г.МОСКВА, УЛ. ВАВИЛОВА, Д.19'), findsOneWidget);
+      expect(
+        find.textContaining('Реквизиты заполнены из ЕГРЮЛ'),
+        findsOneWidget,
+      );
+
+      controller.dispose();
+      auth.dispose();
+    });
+  });
+}
+
+final class _MemoryRegistryGateway implements CompanyRegistryGateway {
+  CompanyRegistryRecord? record;
+  ApiException? failure;
+  String? lastInn;
+  CompanyRegistryScope? lastScope;
+
+  @override
+  Future<CompanyRegistryRecord> lookupByInn(
+    String accessToken,
+    String inn,
+    CompanyRegistryScope scope,
+  ) async {
+    lastInn = inn;
+    lastScope = scope;
+    if (failure != null) throw failure!;
+    return record!;
+  }
 }
 
 final class _MemoryCompanyGateway implements CompanyGateway {

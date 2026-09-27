@@ -4,20 +4,30 @@ namespace SkladKomforta.Application.Quotes;
 public sealed record CreateQuoteClientAccessRequest(int LifetimeDays = 7);
 
 /// <summary>
-/// Секреты новой ссылки. Пароль и открытый токен возвращаются только один раз и
-/// никогда не сохраняются сервером в исходном виде.
+/// Секреты новой ссылки. В базе они хранятся хешами для проверки и зашифрованными
+/// копиями для повторного показа сотруднику; в открытом виде не сохраняются.
 /// </summary>
 public sealed record CreatedQuoteClientAccess(
     string AccessToken,
     string Password,
     DateTimeOffset ExpiresAt);
 
-/// <summary>Состояние действующей клиентской ссылки без раскрытия её секретов.</summary>
+/// <summary>
+/// Состояние действующей клиентской ссылки. Для сотрудника с правом
+/// <c>quotes.manage</c> включает токен и пароль, чтобы их можно было скопировать повторно.
+/// </summary>
+/// <param name="AccessToken">
+/// Открытый токен ссылки; <see langword="null" />, если ссылки нет или она создана
+/// до появления зашифрованного хранения и её нужно пересоздать.
+/// </param>
+/// <param name="Password">Пароль клиента; <see langword="null" /> в тех же случаях.</param>
 public sealed record QuoteClientAccessStatus(
     bool IsActive,
     DateTimeOffset? CreatedAt,
     DateTimeOffset? ExpiresAt,
-    DateTimeOffset? LastAccessedAt);
+    DateTimeOffset? LastAccessedAt,
+    string? AccessToken = null,
+    string? Password = null);
 
 /// <summary>Парольный вход клиента, который не создаёт пользователя организации.</summary>
 public sealed record QuoteClientLoginRequest(string AccessToken, string Password);

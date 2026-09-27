@@ -1068,7 +1068,8 @@ final class QuoteController extends ChangeNotifier {
 
   /// Загружает PDF только для сохранённой и не изменённой версии предложения.
   /// Это исключает ситуацию, когда экран показывает одно, а сервер печатает
-  /// предыдущую версию документа.
+  /// предыдущую версию документа. В PDF попадают только открытые сейчас тип
+  /// предложения и вариант.
   Future<QuotePdfDownload?> downloadPdf({
     required KanbanBoard board,
     KanbanCard? card,
@@ -1091,7 +1092,13 @@ final class QuoteController extends ChangeNotifier {
     notifyListeners();
     try {
       return await _authorized(
-        (token) => _quoteGateway.downloadPdf(token, board.id, cardId),
+        (token) => _quoteGateway.downloadPdf(
+          token,
+          board.id,
+          cardId,
+          proposalTypeId: activeTypeId,
+          variantId: activeVariantId,
+        ),
       );
     } on ApiException catch (exception) {
       error = exception.message;

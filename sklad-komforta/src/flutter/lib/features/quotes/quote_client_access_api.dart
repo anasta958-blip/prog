@@ -125,6 +125,8 @@ final class QuoteClientAccessStatus {
     required this.createdAt,
     required this.expiresAt,
     required this.lastAccessedAt,
+    this.accessToken,
+    this.password,
   });
 
   final bool isActive;
@@ -132,12 +134,29 @@ final class QuoteClientAccessStatus {
   final DateTime? expiresAt;
   final DateTime? lastAccessedAt;
 
+  /// Токен и пароль действующей ссылки для повторного копирования. Пустые,
+  /// если ссылки нет или она создана до появления зашифрованного хранения.
+  final String? accessToken;
+  final String? password;
+
+  /// Секреты действующей ссылки в том же виде, что и сразу после создания.
+  CreatedQuoteClientAccess? get secrets =>
+      isActive && accessToken != null && password != null && expiresAt != null
+      ? CreatedQuoteClientAccess(
+          accessToken: accessToken!,
+          password: password!,
+          expiresAt: expiresAt!,
+        )
+      : null;
+
   factory QuoteClientAccessStatus.fromJson(Map<String, dynamic> json) =>
       QuoteClientAccessStatus(
         isActive: json['isActive'] as bool? ?? false,
         createdAt: _date(json['createdAt']),
         expiresAt: _date(json['expiresAt']),
         lastAccessedAt: _date(json['lastAccessedAt']),
+        accessToken: json['accessToken'] as String?,
+        password: json['password'] as String?,
       );
 
   static DateTime? _date(Object? value) =>

@@ -139,6 +139,14 @@ public static class DependencyInjection
         services.AddScoped<SkladKomforta.Application.Quotes.IQuoteClientAccessService, Quotes.PostgresQuoteClientAccessService>();
         services.AddScoped<SkladKomforta.Application.Company.ICompanyService, Company.PostgresCompanyService>();
         services.AddScoped<SkladKomforta.Application.Company.ICompanyWorkspaceService, Company.PostgresCompanyWorkspaceService>();
+        services.AddHttpClient<SkladKomforta.Application.Company.ICompanyRegistryLookup, Company.EgrulCompanyRegistryLookup>(client =>
+        {
+            client.BaseAddress = Company.EgrulCompanyRegistryLookup.BaseAddress;
+            // Общий предел для поиска и необязательной PDF-выписки.
+            client.Timeout = TimeSpan.FromSeconds(30);
+            client.DefaultRequestHeaders.Add("X-Requested-With", "XMLHttpRequest");
+            client.DefaultRequestHeaders.Referrer = new Uri(Company.EgrulCompanyRegistryLookup.BaseAddress, "index.html");
+        });
 
         return services;
     }

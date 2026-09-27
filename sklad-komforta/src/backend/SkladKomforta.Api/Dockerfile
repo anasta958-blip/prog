@@ -6,7 +6,7 @@ RUN dotnet publish src/backend/SkladKomforta.Api/SkladKomforta.Api.csproj -c Rel
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends fonts-dejavu-core \
+    && apt-get install -y --no-install-recommends fonts-noto-core \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /app/publish .
 USER $APP_UID

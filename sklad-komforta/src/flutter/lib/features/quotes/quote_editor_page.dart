@@ -360,6 +360,8 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
           managerName: manager?.displayName,
           salesHeadName: salesHead?.displayName,
           cardNumber: widget.card?.number,
+          proposalTypeId: controller.activeTypeId,
+          variantId: controller.activeVariantId,
         ),
       ),
     );
@@ -719,13 +721,13 @@ final class _CommandBar extends StatelessWidget {
               const SizedBox(width: 7),
               IconButton.outlined(
                 onPressed: onPreview,
-                tooltip: 'Предпросмотр',
+                tooltip: 'Предпросмотр выбранного варианта',
                 icon: const Icon(Icons.visibility_outlined, size: 18),
               ),
               const SizedBox(width: 7),
               IconButton.outlined(
                 onPressed: controller.printing ? null : onPrint,
-                tooltip: 'Печать',
+                tooltip: 'Печать выбранного варианта',
                 icon: controller.printing
                     ? const SizedBox.square(
                         dimension: 16,
@@ -815,7 +817,13 @@ final class _ClientAccessDialogState extends State<_ClientAccessDialog> {
   int lifetimeDays = 7;
   bool loading = false;
   String? error;
-  CreatedQuoteClientAccess? created;
+
+  /// Секреты действующей ссылки: только что созданной либо полученной при
+  /// повторном открытии окна.
+  late CreatedQuoteClientAccess? created = widget.initialStatus.secrets;
+
+  /// Ссылка была создана в этом окне, а не восстановлена из сохранённой.
+  bool createdNow = false;
 
   String get link {
     final baseUri = Uri.parse(widget.publicAppBaseUrl);
@@ -853,7 +861,7 @@ final class _ClientAccessDialogState extends State<_ClientAccessDialog> {
           if (created case final access?) ...[
             const SizedBox(height: 16),
             _ClientAccessValue(
-              label: 'Новая ссылка',
+              label: createdNow ? 'Новая ссылка' : 'Ссылка',
               value: link,
               onCopy: () => _copy(context, link, 'Ссылка скопирована'),
             ),
@@ -866,10 +874,21 @@ final class _ClientAccessDialogState extends State<_ClientAccessDialog> {
             ),
             const SizedBox(height: 10),
             const Text(
-              'Сохраните пароль сейчас: сервер не хранит его в открытом виде и повторно показать не сможет.',
+              'Ссылку и пароль можно снова открыть в этом окне, пока ссылка действует. Просмотр записывается в журнал изменений.',
               style: TextStyle(color: _muted, fontSize: 12, height: 1.4),
             ),
-          ] else ...[
+          ] else if (status.isActive) ...[
+            const SizedBox(height: 12),
+            const Text(
+              'Эта ссылка создана до обновления системы, поэтому её нельзя показать повторно. Создайте новую ссылку, чтобы отправить её клиенту.',
+              style: TextStyle(
+                color: Color(0xFFE6B86D),
+                fontSize: 12,
+                height: 1.4,
+              ),
+            ),
+          ],
+          if (created == null || !createdNow) ...[
             const SizedBox(height: 16),
             AppSelectField<int>(
               value: lifetimeDays,
@@ -908,13 +927,13 @@ final class _ClientAccessDialogState extends State<_ClientAccessDialog> {
       ),
     ),
     actions: [
-      if (status.isActive && created == null)
+      if (status.isActive && !createdNow)
         TextButton.icon(
           onPressed: loading ? null : _revoke,
           icon: const Icon(Icons.link_off, size: 18),
           label: const Text('Отозвать'),
         ),
-      if (created == null)
+      if (!createdNow)
         FilledButton.icon(
           onPressed: loading ? null : _create,
           icon: loading
@@ -942,6 +961,7 @@ final class _ClientAccessDialogState extends State<_ClientAccessDialog> {
       if (!mounted) return;
       setState(() {
         created = value;
+        createdNow = true;
         status = QuoteClientAccessStatus(
           isActive: true,
           createdAt: DateTime.now(),
@@ -989,6 +1009,7 @@ final class _ClientAccessDialogState extends State<_ClientAccessDialog> {
       await widget.onRevoke();
       if (!mounted) return;
       setState(() {
+        created = null;
         status = const QuoteClientAccessStatus(
           isActive: false,
           createdAt: null,

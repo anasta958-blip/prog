@@ -143,8 +143,27 @@ public sealed class DatabaseRegressionTests
             Assert.Equal(HttpStatusCode.OK, pdf.StatusCode);
             Assert.Equal("application/pdf", pdf.Content.Headers.ContentType?.MediaType);
             Assert.True((await pdf.Content.ReadAsByteArrayAsync()).Length > 1000);
+            var savedQuote = await Send(staff, HttpMethod.Get, quotePath);
+            var printedTypeId = Text(savedQuote["proposalTypes"]![0]!, "id");
+            var printedVariantId = Text(savedQuote["proposalTypes"]![0]!["variants"]![0]!, "id");
+            using var variantPdf = await staff.GetAsync(
+                $"/api/v1{quotePath}/pdf?proposalTypeId={printedTypeId}&variantId={printedVariantId}");
+            Assert.Equal(HttpStatusCode.OK, variantPdf.StatusCode);
+            Assert.Equal("application/pdf", variantPdf.Content.Headers.ContentType?.MediaType);
+            using var missingVariantPdf = await staff.GetAsync(
+                $"/api/v1{quotePath}/pdf?proposalTypeId={printedTypeId}&variantId={Guid.NewGuid()}");
+            Assert.Equal(HttpStatusCode.NotFound, missingVariantPdf.StatusCode);
 
             var link = await Send(staff, HttpMethod.Post, quotePath + "/client-access", new { lifetimeDays = 7 });
+            // Повторное открытие окна возвращает те же токен и пароль и пишет просмотр в аудит.
+            var auditBeforeReveal = (await Send(staff, HttpMethod.Get, "/company/audit")).AsArray().Count;
+            var reopened = await Send(staff, HttpMethod.Get, quotePath + "/client-access");
+            Assert.True(reopened["isActive"]!.GetValue<bool>());
+            Assert.Equal(Text(link, "accessToken"), Text(reopened, "accessToken"));
+            Assert.Equal(Text(link, "password"), Text(reopened, "password"));
+            var auditAfterReveal = (await Send(staff, HttpMethod.Get, "/company/audit")).AsArray();
+            Assert.Equal(auditBeforeReveal + 1, auditAfterReveal.Count);
+            Assert.Contains(auditAfterReveal, entry => Text(entry!, "action") == "client_link_secret_viewed");
             using var guest = factory.CreateClient();
             await Send(guest, HttpMethod.Post, "/client/quotes/login", new
             {
@@ -188,6 +207,9 @@ public sealed class DatabaseRegressionTests
 
             await Send(staff, HttpMethod.Delete, quotePath + "/client-access");
             await Send(guest, HttpMethod.Get, "/client/quotes/current", expected: HttpStatusCode.Unauthorized);
+            var revokedStatus = await Send(staff, HttpMethod.Get, quotePath + "/client-access");
+            Assert.False(revokedStatus["isActive"]!.GetValue<bool>());
+            Assert.Null(revokedStatus["password"]);
             await Send(staff, HttpMethod.Delete, path);
             await Send(staff, HttpMethod.Get, quotePath, expected: HttpStatusCode.NotFound);
         }

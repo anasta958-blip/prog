@@ -66,8 +66,22 @@ abstract interface class CompanyWorkspaceGateway {
   Future<void> deleteRole(String accessToken, String id);
 }
 
+/// Раздел формы, из которого выполняется поиск по ИНН. Определяет endpoint и
+/// требуемое право: редактирование юрлиц или клиентов.
+enum CompanyRegistryScope { legalEntity, client }
+
+/// Поиск реквизитов по ИНН в ЕГРЮЛ/ЕГРИП через backend.
+abstract interface class CompanyRegistryGateway {
+  Future<CompanyRegistryRecord> lookupByInn(
+    String accessToken,
+    String inn,
+    CompanyRegistryScope scope,
+  );
+}
+
 /// REST-клиент рабочего профиля организации.
-final class CompanyApi implements CompanyGateway, CompanyWorkspaceGateway {
+final class CompanyApi
+    implements CompanyGateway, CompanyWorkspaceGateway, CompanyRegistryGateway {
   CompanyApi(this._config) : _client = createPlatformHttpClient();
 
   final AppConfig _config;
@@ -302,6 +316,25 @@ final class CompanyApi implements CompanyGateway, CompanyWorkspaceGateway {
   @override
   Future<void> deleteRole(String token, String id) async {
     await _workspace('DELETE', '/settings/access/roles/$id', token);
+  }
+
+  @override
+  Future<CompanyRegistryRecord> lookupByInn(
+    String token,
+    String inn,
+    CompanyRegistryScope scope,
+  ) async {
+    final section = scope == CompanyRegistryScope.client
+        ? 'clients'
+        : 'legal-entities';
+    return CompanyRegistryRecord.fromJson(
+      await _workspace(
+            'GET',
+            '/company/$section/registry-lookup?inn=${Uri.encodeQueryComponent(inn)}',
+            token,
+          )
+          as Map<String, dynamic>,
+    );
   }
 
   @override

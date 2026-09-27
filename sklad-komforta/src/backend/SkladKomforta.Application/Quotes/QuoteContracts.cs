@@ -208,9 +208,16 @@ public sealed record QuotePdfFile(
 /// </summary>
 public interface IQuotePdfService
 {
+    /// <summary>Формирует PDF сохранённого предложения.</summary>
+    /// <param name="proposalTypeId">Тип, открытый в редакторе; см. <see cref="QuotePrintSelection.Apply"/>.</param>
+    /// <param name="variantId">
+    /// Печатаемый вариант. Если не указаны ни тип, ни вариант, печатается весь документ.
+    /// </param>
     Task<QuotePdfFile> GenerateAsync(
         Guid actorUserId,
         Guid boardId,
         Guid cardId,
+        Guid? proposalTypeId,
+        Guid? variantId,
         CancellationToken cancellationToken);
 }

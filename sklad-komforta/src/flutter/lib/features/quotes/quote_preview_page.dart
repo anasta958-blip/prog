@@ -14,6 +14,10 @@ const _paperHeader = Color(0xFFF0F4F9);
 /// Экран получает черновик напрямую из редактора, поэтому показывает ещё не
 /// сохранённые изменения. Закупочные цены намеренно не входят в клиентскую
 /// таблицу и остаются доступными только в рабочем редакторе.
+///
+/// Как и печать, предпросмотр показывает только открытые в редакторе тип и
+/// вариант ([proposalTypeId], [variantId]). Если вариант не указан или не
+/// найден, выводится весь документ.
 final class QuotePreviewPage extends StatelessWidget {
   const QuotePreviewPage({
     required this.draft,
@@ -22,10 +26,14 @@ final class QuotePreviewPage extends StatelessWidget {
     this.managerName,
     this.salesHeadName,
     this.cardNumber,
+    this.proposalTypeId,
+    this.variantId,
     super.key,
   });
 
   final QuoteDraft draft;
+  final String? proposalTypeId;
+  final String? variantId;
   final CompanyClientModel? client;
   final LegalEntityModel? executor;
   final String? managerName;
@@ -74,6 +82,7 @@ final class QuotePreviewPage extends StatelessWidget {
                 style: const TextStyle(color: _paperText, height: 1.35),
                 child: _Document(
                   draft: draft,
+                  selection: _selection(),
                   client: client,
                   executor: executor,
                   managerName: managerName,
@@ -88,11 +97,24 @@ final class QuotePreviewPage extends StatelessWidget {
       },
     ),
   );
+
+  /// Тип и вариант для показа либо `null`, если нужно вывести весь документ.
+  (QuoteProposalTypeDraft, QuoteVariantDraft)? _selection() {
+    if (variantId == null) return null;
+    for (final type in draft.proposalTypes) {
+      if (proposalTypeId != null && type.id != proposalTypeId) continue;
+      for (final variant in type.variants) {
+        if (variant.id == variantId) return (type, variant);
+      }
+    }
+    return null;
+  }
 }
 
 final class _Document extends StatelessWidget {
   const _Document({
     required this.draft,
+    required this.selection,
     required this.client,
     required this.executor,
     required this.managerName,
@@ -102,6 +124,7 @@ final class _Document extends StatelessWidget {
   });
 
   final QuoteDraft draft;
+  final (QuoteProposalTypeDraft, QuoteVariantDraft)? selection;
   final CompanyClientModel? client;
   final LegalEntityModel? executor;
   final String? managerName;
@@ -155,12 +178,25 @@ final class _Document extends StatelessWidget {
         Text(intro),
       ],
       const SizedBox(height: 30),
-      ...draft.proposalTypes.map(
-        (type) => Padding(
+      if (selection case (final type, final variant))
+        Padding(
           padding: const EdgeInsets.only(bottom: 30),
-          child: _ProposalType(type: type, selectionMode: draft.selectionMode),
+          child: _ProposalType(
+            type: type,
+            selectionMode: draft.selectionMode,
+            onlyVariant: variant,
+          ),
+        )
+      else
+        ...draft.proposalTypes.map(
+          (type) => Padding(
+            padding: const EdgeInsets.only(bottom: 30),
+            child: _ProposalType(
+              type: type,
+              selectionMode: draft.selectionMode,
+            ),
+          ),
         ),
-      ),
       if (_text(draft.additionalInformation) case final information?) ...[
         const Divider(height: 42, color: _paperBorder),
         const Text(
@@ -235,10 +271,18 @@ final class _MetadataGrid extends StatelessWidget {
 }
 
 final class _ProposalType extends StatelessWidget {
-  const _ProposalType({required this.type, required this.selectionMode});
+  const _ProposalType({
+    required this.type,
+    required this.selectionMode,
+    this.onlyVariant,
+  });
 
   final QuoteProposalTypeDraft type;
   final String selectionMode;
+
+  /// Единственный показываемый вариант. Сводка типа при этом не выводится:
+  /// она совпала бы с итогом варианта.
+  final QuoteVariantDraft? onlyVariant;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -261,7 +305,7 @@ final class _ProposalType extends StatelessWidget {
               ),
             ),
             Text(
-              selectionMode == 'type'
+              selectionMode == 'proposal_type'
                   ? 'Выбирается тип целиком'
                   : 'Выбирается один вариант',
               style: const TextStyle(color: Color(0xFFCED7E5), fontSize: 11),
@@ -269,18 +313,19 @@ final class _ProposalType extends StatelessWidget {
           ],
         ),
       ),
-      ...type.variants.map(
+      ...(onlyVariant == null ? type.variants : [onlyVariant!]).map(
         (variant) => _Variant(
           variant: variant,
           selected: type.selectedVariantId == variant.id,
         ),
       ),
-      _Summary(
-        title: 'Сводка типа',
-        aggregate: true,
-        clientTotal: type.clientTotal,
-        vatAmount: type.vatAmount,
-      ),
+      if (onlyVariant == null)
+        _Summary(
+          title: 'Сводка типа',
+          aggregate: true,
+          clientTotal: type.clientTotal,
+          vatAmount: type.vatAmount,
+        ),
     ],
   );
 }
@@ -357,6 +402,9 @@ final class _Variant extends StatelessWidget {
   );
 }
 
+/// Сумма фиксированных ширин колонок таблицы позиций.
+const double _positionTableWidth = 38 + 205 + 145 + 70 + 65 + 100 + 75 + 105;
+
 final class _PositionTable extends StatelessWidget {
   const _PositionTable({required this.categoryName, required this.section});
 
@@ -369,9 +417,27 @@ final class _PositionTable extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          '$categoryName · ${section.name}',
-          style: const TextStyle(fontWeight: FontWeight.w800),
+        // Ширина строки ограничена шириной таблицы, чтобы сумма раздела стояла
+        // над колонкой «Сумма», а на узком экране не уходила за край.
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: _positionTableWidth),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  '$categoryName · ${section.name}',
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                _money(section.clientTotal),
+                key: Key('quote-preview-section-total-${section.id}'),
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 8),
         SingleChildScrollView(
@@ -475,7 +541,7 @@ final class _Summary extends StatelessWidget {
               ? (aggregate ? 'НДС: ${_money(vatAmount)}' : 'Без НДС')
               : 'НДС ${_percent(vatRate)}: ${_money(vatAmount)}',
         ),
-        Text('Итого для клиента: ${_money(clientTotal + vatAmount)}'),
+        Text('Итого: ${_money(clientTotal + vatAmount)}'),
       ],
     ),
   );

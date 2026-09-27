@@ -45,11 +45,13 @@ internal static class QuoteEndpoints
                 HttpContext context,
                 Guid boardId,
                 Guid cardId,
+                Guid? proposalTypeId,
+                Guid? variantId,
                 IQuotePdfService service,
                 CancellationToken token) =>
             {
                 var file = await service.GenerateAsync(
-                    UserId(context.User), boardId, cardId, token);
+                    UserId(context.User), boardId, cardId, proposalTypeId, variantId, token);
                 return Results.File(
                     file.Content,
                     "application/pdf",

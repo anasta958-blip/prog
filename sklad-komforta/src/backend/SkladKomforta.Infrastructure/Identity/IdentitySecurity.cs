@@ -16,6 +16,19 @@ internal static class IdentitySecurity
     /// <summary>Хеширует токен SHA-256 перед сохранением или поиском в PostgreSQL.</summary>
     public static byte[] HashToken(string token) => SHA256.HashData(Encoding.UTF8.GetBytes(token));
 
+    /// <summary>
+    /// Выводит из мастер-ключа отдельный 32-байтовый ключ для указанного назначения
+    /// (HKDF-SHA256), чтобы разные виды секретов не шифровались одним ключом.
+    /// </summary>
+    /// <param name="masterKey">32-байтовый ключ из <c>Security:TotpEncryptionKey</c>.</param>
+    /// <param name="purpose">Стабильная строка назначения, например <c>quote-client-access</c>.</param>
+    public static byte[] DeriveKey(ReadOnlySpan<byte> masterKey, string purpose)
+    {
+        var key = new byte[32];
+        HKDF.DeriveKey(HashAlgorithmName.SHA256, masterKey, key, [], Encoding.UTF8.GetBytes(purpose));
+        return key;
+    }
+
     /// <summary>Шифрует TOTP-секрет AES-GCM с уникальным nonce и встроенным authentication tag.</summary>
     public static byte[] ProtectSecret(ReadOnlySpan<byte> secret, ReadOnlySpan<byte> key)
     {

@@ -40,6 +40,45 @@
 обязательны название, телефон, регистрационные и банковские реквизиты. Email и
 адрес остаются необязательными.
 
+## Поиск реквизитов по ИНН
+
+- `GET /api/v1/company/legal-entities/registry-lookup?inn=...` — право
+  `company.legal_entities.manage`;
+- `GET /api/v1/company/clients/registry-lookup?inn=...` — право
+  `company.clients.manage`.
+
+Оба адреса вызывают один обработчик; два маршрута нужны, чтобы поиск был
+доступен тем, кто может редактировать соответствующий раздел. Ответ —
+`CompanyRegistryRecord` (`Application/Company/CompanyRegistryContracts.cs`):
+`companyType` (`ooo`/`ip`), `name` (сокращённое наименование), `legalName`,
+`inn`, `kpp`, `ogrn`, `address`, `email`, `directorName`, `directorTitle`. Ничего не
+сохраняется: форма только предзаполняется.
+
+Источник — публичный сервис ФНС `egrul.nalog.ru`, как в прежней PHP-версии
+(`EgrulCompanyRegistryLookup`):
+
+1. `POST /` с ИНН → токен поиска; `GET /search-result/{t}` → JSON с
+   наименованиями, ИНН, ОГРН, КПП и руководителем (`EgrulResponseParser.ParseSearchResult`);
+2. `vyp-request` → опрос `vyp-status` (до 8 с) → `vyp-download`; с первых двух
+   страниц PDF через PdfPig читаются адрес юрлица (`ParseAddress`) и e-mail
+   (`ParseEmail`, длинный адрес склеивается из перенесённых строк и приводится
+   к нижнему регистру). Сбой этого шага не ломает ответ — поля остаются `null`.
+
+ИНН сначала проверяется по контрольной сумме (`Domain/Company/TaxpayerNumber`).
+Успешный ответ кэшируется в Redis на 24 часа (`registry:egrul:v2:{inn}`).
+Банковские реквизиты в реестре не публикуются. Место жительства ИП в публичной
+выписке ЕГРИП отсутствует; «адрес регистрирующего органа» — это адрес инспекции
+ФНС, поэтому у ИП `address` всегда `null`.
+
+| Код | HTTP | Когда |
+|---|---|---|
+| `inn_invalid` | 400 | неверная длина или контрольное число |
+| `registry_not_found` | 404 | в ЕГРЮЛ/ЕГРИП нет записи |
+| `registry_unavailable` | 503 | сеть, таймаут 30 с или ФНС запросила капчу |
+
+Формат ответов ФНС неофициальный и может измениться; разбор покрыт тестами
+`EgrulResponseParserTests`, в том числе на раскладке текста PdfPig.
+
 ## Сотрудники
 
 - `GET/POST /api/v1/company/employees`;

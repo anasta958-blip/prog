@@ -18,6 +18,16 @@ void main() {
     expect(find.text('Изменённое без сохранения КП'), findsOneWidget);
     expect(find.text('Кассетный кондиционер'), findsOneWidget);
     expect(find.text('24\u00A0000,00 ₽'), findsWidgets);
+    expect(
+      tester
+          .widget<Text>(
+            find.byKey(const Key('quote-preview-section-total-section-1')),
+          )
+          .data,
+      '24\u00A0000,00 ₽',
+    );
+    expect(find.textContaining('Итого: '), findsWidgets);
+    expect(find.textContaining('Итого для клиента'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -34,6 +44,62 @@ void main() {
 
     expect(find.byKey(const Key('quote-preview-page')), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('предпросмотр показывает только открытые тип и вариант', (
+    tester,
+  ) async {
+    final draft = _draft();
+    draft.proposalTypes.first.variants.add(
+      QuoteVariantDraft(id: 'variant-2', name: 'Премиум', categories: []),
+    );
+    draft.proposalTypes.add(
+      QuoteProposalTypeDraft(
+        id: 'type-2',
+        name: 'Бойлеры',
+        variants: [
+          QuoteVariantDraft(id: 'variant-3', name: 'Базовый', categories: []),
+        ],
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: QuotePreviewPage(
+          draft: draft,
+          proposalTypeId: 'type-1',
+          variantId: 'variant-2',
+        ),
+      ),
+    );
+
+    expect(find.byKey(const Key('quote-preview-type-type-1')), findsOneWidget);
+    expect(find.byKey(const Key('quote-preview-type-type-2')), findsNothing);
+    expect(
+      find.byKey(const Key('quote-preview-variant-variant-2')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('quote-preview-variant-variant-1')),
+      findsNothing,
+    );
+    expect(find.text('Сводка типа'), findsNothing);
+  });
+
+  testWidgets('без выбранного варианта показывается весь документ', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: QuotePreviewPage(draft: _draft(), variantId: 'missing'),
+      ),
+    );
+
+    expect(
+      find.byKey(const Key('quote-preview-variant-variant-1')),
+      findsOneWidget,
+    );
+    expect(find.text('Сводка типа'), findsOneWidget);
   });
 }
 

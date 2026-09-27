@@ -12,17 +12,23 @@ final class CompanyController extends ChangeNotifier {
     this._auth, {
     CompanyGateway? api,
     CompanyWorkspaceGateway? workspaceApi,
+    CompanyRegistryGateway? registryApi,
   }) : _api = api ?? CompanyApi(config),
        _workspaceApi = workspaceApi,
+       _registryApi = registryApi,
        _ownsApi = api == null {
     if (_workspaceApi == null && _api is CompanyWorkspaceGateway) {
       _workspaceApi = _api as CompanyWorkspaceGateway;
+    }
+    if (_registryApi == null && _api is CompanyRegistryGateway) {
+      _registryApi = _api as CompanyRegistryGateway;
     }
   }
 
   final AuthController _auth;
   final CompanyGateway _api;
   CompanyWorkspaceGateway? _workspaceApi;
+  CompanyRegistryGateway? _registryApi;
   final bool _ownsApi;
 
   /// Авторизационный контекст нужен общему редактору onboarding-настроек.
@@ -208,6 +214,31 @@ final class CompanyController extends ChangeNotifier {
     );
     roles = await _auth.executeAuthorized(_workspaceApi!.getRoles);
   });
+
+  /// Ищет реквизиты по ИНН для открытой формы. Не меняет общее состояние
+  /// контроллера: ошибка возвращается вызывающему диалогу, а не в [error].
+  Future<({CompanyRegistryRecord? record, String? error})> lookupByInn(
+    String inn,
+    CompanyRegistryScope scope,
+  ) async {
+    final registry = _registryApi;
+    if (registry == null) {
+      return (record: null, error: 'Поиск по ИНН недоступен.');
+    }
+    try {
+      final record = await _auth.executeAuthorized(
+        (token) => registry.lookupByInn(token, inn, scope),
+      );
+      return (record: record, error: null);
+    } on ApiException catch (exception) {
+      return (record: null, error: exception.message);
+    } on Object {
+      return (
+        record: null,
+        error: 'Не удалось выполнить поиск по ИНН. Проверьте подключение.',
+      );
+    }
+  }
 
   Future<bool> _mutate(Future<void> Function() action) async {
     if (saving || _workspaceApi == null) return false;

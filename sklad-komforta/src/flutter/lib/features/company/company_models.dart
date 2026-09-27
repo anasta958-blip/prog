@@ -264,6 +264,94 @@ final class CompanyClientModel {
   };
 }
 
+/// Реквизиты из ЕГРЮЛ/ЕГРИП для предзаполнения формы. Ничего не сохраняет:
+/// пользователь проверяет значения и сохраняет форму обычным способом.
+final class CompanyRegistryRecord {
+  const CompanyRegistryRecord({
+    required this.companyType,
+    required this.name,
+    required this.legalName,
+    required this.inn,
+    this.kpp,
+    this.ogrn,
+    this.address,
+    this.email,
+    this.directorName,
+    this.directorTitle,
+  });
+
+  /// `ooo` — юридическое лицо, `ip` — индивидуальный предприниматель.
+  final String companyType;
+
+  /// Сокращённое наименование, например `ООО "РОМАШКА"`.
+  final String name;
+
+  /// Полное наименование либо ФИО предпринимателя.
+  final String legalName;
+  final String inn;
+  final String? kpp;
+  final String? ogrn;
+
+  /// Адрес юрлица; отсутствует, если ФНС не успела сформировать выписку.
+  /// У ИП всегда пустой: место жительства в выписке не публикуется.
+  final String? address;
+
+  /// E-mail из выписки, если он внесён в реестр.
+  final String? email;
+  final String? directorName;
+  final String? directorTitle;
+
+  factory CompanyRegistryRecord.fromJson(Map<String, dynamic> json) =>
+      CompanyRegistryRecord(
+        companyType: json['companyType'] as String,
+        name: json['name'] as String,
+        legalName: json['legalName'] as String,
+        inn: json['inn'] as String,
+        kpp: json['kpp'] as String?,
+        ogrn: json['ogrn'] as String?,
+        address: json['address'] as String?,
+        email: json['email'] as String?,
+        directorName: json['directorName'] as String?,
+        directorTitle: json['directorTitle'] as String?,
+      );
+
+  /// Переносит реквизиты в юридическое лицо. Реестр не знает подписанта,
+  /// поэтому руководитель подставляется в подписанта только в пустые поля.
+  void applyToLegalEntity(LegalEntityModel target) {
+    target
+      ..companyType = companyType
+      ..name = name
+      ..legalName = legalName
+      ..inn = inn
+      ..kpp = companyType == 'ip' ? null : kpp
+      ..ogrn = ogrn ?? target.ogrn
+      ..address = address ?? target.address
+      ..email = email ?? target.email
+      ..directorName = directorName ?? target.directorName;
+    if ((target.signatoryName ?? '').trim().isEmpty) {
+      target.signatoryName = directorName;
+    }
+    if ((target.signatoryTitle ?? '').trim().isEmpty) {
+      target.signatoryTitle = directorTitle;
+    }
+  }
+
+  /// Переносит реквизиты в клиента. Форма клиента хранит одно название,
+  /// поэтому используется сокращённое наименование.
+  void applyToClient(CompanyClientModel target) {
+    target
+      ..companyType = companyType
+      ..name = name
+      ..companyName = name
+      ..legalName = name
+      ..inn = inn
+      ..kpp = companyType == 'ip' ? null : kpp
+      ..ogrn = ogrn ?? target.ogrn
+      ..address = address ?? target.address
+      ..email = email ?? target.email;
+  }
+}
+
 /// Роль вместе с правами и ролями, которыми она может руководить.
 final class CompanyRoleModel {
   const CompanyRoleModel({

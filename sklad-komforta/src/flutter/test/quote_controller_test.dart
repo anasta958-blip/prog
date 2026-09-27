@@ -793,13 +793,18 @@ void main() {
     expect(controller.error, 'Сохраните изменения перед печатью.');
     expect(gateway.downloadCalls, 0);
 
-    controller.dirty = false;
+    controller
+      ..dirty = false
+      ..activeTypeId = 'type-conditioners'
+      ..activeVariantId = 'variant-premium';
     final file = await controller.downloadPdf(board: _quoteBoard);
     expect(file?.fileName, 'КП.pdf');
     expect(file?.bytes, [0x25, 0x50, 0x44, 0x46]);
     expect(gateway.downloadCalls, 1);
     expect(gateway.lastBoardId, _quoteBoard.id);
     expect(gateway.lastCardId, 'card-id');
+    expect(gateway.lastProposalTypeId, 'type-conditioners');
+    expect(gateway.lastVariantId, 'variant-premium');
 
     controller.dispose();
     auth.dispose();
@@ -810,16 +815,22 @@ final class _RecordingQuoteGateway implements QuoteGateway {
   int downloadCalls = 0;
   String? lastBoardId;
   String? lastCardId;
+  String? lastProposalTypeId;
+  String? lastVariantId;
 
   @override
   Future<QuotePdfDownload> downloadPdf(
     String accessToken,
     String boardId,
-    String cardId,
-  ) async {
+    String cardId, {
+    String? proposalTypeId,
+    String? variantId,
+  }) async {
     downloadCalls++;
     lastBoardId = boardId;
     lastCardId = cardId;
+    lastProposalTypeId = proposalTypeId;
+    lastVariantId = variantId;
     return QuotePdfDownload(
       fileName: 'КП.pdf',
       bytes: Uint8List.fromList([0x25, 0x50, 0x44, 0x46]),
