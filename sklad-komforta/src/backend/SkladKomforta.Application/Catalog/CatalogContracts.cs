@@ -152,7 +152,9 @@ public sealed record CatalogImportRow(
 public sealed record CatalogBulkRequest(
     IReadOnlyList<Guid> ItemIds,
     string Action,
-    string? Status = null);
+    string? Status = null,
+    Guid? DependencyId = null,
+    Guid? SourceItemId = null);
 
 /// <summary>Количество запрошенных и фактически изменённых карточек.</summary>
 public sealed record CatalogBulkResult(int Requested, int Affected);
@@ -164,7 +166,8 @@ public sealed record CatalogItemQuery(
     string? Status,
     string? Search,
     int Page = 1,
-    int PageSize = 50);
+    int PageSize = 50,
+    Guid? GroupId = null);
 
 /// <summary>Данные создания или полной замены редактируемой карточки.</summary>
 public sealed record SaveCatalogItemRequest(

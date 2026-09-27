@@ -341,6 +341,22 @@ public static class OnboardingValidator
             foreach (var action in rule.Actions)
                 ValidateAction(fields, dependenciesById, category.ClientId, action);
         }
+
+        var writers = new HashSet<(string Category, string Field)>();
+        void RegisterWriter(string categoryId, string fieldCode)
+        {
+            if (writers.Add((categoryId, fieldCode))) return;
+            var category = categoriesById[categoryId];
+            var field = category.Fields.First(item => item.FieldCode == fieldCode);
+            Fail("onboarding_rule_target_conflict",
+                $"Категория «{category.Name}»: в поле «{field.Label ?? fieldCode}» записывает несколько правил или конвейеров. Оставьте один источник записи.");
+        }
+        foreach (var pipeline in pipelines)
+            RegisterWriter(pipeline.CategoryClientId, pipeline.ResultFieldCode);
+        foreach (var rule in rules)
+            foreach (var action in rule.Actions)
+                if (action.ActionType is "set_field" or "calculate_field")
+                    RegisterWriter(rule.CategoryClientId, action.TargetFieldCode!);
     }
 
     private static CatalogCategoryDraft RequireRuleCategory(

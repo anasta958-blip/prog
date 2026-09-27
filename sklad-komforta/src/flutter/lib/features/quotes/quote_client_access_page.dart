@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
@@ -234,9 +235,12 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
                   ),
                   if (error != null) ...[
                     const SizedBox(height: 12),
-                    Text(
-                      error!,
-                      style: const TextStyle(color: Color(0xFFFF748E)),
+                    AutoDismissNotice(
+                      message: error!,
+                      child: Text(
+                        error!,
+                        style: const TextStyle(color: Color(0xFFFF748E)),
+                      ),
                     ),
                   ],
                   const SizedBox(height: 18),
@@ -335,11 +339,14 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (error != null) ...[
-              Semantics(
-                liveRegion: true,
-                child: Text(
-                  error!,
-                  style: const TextStyle(color: Color(0xFFFF748E)),
+              AutoDismissNotice(
+                message: error!,
+                child: Semantics(
+                  liveRegion: true,
+                  child: Text(
+                    error!,
+                    style: const TextStyle(color: Color(0xFFFF748E)),
+                  ),
                 ),
               ),
               const SizedBox(height: 10),

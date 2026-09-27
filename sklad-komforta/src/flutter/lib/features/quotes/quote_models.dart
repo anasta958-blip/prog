@@ -99,7 +99,7 @@ final class QuoteProposalTypeDraft {
   final String id;
   String name;
   String? selectedVariantId;
-  final bool selectedByClient;
+  bool selectedByClient;
   final List<QuoteVariantDraft> variants;
 
   factory QuoteProposalTypeDraft.create({
@@ -140,6 +140,12 @@ final class QuoteProposalTypeDraft {
       .fold(0.0, (total, variant) => total + variant.clientTotal)
       .roundMoney();
 
+  QuoteSystemSummary get systemSummary => QuoteSystemSummary(
+    subtotal: clientTotal,
+    purchase: purchaseTotal,
+    vat: vatAmount,
+  );
+
   double get purchaseTotal => variants
       .fold(0.0, (total, variant) => total + variant.purchaseTotal)
       .roundMoney();
@@ -152,6 +158,8 @@ final class QuoteProposalTypeDraft {
   double get vatAmount => variants
       .fold(0.0, (total, variant) => total + variant.vatAmount)
       .roundMoney();
+
+  double get totalWithVat => (clientTotal + vatAmount).roundMoney();
 }
 
 /// Вариант предложения с собственной ставкой НДС и наполнением.
@@ -215,6 +223,12 @@ final class QuoteVariantDraft {
       .fold(0.0, (total, position) => total + position.lineTotal)
       .roundMoney();
 
+  QuoteSystemSummary get systemSummary => QuoteSystemSummary(
+    subtotal: clientTotal,
+    purchase: purchaseTotal,
+    vat: vatAmount,
+  );
+
   double get purchaseTotal => positions
       .where((position) => !position.excludeFromTotals)
       .fold(
@@ -229,9 +243,10 @@ final class QuoteVariantDraft {
   double get marginPercent =>
       purchaseTotal <= 0 ? 0 : margin / purchaseTotal * 100;
 
-  double get vatAmount => vatRate == null
-      ? 0
-      : (clientTotal * vatRate! / (100 + vatRate!)).roundMoney();
+  double get vatAmount =>
+      vatRate == null ? 0 : (clientTotal * vatRate! / 100).roundMoney();
+
+  double get totalWithVat => (clientTotal + vatAmount).roundMoney();
 }
 
 /// Категория каталога, добавленная в конкретный вариант.
@@ -422,6 +437,21 @@ final class QuotePositionDraft {
   double get legacyLineTotal => (_calculatedUnitPrice * quantity).roundMoney();
 
   double get lineTotal => configuredLineTotal ?? legacyLineTotal;
+}
+
+/// Editor summary using the same included line totals as sections and categories.
+final class QuoteSystemSummary {
+  const QuoteSystemSummary({
+    required this.subtotal,
+    required this.purchase,
+    required this.vat,
+  });
+  final double subtotal;
+  final double purchase;
+  final double vat;
+  double get margin => (subtotal - purchase).roundMoney();
+  double get marginPercent => purchase <= 0 ? 0 : margin / purchase * 100;
+  double get total => (subtotal + vat).roundMoney();
 }
 
 double? _number(dynamic value) => value is num ? value.toDouble() : null;

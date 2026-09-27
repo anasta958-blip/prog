@@ -1,6 +1,5 @@
 using System.Data.Common;
 using System.Globalization;
-using System.Text.Json;
 using Npgsql;
 using SkladKomforta.Application.Abstractions.Persistence;
 using SkladKomforta.Application.Abstractions.Tenancy;
@@ -14,8 +13,6 @@ internal sealed class PostgresRoleAdministrationService(
     IDatabaseConnectionFactory connectionFactory,
     ITenantContext tenantContext) : IRoleAdministrationService
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-
     /// <inheritdoc />
     public async Task<IReadOnlyList<PermissionSummary>> GetPermissionsAsync(CancellationToken cancellationToken)
     {
@@ -456,12 +453,14 @@ internal sealed class PostgresRoleAdministrationService(
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
+        var diff = AuditChanges.Serialize(before, after);
+        if (diff is null) return;
         command.CommandText = "INSERT INTO audit_log (actor_user_id, entity_type, entity_id, action, diff) VALUES (@actor, @type, @id, @action, CAST(@diff AS jsonb))";
         AddParameter(command, "actor", actorUserId);
         AddParameter(command, "type", entityType);
         AddParameter(command, "id", entityId);
         AddParameter(command, "action", action);
-        AddParameter(command, "diff", JsonSerializer.Serialize(new { before, after }, JsonOptions));
+        AddParameter(command, "diff", diff);
         await command.ExecuteNonQueryAsync(token);
     }
 

@@ -277,6 +277,7 @@ final class _ProposalType extends StatelessWidget {
       ),
       _Summary(
         title: 'Сводка типа',
+        aggregate: true,
         clientTotal: type.clientTotal,
         vatAmount: type.vatAmount,
       ),
@@ -446,12 +447,14 @@ final class _Summary extends StatelessWidget {
     required this.clientTotal,
     required this.vatAmount,
     this.vatRate,
+    this.aggregate = false,
   });
 
   final String title;
   final double clientTotal;
   final double vatAmount;
   final double? vatRate;
+  final bool aggregate;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -466,12 +469,13 @@ final class _Summary extends StatelessWidget {
       runSpacing: 6,
       children: [
         Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
-        Text('Сумма: ${_money(clientTotal)}'),
+        Text('Сумма без НДС: ${_money(clientTotal)}'),
         Text(
           vatRate == null
-              ? 'Без НДС'
+              ? (aggregate ? 'НДС: ${_money(vatAmount)}' : 'Без НДС')
               : 'НДС ${_percent(vatRate)}: ${_money(vatAmount)}',
         ),
+        Text('Итого для клиента: ${_money(clientTotal + vatAmount)}'),
       ],
     ),
   );

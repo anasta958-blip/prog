@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
 import 'package:sklad_komforta_app/core/models/workflow_specialization.dart';
 import 'package:sklad_komforta_app/core/widgets/mobile_collapsible_navigation.dart';
 import 'package:flutter/services.dart';
@@ -406,7 +407,7 @@ final class _OrganizationOnboardingPageState
   void _showMessage(String message) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message)));
+      ..showSnackBar(AppSnackBar(content: Text(message)));
   }
 
   @override
@@ -1869,14 +1870,10 @@ final class _OrganizationOnboardingPageState
               const ['money', 'calculated_money'],
               (value) => setState(() => pipeline.resultFieldCode = value!),
               required: true,
-              excludedFieldCodes: draft.moneyPipelines
-                  .where(
-                    (item) =>
-                        item.categoryClientId == category.clientId &&
-                        item.clientId != pipeline.clientId,
-                  )
-                  .map((item) => item.resultFieldCode)
-                  .toSet(),
+              excludedFieldCodes: draft.occupiedCalculationFields(
+                category.clientId,
+                exceptPipeline: pipeline,
+              ),
             ),
             AppSelectField<int>(
               value: pipeline.decimalPlaces,
@@ -1931,10 +1928,7 @@ final class _OrganizationOnboardingPageState
   List<CatalogFieldDraft> _availablePipelineResults(
     CatalogCategoryDraft category,
   ) {
-    final selected = draft.moneyPipelines
-        .where((item) => item.categoryClientId == category.clientId)
-        .map((item) => item.resultFieldCode)
-        .toSet();
+    final selected = draft.occupiedCalculationFields(category.clientId);
     return _numericFields(category, const ['money', 'calculated_money'])
         .where((field) => !selected.contains(field.fieldCode))
         .toList(growable: false);
@@ -2212,6 +2206,10 @@ final class _OrganizationOnboardingPageState
             const [],
             (value) => setState(() => action.targetFieldCode = value),
             required: true,
+            excludedFieldCodes: draft.occupiedCalculationFields(
+              category.clientId,
+              exceptAction: action,
+            ),
           ),
           _ruleFieldSelect(
             category,
@@ -2232,6 +2230,10 @@ final class _OrganizationOnboardingPageState
             const ['number', 'money', 'percent', 'calculated_money'],
             (value) => setState(() => action.targetFieldCode = value),
             required: true,
+            excludedFieldCodes: draft.occupiedCalculationFields(
+              category.clientId,
+              exceptAction: action,
+            ),
           ),
         );
         break;
@@ -2382,6 +2384,12 @@ final class _OrganizationOnboardingPageState
               'Визуальная формула',
               style: TextStyle(fontWeight: FontWeight.w700),
             ),
+            const SizedBox(height: 6),
+            const Text(
+              'Поля типа «Процент» используются как доля: 22% = 0,22. '
+              'Дополнительно делить их на 100 не нужно. Проверьте старые формулы с делением на 100.',
+              style: TextStyle(fontSize: 12),
+            ),
             const SizedBox(height: 10),
             Container(
               constraints: const BoxConstraints(minHeight: 52),
@@ -2390,25 +2398,79 @@ final class _OrganizationOnboardingPageState
                 color: const Color(0xFF101C2B),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  for (var index = 0; index < formula.tokens.length; index++)
-                    InputChip(
-                      label: Text(
-                        _formulaTokenLabel(formula.tokens[index], category),
+              child: formula.tokens.isEmpty
+                  ? const Text('Добавьте поле, число, операцию или скобку.')
+                  : SizedBox(
+                      height: 48,
+                      child: ReorderableListView(
+                        scrollDirection: Axis.horizontal,
+                        buildDefaultDragHandles: false,
+                        onReorder: (oldIndex, newIndex) => setState(() {
+                          if (newIndex > oldIndex) newIndex--;
+                          final token = formula.tokens.removeAt(oldIndex);
+                          formula.tokens.insert(newIndex, token);
+                        }),
+                        children: [
+                          for (
+                            var index = 0;
+                            index < formula.tokens.length;
+                            index++
+                          )
+                            ReorderableDragStartListener(
+                              key: ObjectKey(formula.tokens[index]),
+                              index: index,
+                              child: Padding(
+                                padding: const EdgeInsets.only(right: 6),
+                                child: Center(
+                                  child: Material(
+                                    color: const Color(0xFF162131),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                      side: const BorderSide(
+                                        color: Color(0xFF8FA4C2),
+                                      ),
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.only(left: 8),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(
+                                            Icons.drag_indicator,
+                                            size: 16,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            _formulaTokenLabel(
+                                              formula.tokens[index],
+                                              category,
+                                            ),
+                                          ),
+                                          IconButton(
+                                            tooltip:
+                                                'Удалить компонент формулы',
+                                            visualDensity:
+                                                VisualDensity.compact,
+                                            icon: const Icon(
+                                              Icons.close,
+                                              size: 16,
+                                            ),
+                                            onPressed: () => setState(
+                                              () => formula.tokens.removeAt(
+                                                index,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
-                      onDeleted: () =>
-                          setState(() => formula.tokens.removeAt(index)),
                     ),
-                  if (formula.tokens.isEmpty)
-                    const Text(
-                      'Добавьте поле, число, операцию или скобку.',
-                      style: TextStyle(color: Color(0xFF8FA4C2)),
-                    ),
-                ],
-              ),
             ),
             const SizedBox(height: 10),
             Wrap(
@@ -2590,19 +2652,32 @@ final class _OrganizationOnboardingPageState
     final selected = fields.any((field) => field.fieldCode == value)
         ? value
         : null;
-    return AppSelectField<String>(
-      value: selected,
-      label: label,
-      options: [
-        if (!required)
-          const AppSelectOption(value: null, label: 'Не используется'),
-        for (final field in fields)
-          AppSelectOption(
-            value: field.fieldCode,
-            label: catalogFieldLabel(field),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        AppSelectField<String>(
+          value: selected,
+          label: label,
+          options: [
+            if (!required)
+              const AppSelectOption(value: null, label: 'Не используется'),
+            for (final field in fields)
+              AppSelectOption(
+                value: field.fieldCode,
+                label: catalogFieldLabel(field),
+              ),
+          ],
+          onChanged: onChanged,
+        ),
+        if (value != null && excludedFieldCodes.contains(value))
+          const Padding(
+            padding: EdgeInsets.only(top: 6),
+            child: Text(
+              'Конфликт: в это поле уже записывает другое правило или конвейер. Выберите другое поле.',
+              style: TextStyle(color: Colors.redAccent, fontSize: 12),
+            ),
           ),
       ],
-      onChanged: onChanged,
     );
   }
 
@@ -3608,7 +3683,10 @@ final class _ErrorBanner extends StatelessWidget {
   const _ErrorBanner(this.message);
   final String message;
   @override
-  Widget build(BuildContext context) => DecoratedBox(
+  Widget build(BuildContext context) =>
+      AutoDismissNotice(message: message, child: _content(context));
+
+  Widget _content(BuildContext context) => DecoratedBox(
     decoration: BoxDecoration(
       color: const Color(0x553A1420),
       borderRadius: BorderRadius.circular(12),

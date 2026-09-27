@@ -20,6 +20,7 @@ internal static class CatalogEndpoints
         catalog.MapGet("/items", async (
                 Guid? categoryId,
                 Guid? sectionId,
+                Guid? groupId,
                 string? status,
                 string? search,
                 int? page,
@@ -27,7 +28,7 @@ internal static class CatalogEndpoints
                 ICatalogService service,
                 CancellationToken token) =>
                 Results.Ok(ApiResponse.Success(await service.GetItemsAsync(
-                    new CatalogItemQuery(categoryId, sectionId, status, search, page ?? 1, pageSize ?? 50), token))))
+                    new CatalogItemQuery(categoryId, sectionId, status, search, page ?? 1, pageSize ?? 50, groupId), token))))
             .RequireTenantPermission("catalog.view");
         catalog.MapGet("/template.xlsx", async (
                 Guid? categoryId,

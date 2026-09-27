@@ -205,16 +205,17 @@ internal static class QuotePdfDocumentRenderer
         summary.AddColumn(Unit.FromCentimeter(9.5));
         summary.AddColumn(Unit.FromCentimeter(7.7));
         summary.Borders.Top.Width = Unit.FromPoint(0.8);
-        AddSummaryRow(summary, "Итого для клиента", Money(clientTotal));
+        var vat = QuoteVatCalculator.Calculate(clientTotal, variant.VatRate);
+        AddSummaryRow(summary, "Сумма без НДС", Money(clientTotal));
         if (variant.VatRate is { } rate)
         {
-            var vat = clientTotal == 0 ? 0 : clientTotal * rate / (100 + rate);
-            AddSummaryRow(summary, $"В том числе НДС {Number(rate)}%", Money(vat));
+            AddSummaryRow(summary, $"НДС {Number(rate)}%", Money(vat));
         }
         else
         {
             AddSummaryRow(summary, "НДС", "Без НДС");
         }
+        AddSummaryRow(summary, "Итого для клиента", Money(clientTotal + vat));
         summary.Format.SpaceAfter = Unit.FromMillimeter(5);
     }
 

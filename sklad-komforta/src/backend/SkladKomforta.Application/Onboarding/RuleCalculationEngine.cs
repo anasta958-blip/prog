@@ -44,7 +44,8 @@ public static class RuleCalculationEngine
     /// <summary>Вычисляет структурированную формулу с обычным приоритетом операций и скобками.</summary>
     public static decimal CalculateFormula(
         FormulaDraft formula,
-        IReadOnlyDictionary<string, decimal?> values)
+        IReadOnlyDictionary<string, decimal?> values,
+        IReadOnlySet<string>? percentFields = null)
     {
         var output = new List<FormulaTokenDraft>();
         var operators = new Stack<FormulaTokenDraft>();
@@ -91,7 +92,8 @@ public static class RuleCalculationEngine
         {
             if (token.TokenType == "field")
             {
-                stack.Push(ValueOf(values, token.FieldCode));
+                var value = ValueOf(values, token.FieldCode);
+                stack.Push(percentFields?.Contains(token.FieldCode!) == true ? value / 100m : value);
                 continue;
             }
             if (token.TokenType == "constant" && token.ConstantValue is not null)

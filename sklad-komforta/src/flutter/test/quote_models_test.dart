@@ -2,6 +2,38 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_models.dart';
 
 void main() {
+  test('НДС начисляется сверху, цена и прибыль остаются без НДС', () {
+    final variant = _variant('НДС', 4100)..vatRate = 1;
+    expect(variant.clientTotal, 4100);
+    expect(variant.vatAmount, 41);
+    expect(variant.totalWithVat, 4141);
+    final margin = variant.margin;
+    variant.vatRate = 20;
+    expect(variant.vatAmount, 820);
+    expect(variant.totalWithVat, 4920);
+    expect(variant.margin, margin);
+    variant.vatRate = 0;
+    expect(variant.totalWithVat, 4100);
+    variant.vatRate = null;
+    expect(variant.vatAmount, 0);
+    expect(variant.totalWithVat, 4100);
+  });
+  test('сводка типа суммирует НДС вариантов с разными ставками', () {
+    final type = QuoteProposalTypeDraft(
+      id: 'type-vat',
+      name: 'Тип',
+      variants: [
+        _variant('Первый', 4100)..vatRate = 1,
+        _variant('Второй', 1000)..vatRate = 20,
+      ],
+    );
+    expect(type.clientTotal, 5100);
+    expect(type.vatAmount, 241);
+    expect(type.totalWithVat, 5341);
+    expect(type.systemSummary.subtotal, 5100);
+    expect(type.systemSummary.vat, 241);
+    expect(type.systemSummary.total, 5341);
+  });
   test('новый вариант получает актуальную ставку НДС организации', () {
     final type = QuoteProposalTypeDraft.create(initialVatRate: 22);
 
@@ -59,7 +91,8 @@ void main() {
     expect(section.clientTotal, 120.02);
     expect(category.clientTotal, 120.02);
     expect(variant.clientTotal, 120.02);
-    expect(variant.vatAmount, 20);
+    expect(variant.vatAmount, 24);
+    expect(variant.totalWithVat, 144.02);
   });
 
   test('исключённая позиция не входит в итоги раздела и варианта', () {
@@ -148,7 +181,10 @@ void main() {
     expect(restored.selectionMode, 'proposal_type');
     expect(restored.additionalInformation, 'Срок поставки 14 дней');
     expect(restored.clientSelectedProposalTypeId, 'type-1');
-    expect(restored.clientSelectionSubmittedAt, DateTime.utc(2026, 9, 9, 18, 30));
+    expect(
+      restored.clientSelectionSubmittedAt,
+      DateTime.utc(2026, 9, 9, 18, 30),
+    );
     expect(source.toJson(), isNot(contains('clientSelectedProposalTypeId')));
     expect(restored.proposalTypes.single.name, 'Кондиционеры');
     expect(restored.proposalTypes.single.selectedByClient, isTrue);

@@ -2,9 +2,11 @@ import 'dart:async';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
 import 'package:intl/intl.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_controller.dart';
+import 'package:sklad_komforta_app/features/catalog/catalog_bulk_relations_editor.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_editor.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_models.dart';
 
@@ -18,10 +20,31 @@ final class CatalogPage extends StatefulWidget {
 }
 
 class _CatalogPageState extends State<CatalogPage> {
+  late final TextEditingController _searchController;
   CatalogItemDraft? draft;
   String? editingItemId;
   bool mobileControlsExpanded = false;
   bool mobileFiltersExpanded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController = TextEditingController(text: widget.controller.search);
+  }
+
+  @override
+  void didUpdateWidget(covariant CatalogPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      _searchController.text = widget.controller.search;
+    }
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -32,7 +55,9 @@ class _CatalogPageState extends State<CatalogPage> {
         return Row(
           children: [
             Expanded(child: _catalogBody(persistentEditor)),
-            if (persistentEditor && draft != null)
+            if (persistentEditor && widget.controller.bulkItems.length > 1)
+              SizedBox(width: 400, child: _bulkEditor(_closeBulkEditor))
+            else if (persistentEditor && draft != null)
               SizedBox(
                 width: 400,
                 child: CatalogEditor(
@@ -146,6 +171,7 @@ class _CatalogPageState extends State<CatalogPage> {
             SizedBox(height: mobile ? 10 : 18),
             TextField(
               key: const Key('catalog-search'),
+              controller: _searchController,
               onChanged: controller.updateSearch,
               decoration: const InputDecoration(
                 hintText: 'Поиск по наименованию или маркировке…',
@@ -203,10 +229,6 @@ class _CatalogPageState extends State<CatalogPage> {
               ),
             ] else
               _Filters(controller: controller),
-            if (controller.hasSelection) ...[
-              const SizedBox(height: 12),
-              _BulkToolbar(controller: controller, onDelete: _bulkDelete),
-            ],
             SizedBox(height: mobile ? 8 : 14),
             Row(
               children: [
@@ -223,6 +245,14 @@ class _CatalogPageState extends State<CatalogPage> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   ),
               ],
+            ),
+          ],
+          if (controller.hasSelection) ...[
+            const SizedBox(height: 12),
+            _BulkToolbar(
+              controller: controller,
+              onDelete: _bulkDelete,
+              onEditRelations: () => _openBulkEditor(persistentEditor),
             ),
           ],
           if (controller.error != null) ...[
@@ -277,11 +307,13 @@ class _CatalogPageState extends State<CatalogPage> {
                             ),
                             onToggleSelection: () =>
                                 controller.toggleSelection(item.id),
-                            onTap: () => _openEditor(
-                              CatalogItemDraft.fromItem(item),
-                              item.id,
-                              persistentEditor,
-                            ),
+                            onTap: () => controller.selectedIds.length > 1
+                                ? _openBulkEditor(persistentEditor)
+                                : _openEditor(
+                                    CatalogItemDraft.fromItem(item),
+                                    item.id,
+                                    persistentEditor,
+                                  ),
                           );
                         },
                       );
@@ -304,11 +336,47 @@ class _CatalogPageState extends State<CatalogPage> {
     return null;
   }
 
+  Widget _bulkEditor(VoidCallback onClose) {
+    final items = widget.controller.bulkItems;
+    final ids = items.map((item) => item.id).toList()..sort();
+    return CatalogBulkRelationsEditor(
+      key: ValueKey(ids.join('/')),
+      controller: widget.controller,
+      items: items,
+      onClose: onClose,
+    );
+  }
+
+  void _closeBulkEditor() {
+    widget.controller.clearSelection();
+    if (editingItemId != null) {
+      unawaited(widget.controller.loadRelations(editingItemId!));
+    }
+  }
+
+  Future<void> _openBulkEditor(bool persistent) async {
+    if (widget.controller.bulkItems.length < 2 || persistent) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Dialog.fullscreen(
+        backgroundColor: const Color(0xFF111A27),
+        child: _bulkEditor(() => Navigator.pop(context)),
+      ),
+    );
+    if (mounted && editingItemId != null) {
+      unawaited(widget.controller.loadRelations(editingItemId!));
+    }
+  }
+
   Future<void> _openEditor(
     CatalogItemDraft value,
     String? itemId,
     bool persistent,
   ) async {
+    if (widget.controller.selectedIds.length > 1) {
+      widget.controller.clearSelection(notify: false);
+    }
     widget.controller.selectItem(
       itemId == null
           ? null
@@ -464,7 +532,7 @@ class _CatalogPageState extends State<CatalogPage> {
     } on Object {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Не удалось сохранить XLSX-файл.')),
+        const AppSnackBar(content: Text('Не удалось сохранить XLSX-файл.')),
       );
     }
   }
@@ -780,10 +848,15 @@ final class _Filters extends StatelessWidget {
 }
 
 final class _BulkToolbar extends StatelessWidget {
-  const _BulkToolbar({required this.controller, required this.onDelete});
+  const _BulkToolbar({
+    required this.controller,
+    required this.onDelete,
+    required this.onEditRelations,
+  });
 
   final CatalogController controller;
   final VoidCallback onDelete;
+  final VoidCallback onEditRelations;
 
   @override
   Widget build(BuildContext context) => DecoratedBox(
@@ -809,6 +882,12 @@ final class _BulkToolbar extends StatelessWidget {
             'Выбрано: ${controller.selectedIds.length}',
             style: const TextStyle(fontWeight: FontWeight.w700),
           ),
+          if (controller.selectedIds.length > 1)
+            OutlinedButton.icon(
+              onPressed: controller.transferBusy ? null : onEditRelations,
+              icon: const Icon(Icons.account_tree_outlined),
+              label: const Text('Связи'),
+            ),
           OutlinedButton(
             onPressed: controller.transferBusy
                 ? null
@@ -1060,7 +1139,10 @@ final class _InlineError extends StatelessWidget {
   const _InlineError(this.message);
   final String message;
   @override
-  Widget build(BuildContext context) => DecoratedBox(
+  Widget build(BuildContext context) =>
+      AutoDismissNotice(message: message, child: _content(context));
+
+  Widget _content(BuildContext context) => DecoratedBox(
     decoration: BoxDecoration(
       color: const Color(0xFF3A1E27),
       borderRadius: BorderRadius.circular(10),
@@ -1084,7 +1166,10 @@ final class _InlineSuccess extends StatelessWidget {
   final String message;
 
   @override
-  Widget build(BuildContext context) => DecoratedBox(
+  Widget build(BuildContext context) =>
+      AutoDismissNotice(message: message, child: _content(context));
+
+  Widget _content(BuildContext context) => DecoratedBox(
     decoration: BoxDecoration(
       color: const Color(0xFF123122),
       borderRadius: BorderRadius.circular(10),

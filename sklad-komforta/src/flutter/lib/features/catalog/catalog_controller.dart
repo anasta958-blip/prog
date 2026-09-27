@@ -23,6 +23,8 @@ final class CatalogController extends ChangeNotifier {
   Timer? _searchTimer;
   int _imageLoadGeneration = 0;
   int _relationLoadGeneration = 0;
+  final Map<String, Future<CatalogBulkResult>> _relationWrites = {};
+  bool _disposed = false;
 
   CatalogConfiguration? configuration;
   CatalogItemPage? result;
@@ -44,6 +46,72 @@ final class CatalogController extends ChangeNotifier {
   List<CatalogItemImage> images = const [];
   List<CatalogItemRelation> relations = const [];
   final Set<String> selectedIds = <String>{};
+  final Map<String, CatalogItem> _selectedItems = {};
+  List<CatalogItem> get bulkItems => selectedIds
+      .map((id) => _selectedItems[id])
+      .whereType<CatalogItem>()
+      .toList(growable: false);
+
+  Future<Map<String, List<CatalogItemRelation>>> loadBulkRelations(
+    List<CatalogItem> targets,
+  ) async {
+    final api = _api as CatalogRelationGateway;
+    final result = <String, List<CatalogItemRelation>>{};
+    // Limit concurrent requests when the selection spans several pages.
+    for (var offset = 0; offset < targets.length; offset += 8) {
+      final batch = targets.skip(offset).take(8);
+      final entries = await Future.wait(
+        batch.map((item) async {
+          await _relationWrites[item.id];
+          return MapEntry(
+            item.id,
+            await _authorized((token) => api.getRelations(token, item.id)),
+          );
+        }),
+      );
+      result.addEntries(entries);
+    }
+    return result;
+  }
+
+  Future<void> editBulkRelation(
+    List<CatalogItem> targets,
+    String dependencyId,
+    String sourceItemId, {
+    bool remove = false,
+  }) async {
+    final api = _api as CatalogBulkRelationGateway;
+    for (final target in targets) {
+      await _relationWrites[target.id];
+    }
+    final operation = _authorized(
+      (token) => api.editBulkRelation(
+        accessToken: token,
+        itemIds: targets.map((item) => item.id).toList(),
+        dependencyId: dependencyId,
+        sourceItemId: sourceItemId,
+        remove: remove,
+      ),
+    );
+    for (final target in targets) {
+      _relationWrites[target.id] = operation;
+    }
+    try {
+      await operation;
+      final activeId = selectedItem?.id;
+      if (!_disposed &&
+          activeId != null &&
+          targets.any((item) => item.id == activeId)) {
+        await loadRelations(activeId);
+      }
+    } finally {
+      for (final target in targets) {
+        if (identical(_relationWrites[target.id], operation)) {
+          _relationWrites.remove(target.id);
+        }
+      }
+    }
+  }
 
   List<CatalogItem> get items => result?.items ?? const [];
   int get total => result?.total ?? 0;
@@ -184,6 +252,8 @@ final class CatalogController extends ChangeNotifier {
   /// Выбирает карточку для постоянной панели редактирования.
   void selectItem(CatalogItem? item) {
     if (selectedItem?.id != item?.id) {
+      ++_relationLoadGeneration;
+      relationsLoading = false;
       images = const [];
       imagesError = null;
       relations = const [];
@@ -203,6 +273,7 @@ final class CatalogController extends ChangeNotifier {
     relationsError = null;
     notifyListeners();
     try {
+      await _relationWrites[itemId];
       final loaded = await _authorized(
         (token) => relationApi.getRelations(token, itemId),
       );
@@ -246,73 +317,73 @@ final class CatalogController extends ChangeNotifier {
     String itemId,
     CatalogDependency dependency,
     CatalogRelationCandidate candidate,
-  ) async {
-    if (relations.any(
-      (item) =>
-          item.dependencyId == dependency.id &&
-          item.sourceItemId == candidate.id,
-    )) {
-      relationsError = 'Эта карточка уже привязана.';
-      notifyListeners();
-      return false;
-    }
-    final next = [
-      ...relations,
-      CatalogItemRelation(
-        dependencyId: dependency.id,
-        sourceItemId: candidate.id,
-        sourceName: candidate.name,
-        sourceMarking: candidate.marking,
-        sortOrder: relations.length,
-      ),
-    ];
-    return _replaceRelations(itemId, next);
-  }
+  ) => _editRelation(itemId, dependency.id, candidate.id, false);
 
   Future<bool> removeRelation(
     String itemId,
     String dependencyId,
     String sourceItemId,
-  ) => _replaceRelations(
-    itemId,
-    relations
-        .where(
-          (item) =>
-              item.dependencyId != dependencyId ||
-              item.sourceItemId != sourceItemId,
-        )
-        .toList(),
-  );
+  ) => _editRelation(itemId, dependencyId, sourceItemId, true);
 
-  Future<bool> _replaceRelations(
+  Future<bool> _editRelation(
     String itemId,
-    List<CatalogItemRelation> next,
+    String dependencyId,
+    String sourceItemId,
+    bool remove,
   ) async {
     final relationApi = _api is CatalogRelationGateway
         ? _api as CatalogRelationGateway
         : null;
-    if (relationApi == null || relationsLoading) return false;
+    if (relationApi == null ||
+        _api is! CatalogBulkRelationGateway ||
+        relationsLoading ||
+        selectedItem?.id != itemId ||
+        _relationWrites.containsKey(itemId)) {
+      return false;
+    }
+    final generation = ++_relationLoadGeneration;
     relationsLoading = true;
     relationsError = null;
-    notifyListeners();
+    Future<CatalogBulkResult>? operation;
     try {
-      relations = await _authorized(
-        (token) => relationApi.replaceRelations(
+      operation = _authorized(
+        (token) => (_api as CatalogBulkRelationGateway).editBulkRelation(
           accessToken: token,
-          itemId: itemId,
-          relations: next,
+          itemIds: [itemId],
+          dependencyId: dependencyId,
+          sourceItemId: sourceItemId,
+          remove: remove,
         ),
       );
+      _relationWrites[itemId] = operation;
+      notifyListeners();
+      await operation;
+      final loaded = await _authorized(
+        (token) => relationApi.getRelations(token, itemId),
+      );
+      if (generation == _relationLoadGeneration && selectedItem?.id == itemId) {
+        relations = loaded;
+      }
       return true;
     } on AuthApiException catch (exception) {
-      relationsError = exception.message;
+      if (generation == _relationLoadGeneration) {
+        relationsError = exception.message;
+      }
       return false;
     } on Object {
-      relationsError = 'Не удалось сохранить связанные карточки.';
+      if (generation == _relationLoadGeneration) {
+        relationsError =
+            'Не удалось сохранить или обновить связанные карточки. Повторите загрузку.';
+      }
       return false;
     } finally {
-      relationsLoading = false;
-      notifyListeners();
+      if (identical(_relationWrites[itemId], operation)) {
+        _relationWrites.remove(itemId);
+      }
+      if (generation == _relationLoadGeneration) {
+        relationsLoading = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -474,6 +545,10 @@ final class CatalogController extends ChangeNotifier {
 
   void toggleSelection(String itemId) {
     if (!selectedIds.add(itemId)) selectedIds.remove(itemId);
+    for (final item in items) {
+      if (selectedIds.contains(item.id)) _selectedItems[item.id] = item;
+    }
+    _selectedItems.removeWhere((id, _) => !selectedIds.contains(id));
     notifyListeners();
   }
 
@@ -483,12 +558,17 @@ final class CatalogController extends ChangeNotifier {
     } else {
       selectedIds.addAll(items.map((item) => item.id));
     }
+    for (final item in items) {
+      if (selectedIds.contains(item.id)) _selectedItems[item.id] = item;
+    }
+    _selectedItems.removeWhere((id, _) => !selectedIds.contains(id));
     notifyListeners();
   }
 
   void clearSelection({bool notify = true}) {
     if (selectedIds.isEmpty) return;
     selectedIds.clear();
+    _selectedItems.clear();
     if (notify) notifyListeners();
   }
 
@@ -658,6 +738,8 @@ final class CatalogController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
+    ++_relationLoadGeneration;
     _searchTimer?.cancel();
     if (_ownsApi) _api.close();
     super.dispose();

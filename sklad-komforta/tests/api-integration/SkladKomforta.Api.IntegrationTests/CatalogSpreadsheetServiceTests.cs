@@ -11,6 +11,154 @@ namespace SkladKomforta.Api.IntegrationTests;
 public sealed class CatalogSpreadsheetServiceTests
 {
     [Fact]
+    public async Task TemplateLinksNewTargetByRowWithoutTypingIds()
+    {
+        var gateway = new SpreadsheetCatalogStub();
+        var service = new CatalogSpreadsheetService(gateway);
+        var file = await service.CreateTemplateAsync(SpreadsheetCatalogStub.CategoryId, CancellationToken.None);
+        using var input = new MemoryStream();
+        using (var source = new MemoryStream(file.Content))
+        using (var book = new XLWorkbook(source))
+        {
+            var product = book.Worksheet("Оборудование");
+            product.Cell(3, 2).Value = "Новый товар";
+            product.Cell(3, 3).Value = "NEW";
+            product.Cell(3, 5).Value = 15000m;
+            var choices = book.Worksheet("_catalog_choices");
+            Assert.Equal(XLWorksheetVisibility.VeryHidden, choices.Visibility);
+            var label = choices.Cell(1, 3).GetString();
+            Assert.Contains("Монтаж | M-1 |", label);
+            Assert.Contains("500,00", label);
+            var links = book.Worksheet("Связи 1");
+            links.Cell(4, 2).Value = label;
+            links.Cell(4, 3).Value = 3;
+            // Repeated rows must not create duplicate relations.
+            links.Cell(5, 2).Value = label;
+            links.Cell(5, 3).Value = 3;
+            book.SaveAs(input);
+        }
+        input.Position = 0;
+        await service.ImportAsync(Guid.NewGuid(), input, CancellationToken.None);
+        var imported = Assert.Single(gateway.ImportedRows);
+        Assert.Null(imported.ItemId);
+        Assert.Equal(SpreadsheetCatalogStub.SourceItemId, Assert.Single(imported.Relations).SourceItemId);
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("unknown")]
+    [InlineData("target")]
+    public async Task DamagedLinksRejectImportInsteadOfSilentlyRemovingLinks(string problem)
+    {
+        var gateway = new SpreadsheetCatalogStub();
+        var service = new CatalogSpreadsheetService(gateway);
+        var file = await service.ExportAsync(new CatalogItemQuery(null, null, null, null), CancellationToken.None);
+        using var input = new MemoryStream();
+        using (var source = new MemoryStream(file.Content))
+        using (var book = new XLWorkbook(source))
+        {
+            if (problem == "missing") book.Worksheet("Связи 1").Delete();
+            else book.Worksheet("Связи 1").Cell(4, problem == "target" ? 1 : 2).Value = "Неизвестный товар";
+            book.SaveAs(input);
+        }
+        input.Position = 0;
+        var error = await Assert.ThrowsAsync<SkladKomforta.Application.Identity.IdentityException>(
+            () => service.ImportAsync(Guid.NewGuid(), input, CancellationToken.None));
+        Assert.Equal("catalog_import_relation_invalid", error.Code);
+        Assert.Empty(gateway.ImportedRows);
+    }
+
+    [Fact]
+    public async Task LegacyUuidWorkbookStillImports()
+    {
+        var gateway = new SpreadsheetCatalogStub();
+        var service = new CatalogSpreadsheetService(gateway);
+        var file = await service.ExportAsync(new CatalogItemQuery(SpreadsheetCatalogStub.CategoryId, null, null, null), CancellationToken.None);
+        using var input = new MemoryStream();
+        using (var source = new MemoryStream(file.Content))
+        using (var book = new XLWorkbook(source))
+        {
+            book.Worksheet("_catalog_meta").Cell(1, 2).Value = 2;
+            var sheet = book.Worksheet("Оборудование");
+            sheet.Cell(1, 6).Value = "Связанные работы (ID через ;)";
+            sheet.Cell(2, 6).Value = "work_link";
+            sheet.Cell(3, 6).Value = SpreadsheetCatalogStub.SourceItemId.ToString();
+            book.SaveAs(input);
+        }
+        input.Position = 0;
+        await service.ImportAsync(Guid.NewGuid(), input, CancellationToken.None);
+        Assert.Equal(SpreadsheetCatalogStub.SourceItemId, Assert.Single(Assert.Single(gateway.ImportedRows).Relations).SourceItemId);
+    }
+
+    [Fact]
+    public async Task IdenticalLabelsHaveDistinctChoicesAndPriceChangesDoNotRemapIds()
+    {
+        var gateway = new SpreadsheetCatalogStub();
+        var sourceItem = (await gateway.GetItemsForExportAsync(new CatalogItemQuery(null, null, null, null), CancellationToken.None))[1];
+        var duplicate = sourceItem with { Id = Guid.NewGuid() };
+        gateway.ExtraCandidates = [duplicate];
+        var service = new CatalogSpreadsheetService(gateway);
+        var file = await service.ExportAsync(new CatalogItemQuery(SpreadsheetCatalogStub.CategoryId, null, null, null), CancellationToken.None);
+        using var input = new MemoryStream();
+        using (var source = new MemoryStream(file.Content))
+        using (var book = new XLWorkbook(source))
+        {
+            var choices = book.Worksheet("_catalog_choices");
+            var entries = choices.RowsUsed().Where(row => row.Cell(2).GetString() == "source").ToArray();
+            Assert.Equal(2, entries.Length);
+            Assert.NotEqual(entries[0].Cell(3).GetString(), entries[1].Cell(3).GetString());
+            var chosen = entries.Single(row => row.Cell(4).GetString() == duplicate.Id.ToString());
+            book.Worksheet("Связи 1").Cell(4, 2).Value = chosen.Cell(3).GetString();
+            book.SaveAs(input);
+        }
+        gateway.ExtraCandidates = [duplicate with { Values = new Dictionary<string, JsonElement> { ["base_price"] = JsonSerializer.SerializeToElement(900m) } }];
+        input.Position = 0;
+        await service.ImportAsync(Guid.NewGuid(), input, CancellationToken.None);
+        Assert.Equal(duplicate.Id, Assert.Single(Assert.Single(gateway.ImportedRows).Relations).SourceItemId);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MultipleDependenciesForOneFieldExportAndImportAllLinks(bool categoryOnly)
+    {
+        var original = await new SpreadsheetCatalogStub().GetConfigurationAsync(CancellationToken.None);
+        var sourceCategoryId = Guid.NewGuid();
+        var dependencyId = Guid.NewGuid();
+        var sourceId = Guid.NewGuid();
+        var configuration = original with
+        {
+            Categories = [.. original.Categories, new CatalogCategorySummary(sourceCategoryId, "materials", "Материалы", 2, [], [])],
+            Dependencies = [.. original.Dependencies, new CatalogDependencySummary(dependencyId, "materials-to-products", sourceCategoryId, SpreadsheetCatalogStub.CategoryId, "work_link", 1)],
+        };
+        var gateway = new SpreadsheetCatalogStub(configuration)
+        {
+            ExtraRelations = [new CatalogItemRelationSummary(dependencyId, sourceId, "Крепёж", "K-1", 1)],
+        };
+        var service = new CatalogSpreadsheetService(gateway);
+        Guid? categoryId = categoryOnly ? SpreadsheetCatalogStub.CategoryId : null;
+        var template = await service.CreateTemplateAsync(categoryId, CancellationToken.None);
+        Assert.NotEmpty(template.Content);
+        var exported = await service.ExportAsync(new CatalogItemQuery(categoryId, null, null, null), CancellationToken.None);
+        using (var stream = new MemoryStream(exported.Content))
+        using (var workbook = new XLWorkbook(stream))
+        {
+            var sheet = workbook.Worksheet("Оборудование");
+            Assert.True(sheet.Column(1).IsHidden);
+            Assert.Contains("Работы", workbook.Worksheet("Связи 1").Cell(1, 1).GetString());
+            Assert.Contains("Материалы", workbook.Worksheet("Связи 2").Cell(1, 1).GetString());
+            Assert.Contains("Монтаж | M-1 |", workbook.Worksheet("Связи 1").Cell(4, 2).GetString());
+            Assert.Contains("Крепёж | K-1 |", workbook.Worksheet("Связи 2").Cell(4, 2).GetString());
+        }
+        using var input = new MemoryStream(exported.Content);
+        await service.ImportAsync(Guid.NewGuid(), input, CancellationToken.None);
+        var relations = Assert.Single(gateway.ImportedRows, row => row.ItemId == SpreadsheetCatalogStub.ItemId).Relations;
+        Assert.Equal(2, relations.Count);
+        Assert.Contains(relations, relation => relation.DependencyId == dependencyId && relation.SourceItemId == sourceId);
+        Assert.Contains(relations, relation => relation.DependencyId == original.Dependencies[0].Id && relation.SourceItemId == SpreadsheetCatalogStub.SourceItemId);
+    }
+
+    [Fact]
     public async Task TemplateRequiresAtLeastOneConfiguredCategory()
     {
         var gateway = new SpreadsheetCatalogStub(new CatalogConfiguration([], [], [], [], []));
@@ -53,14 +201,14 @@ public sealed class CatalogSpreadsheetServiceTests
             Assert.Equal("id", sheet.Cell(2, 1).GetString());
             Assert.Equal("Вентилятор", sheet.Cell(3, 2).GetString());
             Assert.Equal(12500m, sheet.Cell(3, 5).GetValue<decimal>());
-            Assert.Equal(SpreadsheetCatalogStub.SourceItemId.ToString(), sheet.Cell(3, 6).GetString());
+            Assert.Contains("Монтаж | M-1 |", workbook.Worksheet("Связи 1").Cell(4, 2).GetString());
         }
 
         using var importStream = new MemoryStream(exported.Content);
         var result = await service.ImportAsync(Guid.NewGuid(), importStream, CancellationToken.None);
 
-        Assert.Equal(1, result.TotalRows);
-        var row = Assert.Single(gateway.ImportedRows);
+        Assert.Equal(2, result.TotalRows);
+        var row = Assert.Single(gateway.ImportedRows, item => item.ItemId == SpreadsheetCatalogStub.ItemId);
         Assert.Equal("Вентилятор", row.Item.Name);
         Assert.Equal(SpreadsheetCatalogStub.ItemId, row.ItemId);
         Assert.Equal("approved", row.Item.Status);
@@ -131,14 +279,17 @@ public sealed class CatalogSpreadsheetServiceTests
         }
 
         public IReadOnlyList<CatalogImportRow> ImportedRows { get; private set; } = [];
+        public IReadOnlyList<CatalogItemRelationSummary> ExtraRelations { get; init; } = [];
+        public IReadOnlyList<CatalogItemSummary> ExtraCandidates { get; set; } = [];
 
         public Task<CatalogConfiguration> GetConfigurationAsync(CancellationToken cancellationToken) =>
             Task.FromResult(configuration);
 
         public Task<IReadOnlyList<CatalogItemSummary>> GetItemsForExportAsync(
             CatalogItemQuery query,
-            CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<CatalogItemSummary>>(
-            [new CatalogItemSummary(
+            CancellationToken cancellationToken)
+        {
+            var target = new CatalogItemSummary(
                 ItemId,
                 CategoryId,
                 null,
@@ -153,7 +304,20 @@ public sealed class CatalogSpreadsheetServiceTests
                 null,
                 DateTimeOffset.UtcNow,
                 null,
-                DateTimeOffset.UtcNow)]);
+                DateTimeOffset.UtcNow);
+            var sources = configuration.Dependencies.Select(dependency =>
+            {
+                var relation = ExtraRelations.FirstOrDefault(item => item.DependencyId == dependency.Id);
+                return target with {
+                    Id = relation?.SourceItemId ?? SourceItemId,
+                    CategoryId = dependency.SourceCategoryId,
+                    Name = relation?.SourceName ?? "Монтаж", Marking = relation?.SourceMarking ?? "M-1",
+                    Values = new Dictionary<string, JsonElement> { ["base_price"] = JsonSerializer.SerializeToElement(500m) },
+                };
+            });
+            return Task.FromResult<IReadOnlyList<CatalogItemSummary>>(
+                new[] { target }.Concat(sources).Concat(ExtraCandidates).Where(item => query.CategoryId == null || item.CategoryId == query.CategoryId).ToArray());
+        }
 
         public Task<IReadOnlyDictionary<Guid, IReadOnlyList<CatalogItemRelationSummary>>> GetRelationsForExportAsync(
             IReadOnlyList<Guid> itemIds,
@@ -169,6 +333,7 @@ public sealed class CatalogSpreadsheetServiceTests
                             "Монтаж",
                             "M-1",
                             0),
+                        .. ExtraRelations,
                     ],
                 });
 

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
@@ -542,7 +543,10 @@ final class _ErrorBanner extends StatelessWidget {
   const _ErrorBanner(this.message);
   final String message;
   @override
-  Widget build(BuildContext context) => DecoratedBox(
+  Widget build(BuildContext context) =>
+      AutoDismissNotice(message: message, child: _content(context));
+
+  Widget _content(BuildContext context) => DecoratedBox(
     decoration: BoxDecoration(
       color: const Color(0xFF3A1E27),
       borderRadius: BorderRadius.circular(12),

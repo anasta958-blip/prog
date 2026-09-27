@@ -76,7 +76,22 @@ internal sealed class PostgresCompanyService(
             }
             await UpdateProfileAsync(connection, transaction, userId, normalized.Company, cancellationToken);
             await SyncDictionariesAsync(connection, transaction, normalized.Dictionaries, cancellationToken);
-            await ExecuteAsync(connection, transaction, "DELETE FROM catalog_category_dependencies", cancellationToken);
+            // Keep unchanged dependency identities: deleting them cascades to product links.
+            await ExecuteAsync(connection, transaction, """
+                DELETE FROM catalog_category_dependencies AS dependency
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM jsonb_array_elements(CAST(@dependencies AS jsonb)) AS desired
+                    JOIN catalog_categories AS source
+                      ON source.client_id = desired->>'sourceCategoryClientId'
+                    JOIN catalog_categories AS target
+                      ON target.client_id = desired->>'targetCategoryClientId'
+                    WHERE dependency.client_id = desired->>'clientId'
+                      AND dependency.source_category_id = source.id
+                      AND dependency.target_category_id = target.id
+                      AND dependency.target_field_code = desired->>'targetFieldCode')
+                """, cancellationToken,
+                ("dependencies", JsonSerializer.Serialize(normalized.Dependencies ?? [], JsonOptions)));
             var categoryIds = await SyncCatalogAsync(
                 connection, transaction, previous.Categories, normalized.Categories, cancellationToken);
             await SyncWorkflowsAsync(
@@ -94,13 +109,15 @@ internal sealed class PostgresCompanyService(
                 WHERE singleton
                 """, cancellationToken,
                 ("payload", JsonSerializer.Serialize(normalized, JsonOptions)), ("user_id", userId));
-            await ExecuteAsync(connection, transaction, """
+            var configurationDiff = AuditChanges.Serialize(previous, normalized);
+            if (configurationDiff is not null)
+                await ExecuteAsync(connection, transaction, """
                 INSERT INTO audit_log (actor_user_id, entity_type, entity_id, action, diff)
                 VALUES (@user_id, 'organization_configuration', @organization_id,
                         'updated', CAST(@diff AS jsonb))
                 """, cancellationToken,
                 ("user_id", userId), ("organization_id", tenantContext.OrganizationId),
-                ("diff", JsonSerializer.Serialize(new { before = previous, after = normalized }, JsonOptions)));
+                ("diff", configurationDiff));
             await transaction.CommitAsync(cancellationToken);
         }
         catch (PostgresException exception) when (exception.SqlState is "23001" or "23503" or "23505")
@@ -186,12 +203,14 @@ internal sealed class PostgresCompanyService(
             cancellationToken,
             ("name", profile.OrganizationName.Trim()), ("organization_id", tenantContext.OrganizationId));
 
-        await ExecuteAsync(connection, transaction, """
+        var profileDiff = AuditChanges.Serialize(before, profile);
+        if (profileDiff is not null)
+            await ExecuteAsync(connection, transaction, """
             INSERT INTO audit_log (actor_user_id, entity_type, entity_id, action, diff)
             VALUES (@user_id, 'organization_profile', @organization_id, 'updated', CAST(@diff AS jsonb))
             """, cancellationToken,
             ("user_id", userId), ("organization_id", tenantContext.OrganizationId),
-            ("diff", JsonSerializer.Serialize(new { before, after = profile }, JsonOptions)));
+            ("diff", profileDiff));
 
         await transaction.CommitAsync(cancellationToken);
         return await ReadAsync(connection, cancellationToken);
@@ -407,8 +426,12 @@ internal sealed class PostgresCompanyService(
                 ("name", category.Name.Trim()), ("sort", index));
             var oldCategory = oldCategories.FirstOrDefault(item => item.ClientId == category.ClientId);
             await SyncSectionsAsync(connection, transaction, id, oldCategory?.Sections ?? [], category.Sections, token);
-            await ExecuteAsync(connection, transaction,
-                "DELETE FROM catalog_category_fields WHERE category_id = @id", token, ("id", id));
+            await ExecuteAsync(connection, transaction, """
+                UPDATE catalog_category_fields SET sort_order = sort_order + (
+                    SELECT COALESCE(MAX(sort_order), 0) + @count + 1
+                    FROM catalog_category_fields WHERE category_id = @id)
+                WHERE category_id = @id
+                """, token, ("id", id), ("count", category.Fields.Count));
             for (var fieldIndex = 0; fieldIndex < category.Fields.Count; fieldIndex++)
             {
                 var field = category.Fields[fieldIndex];
@@ -416,12 +439,22 @@ internal sealed class PostgresCompanyService(
                     INSERT INTO catalog_category_fields
                         (category_id, field_code, label, field_type, is_visible, is_required, sort_order, dictionary_code)
                     VALUES (@category_id, @code, @label, @field_type, @visible, @required, @sort, @dictionary_code)
+                    ON CONFLICT (category_id, field_code) DO UPDATE SET
+                        label = EXCLUDED.label, field_type = EXCLUDED.field_type,
+                        is_visible = EXCLUDED.is_visible, is_required = EXCLUDED.is_required,
+                        sort_order = EXCLUDED.sort_order, dictionary_code = EXCLUDED.dictionary_code
                     """, token, ("category_id", id), ("code", field.FieldCode.Trim()),
                     ("label", OnboardingFieldRegistry.LabelOf(field)),
                     ("field_type", OnboardingFieldRegistry.FieldTypeOf(field)),
                     ("visible", field.IsVisible), ("required", field.IsRequired), ("sort", fieldIndex),
                     ("dictionary_code", Db(field.DictionaryCode)));
             }
+            await ExecuteAsync(connection, transaction, """
+                DELETE FROM catalog_category_fields
+                WHERE category_id = @id AND field_code NOT IN (
+                    SELECT jsonb_array_elements_text(CAST(@codes AS jsonb)))
+                """, token, ("id", id),
+                ("codes", JsonSerializer.Serialize(category.Fields.Select(field => field.FieldCode.Trim()), JsonOptions)));
         }
         await DeleteMissingAsync(connection, transaction, "catalog_categories", retained, token);
         return result;
@@ -612,6 +645,11 @@ internal sealed class PostgresCompanyService(
         IReadOnlyDictionary<string, Guid> categoryIds,
         CancellationToken token)
     {
+        await ExecuteAsync(connection, transaction, """
+            UPDATE catalog_category_dependencies SET sort_order = sort_order + (
+                SELECT COALESCE(MAX(sort_order), 0) + @count + 1
+                FROM catalog_category_dependencies)
+            """, token, ("count", dependencies.Count));
         for (var index = 0; index < dependencies.Count; index++)
         {
             var dependency = dependencies[index];
@@ -619,6 +657,7 @@ internal sealed class PostgresCompanyService(
                 INSERT INTO catalog_category_dependencies
                     (id, client_id, source_category_id, target_category_id, target_field_code, sort_order)
                 VALUES (@id, @client_id, @source, @target, @field, @sort)
+                ON CONFLICT (client_id) DO UPDATE SET sort_order = EXCLUDED.sort_order
                 """, token, ("id", Guid.NewGuid()),
                 ("client_id", dependency.ClientId.Trim()),
                 ("source", categoryIds[dependency.SourceCategoryClientId]),

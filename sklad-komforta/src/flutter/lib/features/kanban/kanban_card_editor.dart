@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
+import 'package:sklad_komforta_app/core/widgets/app_number_field.dart';
 import 'package:flutter/services.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_models.dart';
@@ -274,6 +276,27 @@ final class _KanbanCardEditorState extends State<KanbanCardEditor> {
       'money',
       'percent',
     }.contains(field.fieldType);
+    if (numeric) {
+      return AppNumberField(
+        key: ValueKey('${widget.draft.categoryId}-${field.code}'),
+        value: value?.toString() ?? '',
+        enabled:
+            !widget.saving && !widget.readOnly && field.code != 'base_price',
+        minimum: field.fieldType == 'money' ? 0 : null,
+        decoration: InputDecoration(labelText: label),
+        onChanged: (next) {
+          if (next.trim().isEmpty) {
+            widget.draft.values.remove(field.code);
+          } else {
+            final parsed = num.tryParse(next.replaceAll(',', '.'));
+            if (parsed != null) widget.draft.values[field.code] = parsed;
+          }
+        },
+        validator: (next) => field.isRequired && (next ?? '').trim().isEmpty
+            ? 'Заполните поле «${field.label}».'
+            : null,
+      );
+    }
     return TextFormField(
       key: ValueKey('${widget.draft.categoryId}-${field.code}'),
       initialValue: value?.toString() ?? '',
@@ -316,7 +339,10 @@ final class _EditorError extends StatelessWidget {
   final String message;
 
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) =>
+      AutoDismissNotice(message: message, child: _content(context));
+
+  Widget _content(BuildContext context) => Container(
     padding: const EdgeInsets.all(12),
     decoration: BoxDecoration(
       color: const Color(0xFF321825),

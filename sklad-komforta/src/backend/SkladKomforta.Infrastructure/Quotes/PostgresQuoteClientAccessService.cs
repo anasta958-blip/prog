@@ -230,6 +230,28 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
                 ?? throw Failure(404, "quote_client_link_unavailable", "Предложение больше недоступно.");
         }
 
+        async Task<JsonElement> ReadSelectionSnapshotAsync()
+        {
+            await using var snapshot = new NpgsqlCommand("""
+                SELECT jsonb_build_object(
+                    'selectionMode', quote.selection_mode,
+                    'submitted', quote.client_selection_submitted_at IS NOT NULL,
+                    'proposalTypeId', (SELECT proposal_type_id FROM quote_client_type_selections WHERE quote_id = quote.id),
+                    'variants', COALESCE((
+                        SELECT jsonb_agg(jsonb_build_object(
+                            'proposalTypeId', selection.proposal_type_id, 'variantId', selection.variant_id)
+                            ORDER BY selection.proposal_type_id)
+                        FROM quote_proposal_type_selections AS selection
+                        JOIN quote_proposal_types AS type ON type.id = selection.proposal_type_id
+                        WHERE type.quote_id = quote.id
+                    ), '[]'::jsonb))::text
+                FROM quotes AS quote WHERE quote.id = @quote_id
+                """, connection, transaction);
+            snapshot.Parameters.AddWithValue("quote_id", session.QuoteId);
+            return JsonSerializer.Deserialize<JsonElement>((string)(await snapshot.ExecuteScalarAsync(cancellationToken))!);
+        }
+        var selectionBefore = await ReadSelectionSnapshotAsync();
+
         if (mode == "proposal_type")
         {
             if (!request.ProposalTypeId.HasValue || selections.Count != 0)
@@ -276,18 +298,14 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
         await ExecuteAsync(connection, transaction,
             "UPDATE quotes SET client_selection_submitted_at = now(), updated_at = now() WHERE id = @quote_id",
             cancellationToken, ("quote_id", session.QuoteId));
-        await ExecuteAsync(connection, transaction, """
+        var selectionDiff = AuditChanges.Serialize(selectionBefore, await ReadSelectionSnapshotAsync());
+        if (selectionDiff is not null)
+            await ExecuteAsync(connection, transaction, """
             INSERT INTO audit_log (actor_user_id, entity_type, entity_id, action, diff)
             VALUES (NULL, 'quote', @quote_id, 'client_selection_submitted', CAST(@diff AS jsonb))
             """, cancellationToken,
             ("quote_id", session.QuoteId),
-            ("diff", JsonSerializer.Serialize(new
-            {
-                selectionMode = mode,
-                proposalTypeId = request.ProposalTypeId,
-                variants = selections,
-                accessLinkId = session.LinkId,
-            })));
+            ("diff", selectionDiff));
         await transaction.CommitAsync(cancellationToken);
         return await ReadClientViewAsync(schema, session.QuoteId, cancellationToken);
     }
@@ -651,7 +669,7 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
         {
             var subtotal = Categories.SelectMany(item => item.Sections)
                 .SelectMany(item => item.Positions).Sum(item => item.LineTotal);
-            var vat = vatRate.HasValue ? decimal.Round(subtotal * vatRate.Value / 100m, 2) : 0m;
+            var vat = QuoteVatCalculator.Calculate(subtotal, vatRate);
             return new QuoteClientVariant(
                 Id, name, subtitle, vatRate, subtotal, vat, subtotal + vat,
                 Categories.Select(item => item.ToDetails()).ToArray());

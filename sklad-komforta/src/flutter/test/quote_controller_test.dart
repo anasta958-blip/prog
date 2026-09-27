@@ -22,6 +22,151 @@ void main() {
     environment: 'test',
   );
 
+  testWidgets(
+    'уведомление о черновике исчезает через 5 секунд и не стирает новое',
+    (tester) async {
+      final auth = AuthController(
+        config,
+        api: _NoopAuthGateway(),
+        tokens: _MemoryTokenRepository(),
+      );
+      final controller = QuoteController(config, auth);
+      var notifications = 0;
+      controller.addListener(() => notifications++);
+      controller.showDraftRestoredMessage();
+      await tester.pump(const Duration(seconds: 4));
+      expect(controller.successMessage, 'Восстановлен локальный черновик');
+      await tester.pump(const Duration(seconds: 1));
+      expect(controller.successMessage, isNull);
+      expect(notifications, 2);
+      controller.showDraftRestoredMessage();
+      await tester.pump(const Duration(seconds: 3));
+      controller.successMessage = 'Сохранено';
+      await tester.pump(const Duration(seconds: 4));
+      expect(controller.successMessage, 'Сохранено');
+      await tester.pump(const Duration(seconds: 1));
+      expect(controller.successMessage, isNull);
+      controller.showDraftRestoredMessage();
+      controller.dispose();
+      await tester.pump(const Duration(seconds: 5));
+      expect(tester.takeException(), isNull);
+      auth.dispose();
+    },
+  );
+
+  test(
+    'удаление типов и вариантов исправляет выбор и защищает последние вкладки',
+    () {
+      final auth = AuthController(
+        config,
+        api: _NoopAuthGateway(),
+        tokens: _MemoryTokenRepository(),
+      );
+      final controller = QuoteController(config, auth);
+      final first = QuoteProposalTypeDraft.create(name: 'Первый');
+      final second = QuoteProposalTypeDraft.create(name: 'Второй');
+      controller.draft = QuoteDraft(
+        kind: QuoteKind.quote,
+        title: 'КП',
+        clientId: 'client',
+        executorCompanyId: 'executor',
+        selectionMode: 'variant',
+        proposalTypes: [first, second],
+      );
+      controller.selectType(second.id);
+      final variant = controller.addVariant();
+      second.selectedVariantId = variant.id;
+      second.selectedByClient = true;
+      controller.dirty = false;
+      controller.removeVariant(second.id, variant.id);
+      expect(second.variants, hasLength(1));
+      expect(controller.activeVariantId, second.variants.single.id);
+      expect(second.selectedVariantId, isNull);
+      expect(second.selectedByClient, isFalse);
+      expect(controller.dirty, isTrue);
+      controller.dirty = false;
+      controller.removeVariant(second.id, second.variants.single.id);
+      expect(second.variants, hasLength(1));
+      expect(controller.dirty, isFalse);
+      controller.draft!.clientSelectedProposalTypeId = second.id;
+      controller.removeType(second.id);
+      expect(controller.activeTypeId, first.id);
+      expect(controller.activeVariantId, first.variants.single.id);
+      expect(controller.draft!.clientSelectedProposalTypeId, isNull);
+      expect(controller.dirty, isTrue);
+      controller.dirty = false;
+      controller.removeType(first.id);
+      expect(controller.draft!.proposalTypes, hasLength(1));
+      expect(controller.dirty, isFalse);
+      controller.dispose();
+      auth.dispose();
+    },
+  );
+
+  test(
+    'массовые проценты применяются ко всему разделу или выделенным строкам',
+    () {
+      final auth = AuthController(
+        config,
+        api: _NoopAuthGateway(),
+        tokens: _MemoryTokenRepository(),
+      );
+      final controller = QuoteController(config, auth);
+      final section = QuoteSectionDraft(
+        id: 'section',
+        name: 'Раздел',
+        positions: [
+          for (var i = 0; i < 3; i++)
+            QuotePositionDraft(
+              id: '$i',
+              name: 'Товар',
+              marking: '',
+              unit: 'шт',
+              quantity: 1,
+              basePrice: 100,
+              values: {},
+            ),
+        ],
+      );
+      controller.applyPercent(section, value: 12, markup: true);
+      controller.applyPercent(section, value: 5, markup: false);
+      expect(section.positions.map((p) => p.markupPercent), [12, 12, 12]);
+      expect(section.positions.map((p) => p.discountPercent), [5, 5, 5]);
+      section.positions[1].selected = true;
+      controller.applyPercent(section, value: 20, markup: true);
+      controller.applyPercent(section, value: 0, markup: false);
+      expect(section.positions.map((p) => p.markupPercent), [12, 20, 12]);
+      expect(section.positions.map((p) => p.discountPercent), [5, 0, 5]);
+      controller.applyPercent(
+        section,
+        value: 17,
+        markup: true,
+        fieldCode: 'custom_markup',
+      );
+      expect(section.positions.map((p) => p.values['custom_markup']), [
+        null,
+        17,
+        null,
+      ]);
+      section.positions[1].selected = false;
+      controller.applyPercent(
+        section,
+        value: 3,
+        markup: false,
+        fieldCode: 'custom_discount',
+      );
+      expect(section.positions.map((p) => p.values['custom_discount']), [
+        3,
+        3,
+        3,
+      ]);
+      expect(section.positions.map((p) => p.markupPercent), [12, 20, 12]);
+      expect(section.positions.map((p) => p.discountPercent), [5, 0, 5]);
+      controller.dispose();
+      auth.dispose();
+    },
+  );
+
   test(
     'повторная связанная работа увеличивает количество без сброса ручных значений',
     () async {
@@ -108,12 +253,13 @@ void main() {
       expect(workPositions.single.manualPrice, 150);
       expect(workPositions.single.markupPercent, 12);
       expect(workPositions.single.discountPercent, 7);
-      expect(equipmentSection.positions, hasLength(2));
+      expect(equipmentSection.positions, hasLength(1));
+      expect(equipmentSection.positions.single.quantity, 2);
 
       equipmentSection.positions.first.selected = true;
       controller.applyPercent(equipmentSection, value: 9, markup: false);
       expect(equipmentSection.positions.first.discountPercent, 9);
-      expect(equipmentSection.positions.last.discountPercent, isNull);
+      expect(equipmentSection.positions.single.discountPercent, 9);
 
       controller.setSectionSelection(equipmentSection, true);
       expect(
@@ -122,6 +268,34 @@ void main() {
       );
       controller.removeSelectedPositions(equipmentSection);
       expect(equipmentSection.positions, isEmpty);
+      expect(workPositions.single.quantity, 3);
+
+      for (final deleteCategory in [false, true]) {
+        final extraSection = QuoteSectionDraft(
+          id: newQuoteId(),
+          name: 'Удаляемый раздел',
+          positions: [],
+        );
+        equipmentCategory.sections.add(extraSection);
+        await controller.addCatalogPosition(
+          equipmentCategory,
+          extraSection,
+          _equipmentItem,
+        );
+        expect(workPositions.single.quantity, 4);
+        controller.dirty = false;
+        if (deleteCategory) {
+          controller.removeCategory(equipmentCategory);
+          expect(variant.categories, isNot(contains(equipmentCategory)));
+        } else {
+          controller.removeSection(extraSection);
+          expect(equipmentCategory.sections, isNot(contains(extraSection)));
+        }
+        expect(workPositions.single.quantity, 3);
+        expect(workPositions.single.manualPrice, 150);
+        expect(controller.dirty, isTrue);
+        expect(variant.positions, contains(workPositions.single));
+      }
 
       controller.dispose();
       auth.dispose();
@@ -193,6 +367,24 @@ void main() {
       ..activeTypeId = proposalType.id
       ..activeVariantId = variant.id;
 
+    final fields = _quoteBoard.categories.single.fields.toList();
+    final testBoard = KanbanBoard(
+      id: _quoteBoard.id,
+      code: _quoteBoard.code,
+      name: _quoteBoard.name,
+      specialization: _quoteBoard.specialization,
+      columns: [],
+      transitions: [],
+      categories: [
+        KanbanCategory(
+          categoryId: _quoteBoard.categories.single.categoryId,
+          name: 'Оборудование',
+          sortOrder: 0,
+          fields: fields,
+          sections: _quoteBoard.categories.single.sections,
+        ),
+      ],
+    );
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -202,7 +394,7 @@ void main() {
             child: QuoteEditorPage(
               config: config,
               authController: auth,
-              board: _quoteBoard,
+              board: testBoard,
               controller: controller,
               onBack: () {},
             ),
@@ -214,12 +406,115 @@ void main() {
 
     expect(find.text('Оборудование'), findsOneWidget);
     expect(find.text('Вентиляция'), findsOneWidget);
+    expect(find.text('Наценка'), findsNothing);
+    expect(find.text('Скидка'), findsNothing);
+    expect(find.text('Применить'), findsNothing);
+    for (final codes in [
+      ['markup_value'],
+      ['discount_value'],
+      ['markup_value', 'discount_value'],
+      ['custom_markup'],
+      ['custom_discount'],
+      ['custom_markup', 'custom_discount'],
+    ]) {
+      fields.removeWhere((field) => field.fieldType == 'percent');
+      fields.addAll([
+        for (final code in codes)
+          KanbanField(
+            code: code,
+            label: code.contains('markup') ? 'Наценка' : 'Скидка',
+            fieldType: 'percent',
+            isRequired: false,
+            sortOrder: 10,
+            options: [],
+          ),
+      ]);
+      await controller.positionChanged();
+      await tester.pump();
+      expect(
+        find.text('Наценка'),
+        codes.any((code) => code.contains('markup'))
+            ? findsOneWidget
+            : findsNothing,
+      );
+      expect(
+        find.text('Скидка'),
+        codes.any((code) => code.contains('discount'))
+            ? findsOneWidget
+            : findsNothing,
+      );
+      expect(find.text('Применить'), findsNWidgets(codes.length));
+      final addX = tester.getTopRight(find.byTooltip('Добавить позицию')).dx;
+      final deleteX = tester.getTopLeft(find.byTooltip('Удалить раздел')).dx;
+      for (final label in ['Наценка', 'Скидка', 'Итого']) {
+        if (find.text(label).evaluate().isEmpty) continue;
+        expect(tester.getTopLeft(find.text(label)).dx, greaterThan(addX));
+        expect(tester.getTopRight(find.text(label)).dx, lessThan(deleteX));
+      }
+      expect(tester.takeException(), isNull);
+    }
+    fields.removeWhere((field) => field.fieldType == 'percent');
+    await controller.positionChanged();
+    await tester.pump();
+    expect(
+      tester.getCenter(find.byTooltip('Добавить раздел')).dx,
+      greaterThan(tester.getTopRight(find.text('Оборудование')).dx),
+    );
+    expect(
+      tester.getCenter(find.byTooltip('Добавить позицию')).dx,
+      greaterThan(tester.getTopRight(find.text('Вентиляция')).dx),
+    );
+    expect(
+      tester
+          .getTopLeft(find.widgetWithText(OutlinedButton, 'Добавить категорию'))
+          .dx,
+      lessThan(tester.getTopLeft(find.text('Оборудование')).dx),
+    );
     expect(find.text('Вентилятор'), findsOneWidget);
     expect(find.text('НАИМЕНОВАНИЕ'), findsOneWidget);
     expect(find.text('ЦЕНА'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('Закупка')).dx,
+      greaterThan(tester.getTopRight(find.byTooltip('Добавить раздел')).dx),
+    );
+    expect(
+      tester.getTopRight(find.text('Розница')).dx,
+      lessThan(tester.getTopLeft(find.byTooltip('Удалить категорию')).dx),
+    );
     expect(find.text('ГРУППА'), findsNothing);
     expect(find.text('СВЯЗАННЫЕ РАБОТЫ'), findsNothing);
+    final variantSummary = tester.getTopLeft(find.text('Сводка варианта'));
+    final typeSummary = tester.getTopLeft(find.text('Сводка типа'));
+    expect(typeSummary.dy, variantSummary.dy);
+    expect(typeSummary.dx, greaterThan(variantSummary.dx));
     expect(tester.takeException(), isNull);
+    await tester.tap(find.byTooltip('Добавить позицию'));
+    await tester.pumpAndSettle();
+    expect(find.text('Группа товаров'), findsOneWidget);
+    expect(find.text('Сначала выберите группу товаров.'), findsOneWidget);
+    await tester.tap(find.text('Группа товаров'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Вентиляторы').last);
+    await tester.pumpAndSettle();
+    final pickerSearch = find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.byType(TextField),
+    );
+    await tester.enterText(pickerSearch, 'вент');
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pumpAndSettle();
+    expect(_CatalogGatewayWithRelations.lastSearch, 'вент');
+    expect(_CatalogGatewayWithRelations.lastGroupId, 'equipment-group');
+    await tester.enterText(pickerSearch, '');
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pumpAndSettle();
+    expect(_CatalogGatewayWithRelations.lastSearch, '');
+    await tester.tap(find.text('Закрыть'));
+    await tester.pumpAndSettle();
+    section.positions.single.marking = 'changed-by-rule';
+    await controller.positionChanged();
+    await tester.pump();
+    expect(find.text('changed-by-rule'), findsOneWidget);
 
     final nameColumn = find.byKey(const ValueKey('quote-column-name')).first;
     final resizeHandle = find
@@ -235,6 +530,28 @@ void main() {
     await tester.pump();
     final persistedWidth = widthAfterExpansion - 70;
     expect(tester.getSize(nameColumn).width, closeTo(persistedWidth, 1));
+    for (final code in ['base_price', 'unit']) {
+      final before = {
+        for (final field in fields)
+          field.code: tester
+              .getSize(find.byKey(ValueKey('quote-column-${field.code}')).first)
+              .width,
+      };
+      await tester.drag(
+        find.byKey(ValueKey('quote-column-resize-$code')).first,
+        const Offset(-25, 0),
+      );
+      await tester.pump();
+      for (final field in fields) {
+        final width = tester
+            .getSize(find.byKey(ValueKey('quote-column-${field.code}')).first)
+            .width;
+        expect(
+          width,
+          closeTo(before[field.code]! - (field.code == code ? 25 : 0), 1),
+        );
+      }
+    }
     expect(
       find.byKey(
         const ValueKey('quote-section-scrollbar-quote-equipment-section'),
@@ -254,7 +571,7 @@ void main() {
             child: QuoteEditorPage(
               config: config,
               authController: auth,
-              board: _quoteBoard,
+              board: testBoard,
               controller: controller,
               onBack: () {},
             ),
@@ -270,6 +587,54 @@ void main() {
           .width,
       closeTo(persistedWidth, 1),
     );
+    expect(tester.takeException(), isNull);
+
+    final originalType = controller.activeType!;
+    await tester.tap(find.text('Добавить вариант'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Удалить вариант').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Отмена'));
+    await tester.pumpAndSettle();
+    expect(originalType.variants, hasLength(2));
+    await tester.tap(find.byTooltip('Удалить вариант').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Удалить'));
+    await tester.pumpAndSettle();
+    expect(originalType.variants, hasLength(1));
+    expect(find.byTooltip('Нельзя удалить последний вариант'), findsOneWidget);
+    await tester.tap(find.text('Добавить тип'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Удалить тип').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Удалить'));
+    await tester.pumpAndSettle();
+    expect(controller.activeType, same(originalType));
+    expect(find.byTooltip('Нельзя удалить последний тип'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.byTooltip('Удалить раздел'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Отмена'));
+    await tester.pumpAndSettle();
+    expect(category.sections, contains(section));
+    await tester.tap(find.byTooltip('Удалить раздел'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Удалить'));
+    await tester.pumpAndSettle();
+    expect(category.sections, isEmpty);
+    expect(variant.systemSummary.total, 0);
+    await tester.tap(find.byTooltip('Удалить категорию'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Отмена'));
+    await tester.pumpAndSettle();
+    expect(variant.categories, contains(category));
+    await tester.tap(find.byTooltip('Удалить категорию'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Удалить'));
+    await tester.pumpAndSettle();
+    expect(variant.categories, isEmpty);
+    expect(controller.dirty, isTrue);
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox.shrink());
@@ -559,7 +924,9 @@ const _equipmentSection = CatalogSection(
   id: 'equipment-section',
   name: 'Вентиляция',
   sortOrder: 0,
-  groups: [],
+  groups: [
+    CatalogGroup(id: 'equipment-group', name: 'Вентиляторы', sortOrder: 0),
+  ],
 );
 
 const _workSection = CatalogSection(
@@ -657,6 +1024,8 @@ const _workItemId = 'work-item';
 
 final class _CatalogGatewayWithRelations
     implements CatalogGateway, CatalogRelationGateway {
+  static String? lastSearch;
+  static String? lastGroupId;
   @override
   Future<List<CatalogItemRelation>> getRelations(
     String accessToken,
@@ -684,11 +1053,16 @@ final class _CatalogGatewayWithRelations
     required String accessToken,
     String? categoryId,
     String? sectionId,
+    String? groupId,
     String? status,
     String? search,
     required int page,
     required int pageSize,
-  }) async => const CatalogItemPage(items: [], page: 1, pageSize: 50, total: 0);
+  }) async {
+    lastSearch = search;
+    lastGroupId = groupId;
+    return const CatalogItemPage(items: [], page: 1, pageSize: 50, total: 0);
+  }
 
   @override
   Future<List<CatalogRelationCandidate>> searchRelationCandidates({

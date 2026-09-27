@@ -659,6 +659,8 @@ internal sealed class PostgresKanbanService(
         };
         if (!valid)
             throw Invalid("kanban_card_field_type_invalid", $"Поле «{field.Label}» имеет неверный тип значения.");
+        if (field.FieldType is "money" or "calculated_money" && value.TryGetDecimal(out var amount) && amount < 0)
+            throw Invalid("kanban_card_money_negative", $"Поле «{field.Label}» не может быть отрицательным.");
         if (value.ValueKind == JsonValueKind.String && (value.GetString()?.Length ?? 0) > 4000)
             throw Invalid("kanban_card_field_too_long", $"Поле «{field.Label}» не должно превышать 4000 символов.");
     }
@@ -1022,7 +1024,9 @@ internal sealed class PostgresKanbanService(
         AddParameter(command, "actor", actor);
         AddParameter(command, "card_id", cardId);
         AddParameter(command, "action", action);
-        AddParameter(command, "diff", JsonSerializer.Serialize(new { before, after }, JsonOptions));
+        var diff = AuditChanges.Serialize(before, after);
+        if (diff is null) return;
+        AddParameter(command, "diff", diff);
         await command.ExecuteNonQueryAsync(token);
     }
 

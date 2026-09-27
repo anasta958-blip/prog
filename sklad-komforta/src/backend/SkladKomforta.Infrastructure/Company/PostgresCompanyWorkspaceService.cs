@@ -647,10 +647,12 @@ internal sealed class PostgresCompanyWorkspaceService(
 
     private static async Task WriteAuditAsync(DbConnection connection, DbTransaction transaction, Guid actor, string entityType, Guid entityId, string action, object? before, object? after, CancellationToken token)
     {
+        var diff = AuditChanges.Serialize(before, after);
+        if (diff is null) return;
         await using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "INSERT INTO audit_log (actor_user_id, entity_type, entity_id, action, diff) VALUES (@actor, @type, @id, @action, CAST(@diff AS jsonb))";
         Add(command, "actor", actor); Add(command, "type", entityType); Add(command, "id", entityId); Add(command, "action", action);
-        Add(command, "diff", JsonSerializer.Serialize(new { before, after }, JsonOptions)); await command.ExecuteNonQueryAsync(token);
+        Add(command, "diff", diff); await command.ExecuteNonQueryAsync(token);
     }
 
     private static string Required(string value, int minimum, int maximum, string code, string message)

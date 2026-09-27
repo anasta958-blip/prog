@@ -4,6 +4,43 @@ import 'package:sklad_komforta_app/features/onboarding/onboarding_field_registry
 import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
 
 void main() {
+  test('занятые поля объединяют записи правил и конвейеров по категории', () {
+    final draft = OrganizationOnboardingDraft.initial();
+    final action = RuleActionDraft(
+      actionType: 'set_field',
+      targetFieldCode: 'total',
+    );
+    final pipeline = MoneyPipelineDraft(
+      categoryClientId: 'a',
+      basePriceFieldCode: 'price',
+      resultFieldCode: 'amount',
+    );
+    draft.moneyPipelines.add(pipeline);
+    draft.rules.add(
+      CalculationRuleDraft(
+        clientId: 'r',
+        name: 'Правило',
+        categoryClientId: 'a',
+        eventType: 'row_calculation',
+        isEnabled: false,
+        actions: [
+          action,
+          RuleActionDraft(
+            actionType: 'set_field_visibility',
+            targetFieldCode: 'visible',
+          ),
+        ],
+      ),
+    );
+    expect(draft.occupiedCalculationFields('a'), {'total', 'amount'});
+    expect(draft.occupiedCalculationFields('a', exceptAction: action), {
+      'amount',
+    });
+    expect(draft.occupiedCalculationFields('a', exceptPipeline: pipeline), {
+      'total',
+    });
+    expect(draft.occupiedCalculationFields('b'), isEmpty);
+  });
   test('юридическое лицо сохраняет собственную ставку НДС', () {
     final entity = LegalEntityModel(
       id: 'entity-1',

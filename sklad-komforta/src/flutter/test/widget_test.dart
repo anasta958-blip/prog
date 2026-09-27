@@ -310,6 +310,204 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('правило не предлагает результат занятого конвейером поля', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 1600);
+    addTearDown(tester.view.reset);
+    final controller = AuthController(
+      config,
+      api: _OfflineAuthGateway(),
+      tokens: _MemoryTokenRepository(),
+    );
+    controller.stage = AuthStage.organization;
+    final draft = OrganizationOnboardingDraft.initial()..currentStep = 5;
+    controller.onboardingDraft = draft;
+    draft.categories.add(
+      CatalogCategoryDraft(
+        clientId: 'equipment',
+        name: 'Оборудование',
+        sections: [],
+        fields: [
+          for (final code in [
+            'price',
+            'pipeline_total',
+            'rule_total',
+            'free_total',
+          ])
+            CatalogFieldDraft(
+              fieldCode: code,
+              label: code,
+              fieldType: 'money',
+              isVisible: true,
+              isRequired: false,
+            ),
+        ],
+      ),
+    );
+    draft.moneyPipelines.add(
+      MoneyPipelineDraft(
+        categoryClientId: 'equipment',
+        basePriceFieldCode: 'price',
+        resultFieldCode: 'pipeline_total',
+      ),
+    );
+    draft.rules.add(
+      CalculationRuleDraft(
+        clientId: 'r',
+        name: 'Копирование',
+        categoryClientId: 'equipment',
+        eventType: 'row_calculation',
+        isEnabled: true,
+        actions: [
+          RuleActionDraft(
+            actionType: 'set_field',
+            targetFieldCode: 'rule_total',
+            sourceFieldCode: 'price',
+          ),
+        ],
+      ),
+    );
+    await tester.pumpWidget(
+      SkladKomfortaApp(
+        config: config,
+        authController: controller,
+        initializeAuthController: false,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Копирование').first);
+    await tester.tap(find.bySemanticsLabel('Развернуть блок').last);
+    await tester.pumpAndSettle();
+    final destination = tester.widget<AppSelectField<String>>(
+      find.byWidgetPredicate(
+        (w) => w is AppSelectField<String> && w.label == 'Изменить поле',
+      ),
+    );
+    expect(
+      destination.options.map((o) => o.value),
+      containsAll(['price', 'rule_total', 'free_total']),
+    );
+    expect(
+      destination.options.map((o) => o.value),
+      isNot(contains('pipeline_total')),
+    );
+    final source = tester.widget<AppSelectField<String>>(
+      find.byWidgetPredicate(
+        (w) => w is AppSelectField<String> && w.label == 'Взять значение из',
+      ),
+    );
+    expect(source.options.map((o) => o.value), contains('pipeline_total'));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+  });
+
+  testWidgets('компоненты формулы меняют порядок без пересоздания', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 1600);
+    addTearDown(tester.view.reset);
+    final controller = AuthController(
+      config,
+      api: _OfflineAuthGateway(),
+      tokens: _MemoryTokenRepository(),
+    );
+    final formula = FormulaDraft(
+      tokens: [
+        FormulaTokenDraft(tokenType: 'constant', constantValue: 10),
+        FormulaTokenDraft(tokenType: 'operator', operator: 'subtract'),
+        FormulaTokenDraft(tokenType: 'constant', constantValue: 2),
+      ],
+    );
+    controller.stage = AuthStage.organization;
+    controller.onboardingDraft = OrganizationOnboardingDraft.initial()
+      ..currentStep = 5;
+    controller.onboardingDraft!.categories.add(
+      CatalogCategoryDraft(
+        clientId: 'equipment',
+        name: 'Оборудование',
+        sections: [],
+        fields: [
+          CatalogFieldDraft(
+            fieldCode: 'custom_total',
+            label: 'Расчёт',
+            fieldType: 'calculated_money',
+            isVisible: true,
+            isRequired: false,
+          ),
+        ],
+      ),
+    );
+    controller.onboardingDraft!.rules.add(
+      CalculationRuleDraft(
+        clientId: 'formula-test',
+        name: 'Формула для проверки',
+        categoryClientId: 'equipment',
+        eventType: 'row_calculation',
+        isEnabled: true,
+        conditions: [],
+        actions: [
+          RuleActionDraft(
+            actionType: 'calculate_field',
+            targetFieldCode: 'custom_total',
+            formula: formula,
+          ),
+        ],
+      ),
+    );
+    await tester.pumpWidget(
+      SkladKomfortaApp(
+        config: config,
+        authController: controller,
+        initializeAuthController: false,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Формула для проверки').first);
+    await tester.tap(find.bySemanticsLabel('Развернуть блок').last);
+    await tester.pumpAndSettle();
+    final list = find.byWidgetPredicate(
+      (widget) =>
+          widget is ReorderableListView &&
+          widget.scrollDirection == Axis.horizontal,
+    );
+    expect(list, findsOneWidget);
+    final handles = find.descendant(
+      of: list,
+      matching: find.byIcon(Icons.drag_indicator),
+    );
+    await tester.ensureVisible(handles.first);
+    await tester.pumpAndSettle();
+    final gesture = await tester.startGesture(tester.getCenter(handles.first));
+    await gesture.moveBy(const Offset(20, 0));
+    await tester.pump();
+    await gesture.moveBy(const Offset(230, 0));
+    await tester.pump(const Duration(milliseconds: 300));
+    await gesture.moveBy(const Offset(100, 0));
+    await tester.pump(const Duration(milliseconds: 300));
+    await gesture.up();
+    await tester.pumpAndSettle();
+    final ten = find.descendant(of: list, matching: find.text('10'));
+    final two = find.descendant(of: list, matching: find.text('2'));
+    expect(tester.getCenter(ten).dx, greaterThan(tester.getCenter(two).dx));
+    await tester.tap(
+      find
+          .descendant(
+            of: list,
+            matching: find.byTooltip('Удалить компонент формулы'),
+          )
+          .last,
+    );
+    await tester.pumpAndSettle();
+    expect(ten, findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+  });
+
   testWidgets('настроенный канбан сворачивается без показа технического кода', (
     tester,
   ) async {
@@ -732,6 +930,7 @@ final class _WidgetCatalogGateway implements CatalogGateway {
     required String accessToken,
     String? categoryId,
     String? sectionId,
+    String? groupId,
     String? status,
     String? search,
     required int page,

@@ -553,10 +553,32 @@ internal sealed class PostgresQuoteService(
                             var categoryClientId = category.CatalogCategoryId.HasValue
                                 ? runtime.CategoryClientIds.GetValueOrDefault(category.CatalogCategoryId.Value)
                                 : null;
-                            var calculation = categoryClientId is null
+                            if (categoryClientId is not null && position.Values is not null &&
+                                runtime.MoneyFields.TryGetValue(categoryClientId, out var moneyFields))
+                            {
+                                foreach (var fieldCode in moneyFields)
+                                    if (position.Values.TryGetValue(fieldCode, out var value) &&
+                                        value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out var amount) && amount < 0)
+                                        throw new IdentityException(400, "quote_money_negative",
+                                            $"Денежное поле «{fieldCode}» не может быть отрицательным.");
+                            }
+                            QuoteConfiguredCalculationResult? calculation;
+                            try
+                            {
+                            calculation = categoryClientId is null
                                 ? null
                                 : QuoteConfiguredCalculationEngine.Calculate(
-                                    position, categoryClientId, runtime.Rules, runtime.Pipelines);
+                                    position, categoryClientId, runtime.Rules, runtime.Pipelines,
+                                    runtime.PercentFields.GetValueOrDefault(categoryClientId));
+                            }
+                            catch (IdentityException error) when (error.Code == "calculation_value_missing")
+                            {
+                                var message = error.Message;
+                                if (categoryClientId is not null && runtime.FieldLabels.TryGetValue(categoryClientId, out var labels))
+                                    foreach (var field in labels)
+                                        message = message.Replace($"«{field.Key}»", $"«{field.Value}»", StringComparison.Ordinal);
+                                throw new IdentityException(error.StatusCode, error.Code, $"Позиция «{position.Name}»: {message}");
+                            }
                             var legacyCalculation = calculation is null
                                 ? QuoteCalculationEngine.Calculate(position)
                                 : null;
@@ -658,18 +680,34 @@ internal sealed class PostgresQuoteService(
         command.CommandText = "SELECT payload FROM onboarding_draft WHERE singleton";
         var payload = await command.ExecuteScalarAsync(token) as string;
         if (string.IsNullOrWhiteSpace(payload))
-            return new QuoteCalculationConfiguration(categoryClientIds, [], []);
+            return new QuoteCalculationConfiguration(categoryClientIds, [], [], new Dictionary<string, IReadOnlySet<string>>(), new Dictionary<string, IReadOnlySet<string>>(), new Dictionary<string, IReadOnlyDictionary<string, string>>());
         var draft = JsonSerializer.Deserialize<OrganizationOnboardingDraft>(payload, JsonOptions);
         return new QuoteCalculationConfiguration(
             categoryClientIds,
             draft?.Rules?.Where(item => item.IsEnabled).ToArray() ?? [],
-            draft?.MoneyPipelines?.ToArray() ?? []);
+            draft?.MoneyPipelines?.ToArray() ?? [],
+            draft?.Categories.ToDictionary(category => category.ClientId,
+                category => (IReadOnlySet<string>)category.Fields
+                    .Where(field => OnboardingFieldRegistry.FieldTypeOf(field) == "percent")
+                    .Select(field => field.FieldCode).ToHashSet(StringComparer.Ordinal))
+                ?? new Dictionary<string, IReadOnlySet<string>>(),
+            draft?.Categories.ToDictionary(category => category.ClientId,
+                category => (IReadOnlySet<string>)category.Fields
+                    .Where(field => OnboardingFieldRegistry.FieldTypeOf(field) == "money")
+                    .Select(field => field.FieldCode).ToHashSet(StringComparer.Ordinal))
+                ?? new Dictionary<string, IReadOnlySet<string>>(),
+            draft?.Categories.ToDictionary(category => category.ClientId,
+                category => (IReadOnlyDictionary<string, string>)category.Fields.ToDictionary(field => field.FieldCode, OnboardingFieldRegistry.LabelOf))
+                ?? new Dictionary<string, IReadOnlyDictionary<string, string>>());
     }
 
     private sealed record QuoteCalculationConfiguration(
         IReadOnlyDictionary<Guid, string> CategoryClientIds,
         IReadOnlyList<CalculationRuleDraft> Rules,
-        IReadOnlyList<MoneyPipelineDraft> Pipelines);
+        IReadOnlyList<MoneyPipelineDraft> Pipelines,
+        IReadOnlyDictionary<string, IReadOnlySet<string>> PercentFields,
+        IReadOnlyDictionary<string, IReadOnlySet<string>> MoneyFields,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> FieldLabels);
 
     private static async Task ExecuteAsync(
         DbConnection connection,
@@ -704,15 +742,14 @@ internal sealed class PostgresQuoteService(
         Add(command, "actor", actorUserId);
         Add(command, "quote_id", quoteId);
         Add(command, "action", action);
-        Add(command, "diff", JsonSerializer.Serialize(new
-        {
-            before = before is null ? null : AuditSnapshot(before),
-            after = AuditSnapshot(after),
-        }, JsonOptions));
+        var diff = AuditChanges.Serialize(
+            before is null ? null : AuditSnapshot(before), AuditSnapshot(after));
+        if (diff is null) return;
+        Add(command, "diff", diff);
         await command.ExecuteNonQueryAsync(token);
     }
 
-    /// <summary>Оставляет в аудите шапку и цены, не копируя весь динамический JSON.</summary>
+    /// <summary>Сохраняет бизнес-данные без технических временных меток.</summary>
     private static object AuditSnapshot(QuoteDetails quote) => new
     {
         quote.QuoteKind,
@@ -722,33 +759,8 @@ internal sealed class PostgresQuoteService(
         quote.ManagerUserId,
         quote.SalesHeadUserId,
         quote.SelectionMode,
-        ProposalTypes = quote.ProposalTypes.Select(type => new
-        {
-            type.Id,
-            type.Name,
-            type.SelectedVariantId,
-            Variants = type.Variants.Select(variant => new
-            {
-                variant.Id,
-                variant.Name,
-                variant.VatRate,
-                Positions = variant.Categories.SelectMany(category => category.Sections)
-                    .SelectMany(section => section.Positions)
-                    .Select(position => new
-                    {
-                        position.Id,
-                        position.CatalogItemId,
-                        position.Quantity,
-                        position.PurchasePrice,
-                        position.BasePrice,
-                        position.ManualPrice,
-                        position.MarkupPercent,
-                        position.DiscountPercent,
-                        position.LineTotal,
-                        position.ExcludeFromTotals,
-                    }),
-            }),
-        }),
+        quote.AdditionalInformation,
+        quote.ProposalTypes,
     };
 
     private static object Db(object? value) => value ?? DBNull.Value;

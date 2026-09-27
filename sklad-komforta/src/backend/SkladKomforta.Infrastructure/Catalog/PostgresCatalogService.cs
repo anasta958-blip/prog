@@ -87,6 +87,7 @@ internal sealed class PostgresCatalogService(
             WHERE item.deleted_at IS NULL
               AND (@category_id IS NULL OR item.category_id = @category_id)
               AND (@section_id IS NULL OR item.section_id = @section_id)
+              AND (@group_id IS NULL OR item.group_id = @group_id)
               AND (@status = '' OR item.status = @status)
               AND (@search = '' OR item.name ILIKE '%' || @search || '%'
                    OR item.marking ILIKE '%' || @search || '%')
@@ -95,6 +96,7 @@ internal sealed class PostgresCatalogService(
             """;
         AddGuidParameter(command, "category_id", query.CategoryId);
         AddGuidParameter(command, "section_id", query.SectionId);
+        AddGuidParameter(command, "group_id", query.GroupId);
         AddParameter(command, "status", status ?? string.Empty);
         AddParameter(command, "search", search);
         AddParameter(command, "limit", pageSize);
@@ -652,14 +654,63 @@ internal sealed class PostgresCatalogService(
             throw Invalid("catalog_bulk_size_invalid", "Выберите от 1 до 500 карточек.");
         var action = request.Action.Trim().ToLowerInvariant();
         var status = action == "set_status" ? NormalizeStatus(request.Status, false) : null;
-        if (action is not ("set_status" or "delete"))
+        if (action is not ("set_status" or "delete" or "add_relation" or "remove_relation"))
             throw Invalid("catalog_bulk_action_invalid", "Неизвестная массовая операция.");
 
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         var before = new List<CatalogItemSummary>(ids.Length);
+        // Lock in a stable order so concurrent bulk edits cannot overwrite links.
+        await using (var locking = connection.CreateCommand())
+        {
+            locking.Transaction = transaction;
+            locking.CommandText = "SELECT id FROM catalog_items WHERE id = ANY(@ids) ORDER BY id FOR UPDATE";
+            AddParameter(locking, "ids", ids);
+            await using var reader = await locking.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken)) { }
+        }
         foreach (var id in ids)
             before.Add(await ReadItemAsync(connection, transaction, id, cancellationToken));
+
+        if (action is "add_relation" or "remove_relation")
+        {
+            if (request.DependencyId is not { } dependencyId || request.SourceItemId is not { } sourceId)
+                throw Invalid("catalog_relation_invalid", "Выберите зависимость и связанную карточку.");
+            var relation = new SaveCatalogItemRelationRequest(dependencyId, sourceId);
+            var changed = 0;
+            foreach (var item in before)
+            {
+                await ValidateRelationAsync(connection, transaction, item.CategoryId, relation, cancellationToken);
+                var links = await ReadRelationsAsync(connection, transaction, item.Id, cancellationToken);
+                await using var edit = connection.CreateCommand();
+                edit.Transaction = transaction;
+                edit.CommandText = action == "add_relation"
+                    ? """
+                        INSERT INTO catalog_item_relations
+                            (dependency_id, target_item_id, source_item_id, sort_order, created_by, updated_by)
+                        SELECT @dependency, @target, @source,
+                            COALESCE(MAX(sort_order), -1) + 1, @actor, @actor
+                        FROM catalog_item_relations WHERE target_item_id = @target
+                        ON CONFLICT DO NOTHING
+                        """
+                    : """
+                        DELETE FROM catalog_item_relations
+                        WHERE dependency_id = @dependency AND target_item_id = @target AND source_item_id = @source
+                        """;
+                AddParameter(edit, "dependency", dependencyId);
+                AddParameter(edit, "target", item.Id);
+                AddParameter(edit, "source", sourceId);
+                if (action == "add_relation") AddParameter(edit, "actor", actorUserId);
+                if (await edit.ExecuteNonQueryAsync(cancellationToken) > 0)
+                {
+                    changed++;
+                    var afterLinks = await ReadRelationsAsync(connection, transaction, item.Id, cancellationToken);
+                    await WriteRelationAuditAsync(connection, transaction, actorUserId, item.Id, links, afterLinks, cancellationToken);
+                }
+            }
+            await transaction.CommitAsync(cancellationToken);
+            return new CatalogBulkResult(ids.Length, changed);
+        }
 
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -904,6 +955,8 @@ internal sealed class PostgresCatalogService(
         };
         if (!valid)
             throw Invalid("catalog_field_type_invalid", $"Поле «{field.Label}» имеет неверный тип значения.");
+        if (field.FieldType == "money" && TryDecimal(value, out var amount) && amount < 0)
+            throw Invalid("catalog_money_negative", $"Поле «{field.Label}» не может быть отрицательным.");
         if (code == "base_price" && TryDecimal(value, out var price) && !CatalogItemRules.IsValidPrice(price))
             throw Invalid("catalog_price_invalid", "Цена товара должна быть больше нуля.");
     }
@@ -1173,7 +1226,9 @@ internal sealed class PostgresCatalogService(
             """;
         AddParameter(command, "actor", actor);
         AddParameter(command, "item_id", itemId);
-        AddParameter(command, "diff", JsonSerializer.Serialize(new { before, after }, JsonOptions));
+        var diff = AuditChanges.Serialize(before, after);
+        if (diff is null) return;
+        AddParameter(command, "diff", diff);
         await command.ExecuteNonQueryAsync(token);
     }
 
@@ -1196,7 +1251,9 @@ internal sealed class PostgresCatalogService(
         AddParameter(command, "actor", actor);
         AddParameter(command, "item_id", itemId);
         AddParameter(command, "action", action);
-        AddParameter(command, "diff", JsonSerializer.Serialize(new { before, after }, JsonOptions));
+        var diff = AuditChanges.Serialize(before, after);
+        if (diff is null) return;
+        AddParameter(command, "diff", diff);
         await command.ExecuteNonQueryAsync(token);
     }
 

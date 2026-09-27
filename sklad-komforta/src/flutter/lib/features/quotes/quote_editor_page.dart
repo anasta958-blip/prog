@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:file_picker/file_picker.dart';
@@ -10,12 +11,14 @@ import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/core/models/workflow_specialization.dart';
 import 'package:sklad_komforta_app/core/network/api_exception.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
+import 'package:sklad_komforta_app/core/widgets/app_number_field.dart';
 import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_models.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_models.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_controller.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_client_access_api.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_models.dart';
+import 'package:sklad_komforta_app/features/quotes/quote_local_draft.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_preview_page.dart';
 
 const _background = Color(0xFF0B1119);
@@ -62,6 +65,9 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
   late final _ColumnWidthStore columnWidthStore;
   late final QuoteClientAccessApi clientAccessApi;
   bool creatingClientAccess = false;
+  QuoteLocalDraft? localDraft;
+  bool draftReady = false;
+  bool hadLocalChanges = false;
 
   @override
   void initState() {
@@ -77,15 +83,86 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
         widget.board.id,
       ),
     );
-    controller.initialize(
+    if (ownsController) {
+      localDraft = QuoteLocalDraft(
+        '${_columnWidthStorageKey(widget.authController.accessToken, widget.board.id)}'
+        '.draft.${widget.card?.id ?? 'new.${widget.creationColumnId}.${widget.createKind?.apiValue}'}',
+      );
+    }
+    _initializeEditor();
+  }
+
+  Future<void> _initializeEditor() async {
+    await controller.initialize(
       board: widget.board,
       card: widget.card,
       createKind: widget.createKind,
     );
+    if (!mounted) return;
+    try {
+      final restored = await localDraft?.read();
+      if (!mounted) return;
+      if (restored != null && controller.draft != null) {
+        controller.draft = restored;
+        controller.updateDocument((_) {});
+        controller.showDraftRestoredMessage();
+        hadLocalChanges = true;
+      }
+    } on Object {
+      controller.error = 'Не удалось прочитать локальный черновик.';
+    }
+    if (!mounted) return;
+    controller.addListener(_persistLocalDraft);
+    setState(() => draftReady = true);
+  }
+
+  void _persistLocalDraft() {
+    final store = localDraft;
+    final draft = controller.draft;
+    if (store == null || draft == null) return;
+    if (controller.dirty) {
+      hadLocalChanges = true;
+      unawaited(_writeLocalDraft());
+    } else if (hadLocalChanges) {
+      hadLocalChanges = false;
+      unawaited(
+        store.clear().catchError((Object _) {
+          if (mounted) {
+            setState(
+              () =>
+                  controller.error = 'Не удалось удалить сохранённый черновик.',
+            );
+          }
+        }),
+      );
+      final cardId = controller.persistedCardId;
+      if (cardId != null) {
+        final key =
+            '${_columnWidthStorageKey(widget.authController.accessToken, widget.board.id)}.draft.$cardId';
+        if (store.key != key) localDraft = QuoteLocalDraft(key);
+      }
+    }
+  }
+
+  Future<bool> _writeLocalDraft() async {
+    try {
+      final draft = controller.draft;
+      if (draft != null) await localDraft?.write(draft);
+      return true;
+    } on Object {
+      if (mounted) {
+        setState(
+          () => controller.error =
+              'Не удалось сохранить локальный черновик. Не закрывайте редактор.',
+        );
+      }
+      return false;
+    }
   }
 
   @override
   void dispose() {
+    controller.removeListener(_persistLocalDraft);
     variantScrollController.dispose();
     columnWidthStore.dispose();
     clientAccessApi.close();
@@ -97,7 +174,8 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: controller,
     builder: (context, _) {
-      if (controller.loading && controller.draft == null) {
+      if ((ownsController && !draftReady) ||
+          (controller.loading && controller.draft == null)) {
         return const ColoredBox(
           color: _background,
           child: Center(child: CircularProgressIndicator()),
@@ -180,7 +258,12 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
     }
 
     final variant = controller.activeVariant;
-    final summaryWidth = constraints.maxWidth < 1180 ? 230.0 : 270.0;
+    final horizontalSummaries = constraints.maxWidth >= 1400;
+    final summaryWidth = horizontalSummaries
+        ? 552.0
+        : constraints.maxWidth < 1180
+        ? 230.0
+        : 270.0;
     return Column(
       children: [
         Padding(
@@ -211,6 +294,7 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
                       child: _SummaryColumn(
                         controller: controller,
                         variant: variant,
+                        horizontal: horizontalSummaries,
                       ),
                     ),
                   ],
@@ -298,7 +382,7 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
     } on Object {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Не удалось сохранить PDF.')),
+        const AppSnackBar(content: Text('Не удалось сохранить PDF.')),
       );
     }
   }
@@ -306,7 +390,7 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
   Future<void> _manageClientAccess() async {
     if (controller.dirty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        const AppSnackBar(
           content: Text(
             'Сначала сохраните изменения. Ссылка открывает только сохранённую версию предложения.',
           ),
@@ -317,7 +401,9 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
     final cardId = controller.persistedCardId ?? widget.card?.id;
     if (cardId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Сначала сохраните новое предложение.')),
+        const AppSnackBar(
+          content: Text('Сначала сохраните новое предложение.'),
+        ),
       );
       return;
     }
@@ -325,11 +411,8 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
     setState(() => creatingClientAccess = true);
     try {
       final status = await widget.authController.executeAuthorized(
-        (token) => clientAccessApi.getLinkStatus(
-          token,
-          widget.board.id,
-          cardId,
-        ),
+        (token) =>
+            clientAccessApi.getLinkStatus(token, widget.board.id, cardId),
       );
       if (!mounted) return;
       await showDialog<void>(
@@ -346,11 +429,8 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
             ),
           ),
           onRevoke: () => widget.authController.executeAuthorized(
-            (token) => clientAccessApi.revokeLink(
-              token,
-              widget.board.id,
-              cardId,
-            ),
+            (token) =>
+                clientAccessApi.revokeLink(token, widget.board.id, cardId),
           ),
         ),
       );
@@ -358,12 +438,12 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text(exception.message)));
+        ).showSnackBar(AppSnackBar(content: Text(exception.message)));
       }
     } on Object {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          const AppSnackBar(
             content: Text('Не удалось открыть управление клиентской ссылкой.'),
           ),
         );
@@ -409,26 +489,41 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
       widget.onBack();
       return;
     }
-    final leave = await showDialog<bool>(
+    final leave = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Есть несохранённые изменения'),
         content: const Text(
-          'Если выйти сейчас, изменения редактора не попадут на сервер.',
+          'Изменения останутся в локальном черновике на этом устройстве. Серверная версия изменится только после нажатия «Сохранить».',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(context),
             child: const Text('Остаться'),
           ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'discard'),
+            child: const Text('Удалить черновик и выйти'),
+          ),
           FilledButton.tonal(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Выйти без сохранения'),
+            onPressed: () => Navigator.pop(context, 'draft'),
+            child: const Text('Сохранить черновик и выйти'),
           ),
         ],
       ),
     );
-    if (leave == true) widget.onBack();
+    if (leave == 'discard') {
+      try {
+        await localDraft?.clear();
+        if (mounted) widget.onBack();
+      } on Object {
+        if (mounted) {
+          setState(() => controller.error = 'Не удалось удалить черновик.');
+        }
+      }
+    } else if (leave == 'draft' && await _writeLocalDraft() && mounted) {
+      widget.onBack();
+    }
   }
 
   Future<void> _addCategory() async {
@@ -523,10 +618,6 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
   ) async {
     final categoryId = category.catalogCategoryId;
     if (categoryId == null) return;
-    await controller.searchCatalog(
-      categoryId: categoryId,
-      sectionId: section.catalogSectionId,
-    );
     if (!mounted) return;
     final item = await showDialog<CatalogItem>(
       context: context,
@@ -770,7 +861,8 @@ final class _ClientAccessDialogState extends State<_ClientAccessDialog> {
             _ClientAccessValue(
               label: 'Пароль',
               value: access.password,
-              onCopy: () => _copy(context, access.password, 'Пароль скопирован'),
+              onCopy: () =>
+                  _copy(context, access.password, 'Пароль скопирован'),
             ),
             const SizedBox(height: 10),
             const Text(
@@ -794,13 +886,23 @@ final class _ClientAccessDialogState extends State<_ClientAccessDialog> {
               const SizedBox(height: 10),
               const Text(
                 'При создании новой ссылки текущая ссылка и открытая по ней клиентская сессия будут отозваны.',
-                style: TextStyle(color: Color(0xFFE6B86D), fontSize: 12, height: 1.4),
+                style: TextStyle(
+                  color: Color(0xFFE6B86D),
+                  fontSize: 12,
+                  height: 1.4,
+                ),
               ),
             ],
           ],
           if (error case final message?) ...[
             const SizedBox(height: 12),
-            Text(message, style: const TextStyle(color: Color(0xFFFF718A))),
+            AutoDismissNotice(
+              message: message,
+              child: Text(
+                message,
+                style: const TextStyle(color: Color(0xFFFF718A)),
+              ),
+            ),
           ],
         ],
       ),
@@ -850,7 +952,9 @@ final class _ClientAccessDialogState extends State<_ClientAccessDialog> {
     } on ApiException catch (exception) {
       if (mounted) setState(() => error = exception.message);
     } on Object {
-      if (mounted) setState(() => error = 'Не удалось создать клиентскую ссылку.');
+      if (mounted) {
+        setState(() => error = 'Не удалось создать клиентскую ссылку.');
+      }
     } finally {
       if (mounted) setState(() => loading = false);
     }
@@ -895,7 +999,9 @@ final class _ClientAccessDialogState extends State<_ClientAccessDialog> {
     } on ApiException catch (exception) {
       if (mounted) setState(() => error = exception.message);
     } on Object {
-      if (mounted) setState(() => error = 'Не удалось отозвать клиентскую ссылку.');
+      if (mounted) {
+        setState(() => error = 'Не удалось отозвать клиентскую ссылку.');
+      }
     } finally {
       if (mounted) setState(() => loading = false);
     }
@@ -916,7 +1022,7 @@ final class _ClientAccessDialogState extends State<_ClientAccessDialog> {
     if (!context.mounted) return;
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    ).showSnackBar(AppSnackBar(content: Text(message)));
   }
 }
 
@@ -932,9 +1038,7 @@ final class _ClientAccessStatusPanel extends StatelessWidget {
           ? const Color(0xFF102A23)
           : const Color(0xFF151E2A),
       border: Border.all(
-        color: status.isActive
-            ? const Color(0xFF28674F)
-            : _border,
+        color: status.isActive ? const Color(0xFF28674F) : _border,
       ),
       borderRadius: BorderRadius.circular(12),
     ),
@@ -1209,6 +1313,20 @@ final class _TypeTabs extends StatelessWidget {
                   ? 'Выбран клиентом'
                   : null,
               onPressed: () => controller.selectType(type.id),
+              deleteTooltip: controller.draft!.proposalTypes.length <= 1
+                  ? 'Нельзя удалить последний тип'
+                  : 'Удалить тип',
+              onDelete:
+                  controller.saving ||
+                      controller.draft!.proposalTypes.length <= 1
+                  ? null
+                  : () => _confirmTabRemoval(
+                      context,
+                      title: 'Удалить тип «${type.name}»?',
+                      content:
+                          'Все варианты и позиции этого типа будут удалены из предложения.',
+                      onConfirmed: () => controller.removeType(type.id),
+                    ),
               onRename: () => _rename(context, type.name, (value) {
                 type.name = value;
                 controller.positionChanged();
@@ -1256,6 +1374,19 @@ final class _VariantTabs extends StatelessWidget {
                           ? 'Выбран клиентом'
                           : null,
                       onPressed: () => controller.selectVariant(variant.id),
+                      deleteTooltip: type.variants.length <= 1
+                          ? 'Нельзя удалить последний вариант'
+                          : 'Удалить вариант',
+                      onDelete: controller.saving || type.variants.length <= 1
+                          ? null
+                          : () => _confirmTabRemoval(
+                              context,
+                              title: 'Удалить вариант «${variant.name}»?',
+                              content:
+                                  'Все категории, разделы и позиции этого варианта будут удалены из предложения.',
+                              onConfirmed: () =>
+                                  controller.removeVariant(type.id, variant.id),
+                            ),
                       onRename: () => _rename(context, variant.name, (value) {
                         variant.name = value;
                         controller.positionChanged();
@@ -1355,7 +1486,7 @@ final class _VariantContent extends StatelessWidget {
             ),
           ),
       Align(
-        alignment: Alignment.centerRight,
+        alignment: Alignment.centerLeft,
         child: OutlinedButton.icon(
           onPressed: onAddCategory,
           icon: const Icon(Icons.add),
@@ -1413,19 +1544,44 @@ final class _CategoryBlock extends StatelessWidget {
                   const Icon(Icons.folder_outlined, size: 18, color: _accent),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Text(
-                      category.name,
-                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    child: Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            category.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Добавить раздел',
+                          onPressed: onAddSection,
+                          icon: const Icon(Icons.create_new_folder_outlined),
+                        ),
+                        const SizedBox(width: 8),
+                        _MoneyLabel('Закупка', category.purchaseTotal),
+                        const SizedBox(width: 16),
+                        _MoneyLabel('Розница', category.clientTotal),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          tooltip: 'Удалить категорию',
+                          color: const Color(0xFFFF7676),
+                          icon: const Icon(Icons.delete_outline, size: 20),
+                          onPressed: controller.saving
+                              ? null
+                              : () => _confirmTabRemoval(
+                                  context,
+                                  title:
+                                      'Удалить категорию «${category.name}»?',
+                                  content:
+                                      'Категория и все её разделы с позициями будут удалены из этого варианта. Связанные автоматические позиции будут пересчитаны. Каталог товаров не изменится.',
+                                  onConfirmed: () =>
+                                      controller.removeCategory(category),
+                                ),
+                        ),
+                      ],
                     ),
-                  ),
-                  _MoneyLabel('Закупка', category.purchaseTotal),
-                  const SizedBox(width: 16),
-                  _MoneyLabel('Розница', category.clientTotal),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    tooltip: 'Добавить раздел',
-                    onPressed: onAddSection,
-                    icon: const Icon(Icons.create_new_folder_outlined),
                   ),
                 ],
               ),
@@ -1512,6 +1668,7 @@ final class _SectionBlockState extends State<_SectionBlock> {
           decoration: const BoxDecoration(color: Color(0xFF132334)),
           child: _SectionHeader(
             controller: controller,
+            fields: fields,
             section: section,
             expanded: expanded,
             onToggle: onToggle,
@@ -1549,7 +1706,9 @@ final class _SectionBlockState extends State<_SectionBlock> {
                       preferredFieldsWidth > stretchedFieldsWidth
                       ? preferredFieldsWidth
                       : stretchedFieldsWidth;
-                  final widthScale = preferredFieldsWidth > 0
+                  final widthScale =
+                      preferredFieldsWidth > 0 &&
+                          !columnWidthStore.hasCustomWidths(widthScope)
                       ? availableFieldsWidth / preferredFieldsWidth
                       : 1.0;
                   final fieldWidths = [
@@ -1649,6 +1808,7 @@ final class _SectionBlockState extends State<_SectionBlock> {
 final class _SectionHeader extends StatelessWidget {
   const _SectionHeader({
     required this.controller,
+    required this.fields,
     required this.section,
     required this.expanded,
     required this.onToggle,
@@ -1656,15 +1816,32 @@ final class _SectionHeader extends StatelessWidget {
   });
 
   final QuoteController controller;
+  final List<KanbanField> fields;
   final QuoteSectionDraft section;
   final bool expanded;
   final VoidCallback onToggle;
   final VoidCallback onAddPosition;
 
+  KanbanField? _percentField(bool markup) {
+    final code = markup ? 'markup_value' : 'discount_value';
+    final label = markup ? 'наценка' : 'скидка';
+    return fields.where((field) => field.code == code).firstOrNull ??
+        fields
+            .where(
+              (field) =>
+                  const {'percent', 'number'}.contains(field.fieldType) &&
+                  field.label.trim().toLowerCase() == label,
+            )
+            .firstOrNull;
+  }
+
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
+      final markupField = _percentField(true);
+      final discountField = _percentField(false);
       final title = Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
           IconButton(
             visualDensity: VisualDensity.compact,
@@ -1673,7 +1850,7 @@ final class _SectionHeader extends StatelessWidget {
           ),
           const Icon(Icons.folder_open_outlined, size: 17),
           const SizedBox(width: 7),
-          Expanded(
+          Flexible(
             child: Text(
               section.name,
               maxLines: 1,
@@ -1681,12 +1858,11 @@ final class _SectionHeader extends StatelessWidget {
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
           ),
-          if (constraints.maxWidth < 760)
-            IconButton(
-              tooltip: 'Добавить позицию',
-              onPressed: onAddPosition,
-              icon: const Icon(Icons.add_circle_outline),
-            ),
+          IconButton(
+            tooltip: 'Добавить позицию',
+            onPressed: onAddPosition,
+            icon: const Icon(Icons.add_circle_outline),
+          ),
         ],
       );
       final actions = Row(
@@ -1707,27 +1883,48 @@ final class _SectionHeader extends StatelessWidget {
             ),
             const SizedBox(width: 8),
           ],
-          _PercentAction(
-            label: 'Наценка',
-            initialValue: section.markupPercent,
-            onApply: (value) =>
-                controller.applyPercent(section, value: value, markup: true),
-          ),
-          const SizedBox(width: 8),
-          _PercentAction(
-            label: 'Скидка',
-            initialValue: section.discountPercent,
-            onApply: (value) =>
-                controller.applyPercent(section, value: value, markup: false),
-          ),
-          const SizedBox(width: 10),
-          _MoneyLabel('Итого', section.clientTotal),
-          if (constraints.maxWidth >= 760)
-            IconButton(
-              tooltip: 'Добавить позицию',
-              onPressed: onAddPosition,
-              icon: const Icon(Icons.add_circle_outline),
+          if (markupField != null) ...[
+            _PercentAction(
+              label: 'Наценка',
+              initialValue: section.markupPercent,
+              onApply: (value) => controller.applyPercent(
+                section,
+                value: value,
+                markup: true,
+                fieldCode: markupField.code,
+              ),
             ),
+            const SizedBox(width: 8),
+          ],
+          if (discountField != null) ...[
+            _PercentAction(
+              label: 'Скидка',
+              initialValue: section.discountPercent,
+              onApply: (value) => controller.applyPercent(
+                section,
+                value: value,
+                markup: false,
+                fieldCode: discountField.code,
+              ),
+            ),
+            const SizedBox(width: 10),
+          ],
+          _MoneyLabel('Итого', section.clientTotal),
+          const SizedBox(width: 8),
+          IconButton(
+            tooltip: 'Удалить раздел',
+            color: const Color(0xFFFF7676),
+            icon: const Icon(Icons.delete_outline, size: 20),
+            onPressed: controller.saving
+                ? null
+                : () => _confirmTabRemoval(
+                    context,
+                    title: 'Удалить раздел «${section.name}»?',
+                    content:
+                        'Раздел и все его позиции будут удалены из этого варианта. Связанные автоматические позиции будут пересчитаны. Каталог товаров не изменится.',
+                    onConfirmed: () => controller.removeSection(section),
+                  ),
+          ),
         ],
       );
       if (constraints.maxWidth >= 760) {
@@ -1735,7 +1932,8 @@ final class _SectionHeader extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
           child: Row(
             children: [
-              Expanded(child: title),
+              Flexible(child: title),
+              const SizedBox(width: 8),
               actions,
             ],
           ),
@@ -1881,7 +2079,7 @@ final class _HeaderCell extends StatelessWidget {
   );
 }
 
-/// Хранит пользовательские ширины колонок только на время работы редактора.
+/// Сохраняет пользовательские ширины колонок между открытиями редактора.
 /// КП и ПКП используют один экземпляр механизма, а значения синхронизируются
 /// между всеми разделами одной категории без перестроения остальной страницы.
 final class _ColumnWidthStore extends ChangeNotifier {
@@ -1900,6 +2098,8 @@ final class _ColumnWidthStore extends ChangeNotifier {
 
   double widthFor(String scope, String fieldCode, double fallback) =>
       _widths[scope]?[fieldCode] ?? fallback;
+
+  bool hasCustomWidths(String scope) => _widths[scope]?.isNotEmpty == true;
 
   void beginResize({
     required String scope,
@@ -1928,26 +2128,6 @@ final class _ColumnWidthStore extends ChangeNotifier {
     final appliedDelta = resizedWidth - next[session.fieldIndex];
     if (appliedDelta == 0) return;
     next[session.fieldIndex] = resizedWidth;
-
-    // Пока таблица помещается в контейнер, соседние колонки компенсируют
-    // изменение. Поэтому перемещаемая граница следует за курсором без
-    // замедления от повторного пропорционального растягивания всей строки.
-    var remaining = appliedDelta.abs();
-    final neighborIndexes = <int>[
-      for (var index = session.fieldIndex + 1; index < next.length; index++)
-        index,
-      for (var index = session.fieldIndex - 1; index >= 0; index--) index,
-    ];
-    for (final index in neighborIndexes) {
-      if (remaining <= 0) break;
-      final capacity = appliedDelta > 0
-          ? next[index] - _minimumWidth
-          : _maximumWidth - next[index];
-      if (capacity <= 0) continue;
-      final adjustment = capacity < remaining ? capacity : remaining;
-      next[index] += appliedDelta > 0 ? -adjustment : adjustment;
-      remaining -= adjustment;
-    }
 
     session.widths = next;
     _widths[session.scope] = {
@@ -2192,6 +2372,8 @@ final class _PositionFieldCell extends StatelessWidget {
         return _RowNumber(
           value: position.quantity,
           width: width,
+          minimum: 0,
+          minimumExclusive: true,
           onChanged: (value) {
             if (value > 0) position.quantity = value;
             controller.positionChanged(
@@ -2228,11 +2410,10 @@ final class _PositionFieldCell extends StatelessWidget {
           field.code,
         );
       case 'base_price':
-        return _numberCell(
+        return _RowText(
+          _money(position.manualPrice ?? position.basePrice),
           width,
-          position.manualPrice ?? position.basePrice,
-          (value) => position.manualPrice = value,
-          field.code,
+          alignEnd: true,
         );
       case 'discount_value':
         return _numberCell(
@@ -2251,6 +2432,7 @@ final class _PositionFieldCell extends StatelessWidget {
               value: position.excludeFromTotals,
               onChanged: (value) {
                 position.excludeFromTotals = value == true;
+                position.values['_manual_excluded_from_calc'] = value == true;
                 controller.positionChanged(
                   position: position,
                   fieldCode: field.code,
@@ -2339,6 +2521,7 @@ final class _PositionFieldCell extends StatelessWidget {
   ) => _RowNumber(
     value: value ?? 0,
     width: width,
+    minimum: field.fieldType == 'money' ? 0 : null,
     onChanged: (next) {
       assign(next);
       controller.positionChanged(position: position, fieldCode: fieldCode);
@@ -2477,43 +2660,68 @@ final class _PositionRow extends StatelessWidget {
 }
 
 final class _SummaryColumn extends StatelessWidget {
-  const _SummaryColumn({required this.controller, required this.variant});
+  const _SummaryColumn({
+    required this.controller,
+    required this.variant,
+    this.horizontal = false,
+  });
   final QuoteController controller;
   final QuoteVariantDraft variant;
+  final bool horizontal;
 
   @override
-  Widget build(BuildContext context) => Column(
-    children: [
+  Widget build(BuildContext context) {
+    final cards = <Widget>[
       _SummaryCard(
         title: 'Сводка варианта',
         rows: [
-          ('Итого для клиента', variant.clientTotal),
+          ('Сумма без НДС', variant.systemSummary.subtotal),
           ('Итого закупка', variant.purchaseTotal),
-          ('Валовая прибыль', variant.margin),
-          ('НДС', variant.vatAmount),
+          ('Валовая прибыль', variant.systemSummary.margin),
+          ('НДС', variant.systemSummary.vat),
+          ('Итого для клиента', variant.systemSummary.total),
         ],
         footer: (
           'Маржинальность',
-          '${variant.marginPercent.toStringAsFixed(1)}%',
+          '${variant.systemSummary.marginPercent.toStringAsFixed(1)}%',
         ),
       ),
-      const SizedBox(height: 10),
       if (controller.activeType case final type?)
         _SummaryCard(
           title: 'Сводка типа',
           rows: [
-            ('Итого для клиента', type.clientTotal),
+            ('Сумма без НДС', type.systemSummary.subtotal),
             ('Итого закупка', type.purchaseTotal),
-            ('Валовая прибыль', type.margin),
-            ('НДС', type.vatAmount),
+            ('Валовая прибыль', type.systemSummary.margin),
+            ('НДС', type.systemSummary.vat),
+            ('Итого для клиента', type.systemSummary.total),
           ],
           footer: (
             'Маржинальность',
-            '${type.marginPercent.toStringAsFixed(1)}%',
+            '${type.systemSummary.marginPercent.toStringAsFixed(1)}%',
           ),
         ),
-    ],
-  );
+    ];
+    if (horizontal) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var index = 0; index < cards.length; index++) ...[
+            if (index > 0) const SizedBox(width: 12),
+            Expanded(child: cards[index]),
+          ],
+        ],
+      );
+    }
+    return Column(
+      children: [
+        for (var index = 0; index < cards.length; index++) ...[
+          if (index > 0) const SizedBox(height: 10),
+          cards[index],
+        ],
+      ],
+    );
+  }
 }
 
 final class _SummaryCard extends StatelessWidget {
@@ -2532,7 +2740,7 @@ final class _SummaryCard extends StatelessWidget {
         const SizedBox(height: 12),
         for (final row in rows)
           Padding(
-            padding: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.only(bottom: 4),
             child: Row(
               children: [
                 Expanded(
@@ -2657,9 +2865,34 @@ final class _CatalogPickerDialog extends StatefulWidget {
 
 final class _CatalogPickerDialogState extends State<_CatalogPickerDialog> {
   final search = TextEditingController();
+  Timer? debounce;
+  String? groupId;
+  bool pending = false;
+  List<CatalogGroup> get groups =>
+      widget.controller.catalog?.categories
+          .where((category) => category.id == widget.categoryId)
+          .expand((category) => category.sections)
+          .where(
+            (section) =>
+                widget.sectionId == null || section.id == widget.sectionId,
+          )
+          .expand((section) => section.groups)
+          .toList() ??
+      [];
+
+  @override
+  void initState() {
+    super.initState();
+    if (groups.isEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _search();
+      });
+    }
+  }
 
   @override
   void dispose() {
+    debounce?.cancel();
     search.dispose();
     super.dispose();
   }
@@ -2674,6 +2907,22 @@ final class _CatalogPickerDialogState extends State<_CatalogPickerDialog> {
         animation: widget.controller,
         builder: (context, _) => Column(
           children: [
+            if (groups.isNotEmpty) ...[
+              AppSelectField<String>(
+                value: groupId,
+                label: 'Группа товаров',
+                options: [
+                  const AppSelectOption(value: '', label: 'Все группы'),
+                  for (final group in groups)
+                    AppSelectOption(value: group.id, label: group.name),
+                ],
+                onChanged: (value) {
+                  setState(() => groupId = value);
+                  _search();
+                },
+              ),
+              const SizedBox(height: 12),
+            ],
             TextField(
               controller: search,
               autofocus: true,
@@ -2685,10 +2934,19 @@ final class _CatalogPickerDialogState extends State<_CatalogPickerDialog> {
                 ),
               ),
               onSubmitted: (_) => _search(),
+              onChanged: (_) {
+                debounce?.cancel();
+                setState(() => pending = true);
+                debounce = Timer(const Duration(milliseconds: 300), _search);
+              },
             ),
             const SizedBox(height: 12),
             Expanded(
-              child: widget.controller.catalogSearching
+              child: groups.isNotEmpty && groupId == null
+                  ? const Center(
+                      child: Text('Сначала выберите группу товаров.'),
+                    )
+                  : pending || widget.controller.catalogSearching
                   ? const Center(child: CircularProgressIndicator())
                   : widget.controller.catalogSearchResults.isEmpty
                   ? const Center(child: Text('Подходящие позиции не найдены.'))
@@ -2720,11 +2978,18 @@ final class _CatalogPickerDialogState extends State<_CatalogPickerDialog> {
     ],
   );
 
-  void _search() => widget.controller.searchCatalog(
-    categoryId: widget.categoryId,
-    sectionId: widget.sectionId,
-    search: search.text,
-  );
+  void _search() {
+    debounce?.cancel();
+    if (!mounted) return;
+    setState(() => pending = false);
+    if (groups.isNotEmpty && groupId == null) return;
+    widget.controller.searchCatalog(
+      categoryId: widget.categoryId,
+      sectionId: widget.sectionId,
+      groupId: groupId == '' ? null : groupId,
+      search: search.text,
+    );
+  }
 }
 
 final class _Panel extends StatelessWidget {
@@ -2749,6 +3014,8 @@ final class _TabButton extends StatelessWidget {
     required this.selected,
     required this.onPressed,
     required this.onRename,
+    required this.onDelete,
+    required this.deleteTooltip,
     this.icon,
     this.badge,
   });
@@ -2756,6 +3023,8 @@ final class _TabButton extends StatelessWidget {
   final bool selected;
   final VoidCallback onPressed;
   final VoidCallback onRename;
+  final VoidCallback? onDelete;
+  final String deleteTooltip;
   final IconData? icon;
   final String? badge;
 
@@ -2804,11 +3073,47 @@ final class _TabButton extends StatelessWidget {
               onTap: onRename,
               child: const Icon(Icons.edit_outlined, size: 14, color: _muted),
             ),
+            IconButton(
+              onPressed: onDelete,
+              tooltip: deleteTooltip,
+              icon: const Icon(Icons.delete_outline, size: 16),
+              constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+              padding: EdgeInsets.zero,
+              color: _muted,
+            ),
           ],
         ),
       ),
     ),
   );
+}
+
+Future<void> _confirmTabRemoval(
+  BuildContext context, {
+  required String title,
+  required String content,
+  required VoidCallback onConfirmed,
+}) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(title),
+      content: Text(
+        '$content\nИзменения вступят в силу после сохранения предложения.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Отмена'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Удалить'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed == true && context.mounted) onConfirmed();
 }
 
 final class _TextField extends StatelessWidget {
@@ -2922,7 +3227,7 @@ final class _RowSelect extends StatelessWidget {
   );
 }
 
-final class _RowInput extends StatelessWidget {
+final class _RowInput extends StatefulWidget {
   const _RowInput({
     required this.initialValue,
     required this.width,
@@ -2933,18 +3238,58 @@ final class _RowInput extends StatelessWidget {
   final ValueChanged<String> onChanged;
 
   @override
+  State<_RowInput> createState() => _RowInputState();
+}
+
+final class _RowInputState extends State<_RowInput> {
+  late final TextEditingController input = TextEditingController(
+    text: widget.initialValue,
+  );
+  String? lastEnteredValue;
+
+  @override
+  void didUpdateWidget(covariant _RowInput oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialValue == widget.initialValue) return;
+    final enteredNumber = double.tryParse(
+      (lastEnteredValue ?? '').replaceAll(',', '.'),
+    );
+    final nextNumber = double.tryParse(widget.initialValue);
+    // Preserve in-progress numeric input (for example "1,") on its own echo.
+    if (input.text == lastEnteredValue &&
+        (widget.initialValue == lastEnteredValue ||
+            (enteredNumber != null && enteredNumber == nextNumber))) {
+      return;
+    }
+    input.value = TextEditingValue(
+      text: widget.initialValue,
+      selection: TextSelection.collapsed(offset: widget.initialValue.length),
+    );
+    lastEnteredValue = null;
+  }
+
+  @override
+  void dispose() {
+    input.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) => SizedBox(
-    width: width,
+    width: widget.width,
     child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 3),
       child: TextFormField(
-        initialValue: initialValue,
+        controller: input,
         style: const TextStyle(fontSize: 11),
         decoration: const InputDecoration(
           isDense: true,
           contentPadding: EdgeInsets.symmetric(horizontal: 7, vertical: 9),
         ),
-        onChanged: onChanged,
+        onChanged: (value) {
+          lastEnteredValue = value;
+          widget.onChanged(value);
+        },
       ),
     ),
   );
@@ -2955,21 +3300,41 @@ final class _RowNumber extends StatelessWidget {
     required this.value,
     required this.width,
     required this.onChanged,
+    this.minimum,
+    this.minimumExclusive = false,
   });
   final double value;
   final double width;
   final ValueChanged<double> onChanged;
+  final double? minimum;
+  final bool minimumExclusive;
 
   @override
-  Widget build(BuildContext context) => _RowInput(
-    initialValue: value == value.roundToDouble()
-        ? value.toInt().toString()
-        : value.toString(),
+  Widget build(BuildContext context) => SizedBox(
     width: width,
-    onChanged: (text) {
-      final parsed = double.tryParse(text.replaceAll(',', '.'));
-      if (parsed != null) onChanged(parsed);
-    },
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 3),
+      child: AppNumberField(
+        minimum: minimum,
+        minimumExclusive: minimumExclusive,
+        style: const TextStyle(fontSize: 11),
+        decoration: const InputDecoration(
+          isDense: true,
+          contentPadding: EdgeInsets.symmetric(horizontal: 7, vertical: 9),
+        ),
+        value: value == value.roundToDouble()
+            ? value.toInt().toString()
+            : value.toString(),
+        onChanged: (text) {
+          final parsed = double.tryParse(text.replaceAll(',', '.'));
+          if (parsed != null &&
+              parsed.isFinite &&
+              (minimum == null || parsed >= minimum!)) {
+            onChanged(parsed);
+          }
+        },
+      ),
+    ),
   );
 }
 
@@ -3030,7 +3395,10 @@ final class _MessageBanner extends StatelessWidget {
   final bool error;
 
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) =>
+      AutoDismissNotice(message: message, child: _content(context));
+
+  Widget _content(BuildContext context) => Container(
     width: double.infinity,
     color: error ? const Color(0xFF4A1D29) : const Color(0xFF123B2A),
     padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),

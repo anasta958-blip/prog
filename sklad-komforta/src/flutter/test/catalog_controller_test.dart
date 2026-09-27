@@ -1,6 +1,9 @@
 import 'dart:typed_data';
+import 'dart:async';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sklad_komforta_app/features/catalog/catalog_editor.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/core/security/token_store.dart';
 import 'package:sklad_komforta_app/features/auth/auth_api.dart';
@@ -8,12 +11,219 @@ import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_api.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_controller.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_models.dart';
+import 'package:sklad_komforta_app/features/catalog/catalog_page.dart';
 
 void main() {
   const config = AppConfig(
     apiBaseUrl: 'https://api.example.test/api/v1',
     environment: 'test',
   );
+
+  testWidgets(
+    'catalog search survives leaving and returning and can be cleared',
+    (tester) async {
+      final api = _MemoryCatalogGateway();
+      final auth = _authorizedController(config);
+      final controller = CatalogController(config, auth, api: api);
+      await controller.initialize();
+      Widget catalog() => MaterialApp(
+        home: Scaffold(body: CatalogPage(controller: controller)),
+      );
+      final search = find.byKey(const Key('catalog-search'));
+      await tester.pumpWidget(catalog());
+      await tester.enterText(search, 'Test product');
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(api.lastSearch, 'Test product');
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpWidget(catalog());
+      expect(tester.widget<TextField>(search).controller!.text, 'Test product');
+      await tester.enterText(search, '');
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(controller.search, isEmpty);
+      expect(api.lastSearch ?? '', isEmpty);
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+      auth.dispose();
+    },
+  );
+
+  test(
+    'одиночная привязка не затирает добавленные другим редактором связи',
+    () async {
+      final api = _MemoryCatalogGateway();
+      final auth = _authorizedController(config);
+      final controller = CatalogController(config, auth, api: api);
+      await controller.initialize();
+      final item = controller.items.single;
+      controller.selectItem(item);
+      await controller.loadRelations(item.id);
+      api.savedRelations = [_link('external')];
+      expect(
+        await controller.addRelation(item.id, _dependency, _workCandidate),
+        isTrue,
+      );
+      expect(api.savedRelations.map((item) => item.sourceItemId), [
+        'external',
+        _workCandidate.id,
+      ]);
+      await controller.removeRelation(
+        item.id,
+        _dependency.id,
+        _workCandidate.id,
+      );
+      expect(api.savedRelations.single.sourceItemId, 'external');
+      controller.dispose();
+      auth.dispose();
+    },
+  );
+
+  test('позднее сохранение одного товара не меняет связи другого', () async {
+    final api = _MemoryCatalogGateway()..writeGate = Completer<void>();
+    final auth = _authorizedController(config);
+    final controller = CatalogController(config, auth, api: api);
+    await controller.initialize();
+    final first = controller.items.single;
+    controller.selectItem(first);
+    await controller.loadRelations(first.id);
+    final saving = controller.addRelation(
+      first.id,
+      _dependency,
+      _workCandidate,
+    );
+    controller.selectItem(_item(id: 'second'));
+    await controller.loadRelations('second');
+    api.writeGate!.complete();
+    expect(await saving, isTrue);
+    expect(controller.relations, isEmpty);
+    expect(controller.relationsLoading, isFalse);
+    expect(controller.relationsError, isNull);
+    controller.dispose();
+    auth.dispose();
+  });
+
+  test('возврат к товару ожидает завершения его сохранения', () async {
+    final api = _MemoryCatalogGateway()..writeGate = Completer<void>();
+    final auth = _authorizedController(config);
+    final controller = CatalogController(config, auth, api: api);
+    await controller.initialize();
+    final first = controller.items.single;
+    controller.selectItem(first);
+    await controller.loadRelations(first.id);
+    final saving = controller.addRelation(
+      first.id,
+      _dependency,
+      _workCandidate,
+    );
+    controller.selectItem(_item(id: 'second'));
+    controller.selectItem(first);
+    final loading = controller.loadRelations(first.id);
+    api.writeGate!.complete();
+    await saving;
+    await loading;
+    expect(controller.relations.single.sourceItemId, _workCandidate.id);
+    controller.dispose();
+    auth.dispose();
+  });
+
+  test('массовые связи используют снимок выбора между страницами', () async {
+    final api = _MemoryCatalogGateway();
+    final auth = _authorizedController(config);
+    final controller = CatalogController(config, auth, api: api);
+    await controller.initialize();
+    final first = controller.items.single;
+    controller.toggleSelection(first.id);
+    api.items
+      ..clear()
+      ..add(_item(id: 'second'));
+    await controller.refresh();
+    controller.toggleCurrentPage();
+    final snapshot = controller.bulkItems;
+    expect(snapshot.map((item) => item.id), [first.id, 'second']);
+    expect((await controller.loadBulkRelations(snapshot)).keys, [
+      first.id,
+      'second',
+    ]);
+    controller.clearSelection();
+    await controller.editBulkRelation(
+      snapshot,
+      _dependency.id,
+      _workCandidate.id,
+    );
+    expect(api.bulkIds, [first.id, 'second']);
+    expect(api.bulkAction, 'add_relation');
+    await controller.editBulkRelation(
+      snapshot,
+      _dependency.id,
+      _workCandidate.id,
+      remove: true,
+    );
+    expect(api.bulkAction, 'remove_relation');
+    expect(controller.bulkItems, isEmpty);
+    controller.dispose();
+    auth.dispose();
+  });
+
+  testWidgets('в массовом редакторе только связи и частичная привязка', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(400, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final source = CatalogCategory(
+      id: _dependency.sourceCategoryId,
+      name: 'Работы',
+      sortOrder: 1,
+      fields: const [],
+      sections: const [],
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CatalogEditor(
+            draft: CatalogItemDraft.fromItem(_item()),
+            configuration: CatalogConfiguration(
+              categories: [_category, source],
+              dictionaries: const [],
+              dependencies: const [_dependency],
+            ),
+            saving: false,
+            error: null,
+            isNew: false,
+            images: const [],
+            imagesLoading: false,
+            relationsLoading: false,
+            relations: [
+              CatalogItemRelation(
+                dependencyId: _dependency.id,
+                sourceItemId: _workCandidate.id,
+                sourceName: 'Монтаж',
+                sourceMarking: 'M-1',
+                sortOrder: 0,
+              ),
+            ],
+            bulkItems: [
+              _item(),
+              _item(id: 'second'),
+            ],
+            relationCounts: {'${_dependency.id}/${_workCandidate.id}': 1},
+            onClose: () {},
+            onSave: () async => false,
+            onSearchRelations: (_, _) async => [_workCandidate],
+            onAddRelation: (_, _) async => true,
+          ),
+        ),
+      ),
+    );
+    expect(find.text('Связи'), findsOneWidget);
+    expect(find.text('Основное'), findsNothing);
+    expect(find.text('Цены'), findsNothing);
+    expect(find.text('Сохранить'), findsNothing);
+    expect(find.text('Привязано к 1 из 2 товаров'), findsOneWidget);
+    await tester.tap(find.text('Привязать'));
+    await tester.pumpAndSettle();
+    // A partially attached card must remain selectable to attach it to the rest.
+    expect(find.text('Монтаж'), findsNWidgets(2));
+    expect(tester.takeException(), isNull);
+  });
 
   test('контроллер загружает конфигурацию и серверную страницу', () async {
     final catalogApi = _MemoryCatalogGateway();
@@ -272,7 +482,44 @@ CatalogItem _item({
 );
 
 final class _MemoryCatalogGateway
-    implements CatalogGateway, CatalogRelationGateway, CatalogTransferGateway {
+    implements
+        CatalogGateway,
+        CatalogRelationGateway,
+        CatalogTransferGateway,
+        CatalogBulkRelationGateway {
+  Completer<void>? writeGate;
+  @override
+  Future<CatalogBulkResult> editBulkRelation({
+    required String accessToken,
+    required List<String> itemIds,
+    required String dependencyId,
+    required String sourceItemId,
+    required bool remove,
+  }) async {
+    bulkIds = itemIds;
+    bulkAction = remove ? 'remove_relation' : 'add_relation';
+    await writeGate?.future;
+    if (remove) {
+      savedRelations = savedRelations
+          .where(
+            (item) =>
+                item.dependencyId != dependencyId ||
+                item.sourceItemId != sourceItemId,
+          )
+          .toList();
+    } else if (!savedRelations.any(
+      (item) =>
+          item.dependencyId == dependencyId &&
+          item.sourceItemId == sourceItemId,
+    )) {
+      savedRelations = [...savedRelations, _link(sourceItemId)];
+    }
+    return CatalogBulkResult(
+      requested: itemIds.length,
+      affected: itemIds.length,
+    );
+  }
+
   final items = <CatalogItem>[_item()];
   CatalogConfiguration configuration = CatalogConfiguration(
     categories: [_category],
@@ -299,6 +546,7 @@ final class _MemoryCatalogGateway
     required String accessToken,
     String? categoryId,
     String? sectionId,
+    String? groupId,
     String? status,
     String? search,
     required int page,
@@ -410,6 +658,14 @@ final class _MemoryCatalogGateway
   @override
   void close() {}
 }
+
+CatalogItemRelation _link(String sourceId) => CatalogItemRelation(
+  dependencyId: _dependency.id,
+  sourceItemId: sourceId,
+  sourceName: 'Монтаж',
+  sourceMarking: 'M-1',
+  sortOrder: 0,
+);
 
 final class _NoopAuthGateway implements AuthGateway {
   @override

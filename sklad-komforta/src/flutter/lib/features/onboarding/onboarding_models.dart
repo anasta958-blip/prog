@@ -637,6 +637,27 @@ final class OrganizationOnboardingDraft {
   List<CalculationRuleDraft> rules;
   List<MoneyPipelineDraft> moneyPipelines;
 
+  Set<String> occupiedCalculationFields(
+    String categoryClientId, {
+    MoneyPipelineDraft? exceptPipeline,
+    RuleActionDraft? exceptAction,
+  }) => {
+    for (final pipeline in moneyPipelines)
+      if (pipeline.categoryClientId == categoryClientId &&
+          !identical(pipeline, exceptPipeline))
+        pipeline.resultFieldCode,
+    for (final rule in rules)
+      if (rule.categoryClientId == categoryClientId)
+        for (final action in rule.actions)
+          if (!identical(action, exceptAction) &&
+              const {
+                'set_field',
+                'calculate_field',
+              }.contains(action.actionType) &&
+              action.targetFieldCode != null)
+            action.targetFieldCode!,
+  };
+
   /// Создаёт локальную стартовую конфигурацию до появления tenant-схемы.
   factory OrganizationOnboardingDraft.initial() => OrganizationOnboardingDraft(
     currentStep: 1,

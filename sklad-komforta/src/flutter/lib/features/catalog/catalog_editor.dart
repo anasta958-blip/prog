@@ -3,6 +3,8 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
+import 'package:sklad_komforta_app/core/widgets/app_number_field.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_models.dart';
 
@@ -28,10 +30,15 @@ final class CatalogEditor extends StatefulWidget {
     this.onSearchRelations,
     this.onAddRelation,
     this.onRemoveRelation,
+    this.bulkItems = const [],
+    this.relationCounts = const {},
     super.key,
   });
 
   final CatalogItemDraft draft;
+  final List<CatalogItem> bulkItems;
+  final Map<String, int> relationCounts;
+  bool get isBulk => bulkItems.length > 1;
   final CatalogConfiguration configuration;
   final bool saving;
   final String? error;
@@ -104,7 +111,11 @@ class _CatalogEditorState extends State<CatalogEditor> {
             children: [
               Expanded(
                 child: Text(
-                  widget.isNew ? 'Новый товар' : 'Редактирование товара',
+                  widget.isBulk
+                      ? 'Связи товаров: ${widget.bulkItems.length}'
+                      : widget.isNew
+                      ? 'Новый товар'
+                      : 'Редактирование товара',
                   style: const TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w700,
@@ -113,81 +124,103 @@ class _CatalogEditorState extends State<CatalogEditor> {
               ),
               IconButton(
                 tooltip: 'Закрыть',
-                onPressed: widget.saving ? null : widget.onClose,
+                onPressed: widget.saving || widget.relationsLoading
+                    ? null
+                    : widget.onClose,
                 icon: const Icon(Icons.close),
               ),
             ],
           ),
         ),
-        _EditorTabs(
-          selected: selectedTab,
-          onSelected: (value) => setState(() => selectedTab = value),
-        ),
-        const Divider(height: 1),
-        Expanded(
-          child: Form(
-            key: formKey,
-            child: IndexedStack(
-              index: selectedTab,
-              children: [
-                _scroll(_mainFields()),
-                _scroll(_priceFields()),
-                _scroll([const _StockPlaceholder()]),
-                _scroll([_imagesEditor()]),
-                _scroll([_relationsEditor()]),
-              ],
+        if (widget.isBulk)
+          const Padding(
+            padding: EdgeInsets.all(12),
+            child: Text(
+              'Связи',
+              style: TextStyle(
+                color: Color(0xFF4D8DFF),
+                fontWeight: FontWeight.w700,
+              ),
             ),
+          )
+        else
+          _EditorTabs(
+            selected: selectedTab,
+            onSelected: (value) => setState(() => selectedTab = value),
           ),
+        const Divider(height: 1),
+        if (widget.relationsLoading) const LinearProgressIndicator(),
+        Expanded(
+          child: widget.isBulk
+              ? _scroll([_relationsEditor()])
+              : Form(
+                  key: formKey,
+                  child: IndexedStack(
+                    index: selectedTab,
+                    children: [
+                      _scroll(_mainFields()),
+                      _scroll(_priceFields()),
+                      _scroll([const _StockPlaceholder()]),
+                      _scroll([_imagesEditor()]),
+                      _scroll([_relationsEditor()]),
+                    ],
+                  ),
+                ),
         ),
         if (widget.error != null ||
             widget.imagesError != null ||
             widget.relationsError != null)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(18, 8, 18, 0),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
+          AutoDismissNotice(
+            message:
                 widget.relationsError ?? widget.imagesError ?? widget.error!,
-                style: const TextStyle(color: Color(0xFFFF809D)),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(18, 8, 18, 0),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  widget.relationsError ?? widget.imagesError ?? widget.error!,
+                  style: const TextStyle(color: Color(0xFFFF809D)),
+                ),
               ),
             ),
           ),
         const Divider(height: 1),
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              if (widget.onDelete != null)
-                IconButton(
-                  tooltip: 'Удалить товар',
-                  onPressed: widget.saving ? null : widget.onDelete,
-                  color: const Color(0xFFFF7180),
-                  icon: const Icon(Icons.delete_outline),
+        if (!widget.isBulk)
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                if (widget.onDelete != null)
+                  IconButton(
+                    tooltip: 'Удалить товар',
+                    onPressed: widget.saving ? null : widget.onDelete,
+                    color: const Color(0xFFFF7180),
+                    icon: const Icon(Icons.delete_outline),
+                  ),
+                const Spacer(),
+                OutlinedButton(
+                  onPressed: widget.saving ? null : widget.onClose,
+                  child: const Text('Отмена'),
                 ),
-              const Spacer(),
-              OutlinedButton(
-                onPressed: widget.saving ? null : widget.onClose,
-                child: const Text('Отмена'),
-              ),
-              const SizedBox(width: 10),
-              FilledButton(
-                key: const Key('catalog-save'),
-                onPressed: widget.saving
-                    ? null
-                    : () async {
-                        if (formKey.currentState?.validate() != true) return;
-                        await widget.onSave();
-                      },
-                child: widget.saving
-                    ? const SizedBox.square(
-                        dimension: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('Сохранить'),
-              ),
-            ],
+                const SizedBox(width: 10),
+                FilledButton(
+                  key: const Key('catalog-save'),
+                  onPressed: widget.saving
+                      ? null
+                      : () async {
+                          if (formKey.currentState?.validate() != true) return;
+                          await widget.onSave();
+                        },
+                  child: widget.saving
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Сохранить'),
+                ),
+              ],
+            ),
           ),
-        ),
       ],
     ),
   );
@@ -415,7 +448,13 @@ class _CatalogEditorState extends State<CatalogEditor> {
       );
     }
     final dependencies = widget.configuration.dependencies
-        .where((item) => item.targetCategoryId == widget.draft.categoryId)
+        .where(
+          (item) => widget.isBulk
+              ? widget.bulkItems.any(
+                  (target) => target.categoryId == item.targetCategoryId,
+                )
+              : item.targetCategoryId == widget.draft.categoryId,
+        )
         .toList();
     if (dependencies.isEmpty) {
       return const _EmptyTab(
@@ -427,11 +466,12 @@ class _CatalogEditorState extends State<CatalogEditor> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const _TabIntroduction(
+        _TabIntroduction(
           icon: Icons.account_tree_outlined,
           title: 'Связанные карточки',
-          message:
-              'Одна карточка может использоваться в любом количестве других товаров.',
+          message: widget.isBulk
+              ? 'Изменения сохраняются сразу для выбранных товаров подходящей категории. Остальные связи сохраняются.'
+              : 'Одна карточка может использоваться в любом количестве других товаров.',
         ),
         const SizedBox(height: 16),
         for (final dependency in dependencies) ...[
@@ -499,7 +539,19 @@ class _CatalogEditorState extends State<CatalogEditor> {
                           relation.sourceItemId,
                         ),
                 ),
+                if (widget.isBulk)
+                  Text(
+                    'Привязано к ${widget.relationCounts['${relation.dependencyId}/${relation.sourceItemId}'] ?? 0} из ${_targetCount(dependency)} товаров',
+                    style: const TextStyle(color: Color(0xFF8298B8)),
+                  ),
               ],
+            if (widget.isBulk) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Применяется к ${_targetCount(dependency)} из ${widget.bulkItems.length} выбранных товаров',
+                style: const TextStyle(color: Color(0xFF8298B8)),
+              ),
+            ],
           ],
         ),
       ),
@@ -517,6 +569,12 @@ class _CatalogEditorState extends State<CatalogEditor> {
         dependencyId: dependency.id,
         excludedIds: widget.relations
             .where((item) => item.dependencyId == dependency.id)
+            .where(
+              (item) =>
+                  !widget.isBulk ||
+                  widget.relationCounts['${item.dependencyId}/${item.sourceItemId}'] ==
+                      _targetCount(dependency),
+            )
             .map((item) => item.sourceItemId)
             .toSet(),
         search: widget.onSearchRelations!,
@@ -526,6 +584,10 @@ class _CatalogEditorState extends State<CatalogEditor> {
       await widget.onAddRelation!(dependency, candidate);
     }
   }
+
+  int _targetCount(CatalogDependency dependency) => widget.bulkItems
+      .where((item) => item.categoryId == dependency.targetCategoryId)
+      .length;
 
   Future<void> _pickImage() async {
     final file = await FilePicker.pickFile(
@@ -539,7 +601,9 @@ class _CatalogEditorState extends State<CatalogEditor> {
     } on Object {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Не удалось прочитать выбранный файл.')),
+        const AppSnackBar(
+          content: Text('Не удалось прочитать выбранный файл.'),
+        ),
       );
       return;
     }
@@ -555,7 +619,7 @@ class _CatalogEditorState extends State<CatalogEditor> {
     };
     if (contentType == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        const AppSnackBar(
           content: Text('Выберите изображение JPEG, PNG или WebP.'),
         ),
       );
@@ -1043,6 +1107,26 @@ final class _DynamicField extends StatelessWidget {
         ],
         enabled: false,
         onChanged: null,
+      );
+    }
+    if (_numeric) {
+      return AppNumberField(
+        value: value?.toString() ?? '',
+        enabled: enabled,
+        minimum: field.fieldType == 'money' ? 0 : null,
+        decoration: InputDecoration(labelText: _label),
+        onChanged: (text) =>
+            onChanged(num.tryParse(text.replaceAll(',', '.')) ?? text),
+        validator: (text) {
+          if (field.isRequired && (text ?? '').trim().isEmpty) {
+            return 'Заполните поле.';
+          }
+          if (field.code == 'base_price' &&
+              (num.tryParse((text ?? '').replaceAll(',', '.')) ?? 0) <= 0) {
+            return 'Цена должна быть больше нуля.';
+          }
+          return null;
+        },
       );
     }
     return TextFormField(

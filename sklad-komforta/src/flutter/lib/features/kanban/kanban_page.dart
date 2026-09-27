@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui' show PointerDeviceKind;
 
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
 import 'package:intl/intl.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/core/models/workflow_specialization.dart';
@@ -91,7 +92,7 @@ final class _KanbanPageState extends State<KanbanPage> {
     );
     if (!moved && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
+        AppSnackBar(
           content: Text(
             widget.controller.error ?? 'Не удалось переместить карточку.',
           ),
@@ -137,7 +138,7 @@ final class _KanbanPageState extends State<KanbanPage> {
     final deleted = await widget.controller.deleteCard(card);
     if (!mounted || deleted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
+      AppSnackBar(
         content: Text(
           widget.controller.error ?? 'Не удалось удалить карточку.',
         ),
@@ -234,7 +235,7 @@ final class _KanbanPageState extends State<KanbanPage> {
   ) {
     if (action == WorkflowCreationAction.order) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        const AppSnackBar(
           content: Text(
             'Редактор комплектации будет подключён отдельным этапом.',
           ),

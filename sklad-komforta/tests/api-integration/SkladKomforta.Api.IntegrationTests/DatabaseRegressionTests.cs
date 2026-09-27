@@ -68,12 +68,17 @@ public sealed class DatabaseRegressionTests
         var roleRequest = new { name = "Просмотр каталога", permissionCodes = (string[])["catalog.view"], subordinateRoleIds = Array.Empty<string>(), cardVisibilityMode = "own" };
         var role = await Send(staff, HttpMethod.Post, "/settings/access/roles", roleRequest);
         var roleId = Text(role, "id");
+        var auditBeforeRoleSave = (await Send(staff, HttpMethod.Get, "/company/audit")).AsArray().Count;
         await Send(staff, HttpMethod.Put, $"/settings/access/roles/{roleId}", roleRequest);
+        Assert.Equal(auditBeforeRoleSave, (await Send(staff, HttpMethod.Get, "/company/audit")).AsArray().Count);
         await Send(staff, HttpMethod.Get, "/settings/access/members");
 
         var roundtrip = await Send(staff, HttpMethod.Put, "/company/configuration", new { draft, deleteCategoryData = Array.Empty<string>() });
         Assert.Single(roundtrip["rules"]!.AsArray());
         Assert.Single(roundtrip["moneyPipelines"]!.AsArray());
+        var auditBeforeConfigurationSave = (await Send(staff, HttpMethod.Get, "/company/audit")).AsArray().Count;
+        await Send(staff, HttpMethod.Put, "/company/configuration", new { draft, deleteCategoryData = Array.Empty<string>() });
+        Assert.Equal(auditBeforeConfigurationSave, (await Send(staff, HttpMethod.Get, "/company/audit")).AsArray().Count);
         Assert.Contains((await Send(staff, HttpMethod.Get, "/settings/access/roles")).AsArray(), value => Text(value!, "id") == roleId);
         await Send(staff, HttpMethod.Delete, $"/settings/access/roles/{roleId}");
 
@@ -89,9 +94,12 @@ public sealed class DatabaseRegressionTests
         };
         var product = await Send(staff, HttpMethod.Post, "/catalog/items", productRequest);
         var productId = Text(product, "id");
+        var auditBeforeProductSave = (await Send(staff, HttpMethod.Get, "/company/audit")).AsArray().Count;
         await Send(staff, HttpMethod.Put, $"/catalog/items/{productId}", productRequest);
+        Assert.Equal(auditBeforeProductSave, (await Send(staff, HttpMethod.Get, "/company/audit")).AsArray().Count);
         await Send(staff, HttpMethod.Get, $"/catalog/items/{productId}");
         Assert.Equal(1, (await Send(staff, HttpMethod.Get, "/catalog/items"))["total"]!.GetValue<int>());
+        await CheckBulkRelations(staff, configuration, productId, productRequest, unitId);
 
         var company = await Send(staff, HttpMethod.Post, "/company/legal-entities", new
         {
@@ -162,6 +170,13 @@ public sealed class DatabaseRegressionTests
                 variants = typeMode ? [] : new[] { new { proposalTypeId = typeId, variantId } },
             });
             Assert.NotNull(selected["selectionSubmittedAt"]);
+            var auditBeforeResubmission = (await Send(staff, HttpMethod.Get, "/company/audit")).AsArray().Count;
+            await Send(guest, HttpMethod.Put, "/client/quotes/current/selection", new
+            {
+                proposalTypeId = typeMode ? typeId : null,
+                variants = typeMode ? [] : new[] { new { proposalTypeId = typeId, variantId } },
+            });
+            Assert.Equal(auditBeforeResubmission, (await Send(staff, HttpMethod.Get, "/company/audit")).AsArray().Count);
             var employeeView = await Send(staff, HttpMethod.Get, quotePath);
             if (typeMode)
                 Assert.Equal(typeId, Text(employeeView, "clientSelectedProposalTypeId"));
@@ -178,16 +193,17 @@ public sealed class DatabaseRegressionTests
         }
 
         var impact = await Send(staff, HttpMethod.Get, "/company/configuration/categories/equipment/deletion-impact");
-        Assert.Equal(1, impact["itemCount"]!.GetValue<int>());
+        // Deletion impact includes the soft-deleted second bulk-edit target.
+        Assert.Equal(2, impact["itemCount"]!.GetValue<int>());
         var emptyDraft = draft with
         {
             Categories = [],
             Workflows = draft.Workflows.Select(workflow => workflow with { Categories = [] }).ToArray(),
-            Rules = [], MoneyPipelines = [],
+            Rules = [], MoneyPipelines = [], Dependencies = [],
         };
         await Send(staff, HttpMethod.Put, "/company/configuration", new { draft = emptyDraft, deleteCategoryData = Array.Empty<string>() }, HttpStatusCode.Conflict);
         await Send(staff, HttpMethod.Get, $"/catalog/items/{productId}");
-        await Send(staff, HttpMethod.Put, "/company/configuration", new { draft = emptyDraft, deleteCategoryData = (string[])["equipment"] });
+        await Send(staff, HttpMethod.Put, "/company/configuration", new { draft = emptyDraft, deleteCategoryData = (string[])["equipment", "services"] });
         Assert.Empty((await Send(staff, HttpMethod.Get, "/catalog/configuration"))["categories"]!.AsArray());
         Assert.NotEmpty((await Send(staff, HttpMethod.Get, "/company/audit")).AsArray());
 
@@ -212,12 +228,71 @@ public sealed class DatabaseRegressionTests
             [.. OnboardingFieldRegistry.DefaultCatalogFields(), new CatalogFieldDraft("quantity", true, false),
                 new CatalogFieldDraft("markup_value", true, false), new CatalogFieldDraft("discount_value", true, false),
                 new CatalogFieldDraft("custom_note", true, false, Label: "Проверка", FieldType: "text"),
-                new CatalogFieldDraft("custom_total", true, false, Label: "Итог", FieldType: "calculated_money")])],
+                new CatalogFieldDraft("custom_total", true, false, Label: "Итог", FieldType: "calculated_money"),
+                new CatalogFieldDraft("linked_services", true, false)]),
+            new CatalogCategoryDraft("services", "Работы", [], OnboardingFieldRegistry.DefaultCatalogFields())],
         [new EntityFieldDraft("quote", "name", "Наименование", "text", true, true)],
-        [], [new DictionaryDraft("units", "Единицы измерения", [new DictionaryItemDraft("шт")])],
+        [],
+        [new DictionaryDraft("units", "Единицы измерения", [new DictionaryItemDraft("шт")])],
+        Dependencies: [new CategoryDependencyDraft("services-equipment", "services", "equipment", "linked_services")],
         Rules: [new CalculationRuleDraft("check", "Проверка правила", "equipment", "card_saving", true, null, [],
             [new RuleActionDraft("set_field", TargetFieldCode: "custom_note", ConstantValue: "Проверено правилом")])],
         MoneyPipelines: [new MoneyPipelineDraft("equipment", "base_price", null, "markup_value", "discount_value", "quantity", "custom_total", 2, true, "total")]);
+
+    private static async Task CheckBulkRelations(HttpClient staff, JsonNode configuration, string firstId, object productRequest, string unitId)
+    {
+        var sourceCategoryId = Text(configuration["categories"]!.AsArray().Single(item => Text(item!, "name") == "Работы")!, "id");
+        var dependencyId = Text(configuration["dependencies"]![0]!, "id");
+        var secondRequest = JsonSerializer.SerializeToNode(productRequest)!;
+        secondRequest["marking"] = "AC-25";
+        var secondId = Text(await Send(staff, HttpMethod.Post, "/catalog/items", secondRequest), "id");
+        async Task<string> Source(string name) => Text(await Send(staff, HttpMethod.Post, "/catalog/items", new
+        {
+            categoryId = sourceCategoryId, name, marking = "S-1", status = "approved",
+            values = new Dictionary<string, object> { ["unit"] = unitId, ["base_price"] = 100m },
+        }), "id");
+        var sourceId = await Source("Монтаж");
+        var otherId = await Source("Доставка");
+        await Send(staff, HttpMethod.Put, $"/catalog/items/{firstId}/relations", new[] {
+            new { dependencyId, sourceItemId = otherId }, new { dependencyId, sourceItemId = sourceId },
+        });
+        var bulk = new { itemIds = new[] { firstId, secondId }, action = "add_relation", dependencyId, sourceItemId = sourceId };
+        var added = await Send(staff, HttpMethod.Post, "/catalog/items/bulk", bulk);
+        Assert.Equal(1, added["affected"]!.GetValue<int>());
+        Assert.Equal(2, (await Send(staff, HttpMethod.Get, $"/catalog/items/{firstId}/relations")).AsArray().Count);
+        Assert.Single((await Send(staff, HttpMethod.Get, $"/catalog/items/{secondId}/relations")).AsArray());
+        Assert.Equal(0, (await Send(staff, HttpMethod.Post, "/catalog/items/bulk", bulk))["affected"]!.GetValue<int>());
+        var savedRelations = await Send(staff, HttpMethod.Get, $"/catalog/items/{firstId}/relations");
+        var settings = await Send(staff, HttpMethod.Get, "/company/configuration");
+        await Send(staff, HttpMethod.Put, "/company/configuration", new {
+            draft = settings, deleteCategoryData = Array.Empty<string>(),
+        });
+        Assert.True(JsonNode.DeepEquals(savedRelations,
+            await Send(staff, HttpMethod.Get, $"/catalog/items/{firstId}/relations")));
+        Assert.Equal(dependencyId,
+            Text((await Send(staff, HttpMethod.Get, "/catalog/configuration"))["dependencies"]![0]!, "id"));
+        Assert.Single((await Send(staff, HttpMethod.Get, $"/catalog/items/{secondId}/relations")).AsArray());
+        var fields = settings["categories"]![0]!["fields"]!.AsArray();
+        var reorderedFields = fields.Reverse().Select(field => field!.DeepClone()).ToArray();
+        fields.Clear();
+        foreach (var field in reorderedFields) fields.Add(field);
+        await Send(staff, HttpMethod.Put, "/company/configuration", new {
+            draft = settings, deleteCategoryData = Array.Empty<string>(),
+        });
+        Assert.True(JsonNode.DeepEquals(savedRelations,
+            await Send(staff, HttpMethod.Get, $"/catalog/items/{firstId}/relations")));
+        // The first update must roll back when a later target has an incompatible category.
+        await Send(staff, HttpMethod.Post, "/catalog/items/bulk", new {
+            itemIds = new[] { secondId, sourceId }, action = "add_relation", dependencyId, sourceItemId = otherId,
+        }, HttpStatusCode.BadRequest);
+        Assert.Single((await Send(staff, HttpMethod.Get, $"/catalog/items/{secondId}/relations")).AsArray());
+        await Send(staff, HttpMethod.Post, "/catalog/items/bulk", new {
+            itemIds = new[] { firstId, secondId }, action = "remove_relation", dependencyId, sourceItemId = sourceId,
+        });
+        Assert.Equal(otherId, Text((await Send(staff, HttpMethod.Get, $"/catalog/items/{firstId}/relations"))[0]!, "sourceItemId"));
+        Assert.Empty((await Send(staff, HttpMethod.Get, $"/catalog/items/{secondId}/relations")).AsArray());
+        await Send(staff, HttpMethod.Delete, $"/catalog/items/{secondId}");
+    }
 
     private static object QuoteRequest(string kind, string clientId, string executorCompanyId, string categoryId, string sectionId, string productId) => new
     {

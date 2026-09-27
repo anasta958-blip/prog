@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/core/models/workflow_specialization.dart';
@@ -54,7 +56,19 @@ final class QuoteController extends ChangeNotifier {
   bool catalogSearching = false;
   bool dirty = false;
   String? error;
-  String? successMessage;
+  String? _successMessage;
+  Timer? _successMessageTimer;
+  String? get successMessage => _successMessage;
+  set successMessage(String? value) {
+    _successMessageTimer?.cancel();
+    _successMessage = value;
+    if (value == null) return;
+    _successMessageTimer = Timer(const Duration(seconds: 5), () {
+      _successMessage = null;
+      notifyListeners();
+    });
+  }
+
   String? persistedCardId;
   List<double?> availableVatRates = [20];
   int _catalogSearchGeneration = 0;
@@ -63,6 +77,11 @@ final class QuoteController extends ChangeNotifier {
   final Map<String, Future<void>> _behaviorQueues = {};
 
   double? get initialVatRate => availableVatRates.firstOrNull;
+
+  void showDraftRestoredMessage() {
+    successMessage = 'Восстановлен локальный черновик';
+    notifyListeners();
+  }
 
   QuoteProposalTypeDraft? get activeType {
     final document = draft;
@@ -252,6 +271,42 @@ final class QuoteController extends ChangeNotifier {
     return variant;
   }
 
+  void removeType(String id) {
+    final document = draft;
+    if (saving ||
+        document == null ||
+        document.proposalTypes.length <= 1 ||
+        !document.proposalTypes.any((type) => type.id == id)) {
+      return;
+    }
+    document.proposalTypes.removeWhere((type) => type.id == id);
+    if (document.clientSelectedProposalTypeId == id) {
+      document.clientSelectedProposalTypeId = null;
+      document.clientSelectionSubmittedAt = null;
+    }
+    _repairActiveSelection();
+    _changed();
+  }
+
+  void removeVariant(String typeId, String variantId) {
+    final type = draft?.proposalTypes
+        .where((type) => type.id == typeId)
+        .firstOrNull;
+    if (saving ||
+        type == null ||
+        type.variants.length <= 1 ||
+        !type.variants.any((variant) => variant.id == variantId)) {
+      return;
+    }
+    type.variants.removeWhere((variant) => variant.id == variantId);
+    if (type.selectedVariantId == variantId) {
+      type.selectedVariantId = null;
+      type.selectedByClient = false;
+    }
+    _repairActiveSelection();
+    _changed();
+  }
+
   void addCategory(CatalogCategory source) {
     final variant = activeVariant;
     if (variant == null ||
@@ -293,6 +348,7 @@ final class QuoteController extends ChangeNotifier {
   Future<void> searchCatalog({
     required String categoryId,
     String? sectionId,
+    String? groupId,
     String search = '',
   }) async {
     final generation = ++_catalogSearchGeneration;
@@ -306,6 +362,7 @@ final class QuoteController extends ChangeNotifier {
           accessToken: token,
           categoryId: categoryId,
           sectionId: sectionId,
+          groupId: groupId,
           status: 'approved',
           search: search,
           page: 1,
@@ -342,21 +399,32 @@ final class QuoteController extends ChangeNotifier {
   ) async {
     final variant = activeVariant;
     if (variant == null) return;
-    final primaryPosition = _positionFromCatalogItem(
-      item,
-      groupName: _groupName(
-        category.catalogCategoryId,
-        section.catalogSectionId,
-        item.groupId,
-      ),
-    );
-    section.positions.add(primaryPosition);
+    final existing = variant.positions
+        .where((position) => position.catalogItemId == item.id)
+        .firstOrNull;
+    if (existing != null) {
+      existing.quantity += 1;
+    }
+    final primaryPosition =
+        existing ??
+        _positionFromCatalogItem(
+          item,
+          groupName: _groupName(
+            category.catalogCategoryId,
+            section.catalogSectionId,
+            item.groupId,
+          ),
+        );
+    if (existing == null) section.positions.add(primaryPosition);
     _changed();
 
     final relationGateway = _catalogGateway is CatalogRelationGateway
         ? _catalogGateway as CatalogRelationGateway
         : null;
-    if (relationGateway == null) return;
+    if (relationGateway == null) {
+      await positionChanged(position: primaryPosition, fieldCode: 'quantity');
+      return;
+    }
     try {
       final relations = await _relationsFor(item.id, relationGateway);
       var changed = false;
@@ -370,12 +438,13 @@ final class QuoteController extends ChangeNotifier {
                 relation,
                 parentPositionId: primaryPosition.id,
                 dependencyClientId: dependency.clientId,
+                additionalContribution: existing != null,
               ) ||
               changed;
         }
       }
       if (changed) _changed();
-      await _applyBehaviorRules(primaryPosition);
+      await positionChanged(position: primaryPosition, fieldCode: 'quantity');
     } on ApiException catch (exception) {
       error = exception.message;
       notifyListeners();
@@ -437,8 +506,12 @@ final class QuoteController extends ChangeNotifier {
     CatalogItemRelation relation, {
     required String parentPositionId,
     required String dependencyClientId,
+    bool additionalContribution = false,
   }) {
-    final marker = _relationMarker(parentPositionId, dependencyClientId);
+    final baseMarker = _relationMarker(parentPositionId, dependencyClientId);
+    final marker = additionalContribution
+        ? '$baseMarker|${newQuoteId()}'
+        : baseMarker;
     for (final position in variant.positions) {
       if (position.catalogItemId == relation.sourceItemId) {
         final sources = _autoRelationSources(position);
@@ -534,6 +607,43 @@ final class QuoteController extends ChangeNotifier {
     _changed();
   }
 
+  void removeCategory(QuoteCategoryDraft category) {
+    if (saving) return;
+    for (final type in draft?.proposalTypes ?? <QuoteProposalTypeDraft>[]) {
+      for (final variant in type.variants) {
+        if (!variant.categories.contains(category)) continue;
+        final ids = category.sections
+            .expand((section) => section.positions)
+            .map((position) => position.id)
+            .toList();
+        for (final id in ids) {
+          _removeAutomaticContributions(variant, id);
+        }
+        variant.categories.remove(category);
+        _changed();
+        return;
+      }
+    }
+  }
+
+  void removeSection(QuoteSectionDraft section) {
+    if (saving) return;
+    for (final type in draft?.proposalTypes ?? <QuoteProposalTypeDraft>[]) {
+      for (final variant in type.variants) {
+        for (final category in variant.categories) {
+          if (!category.sections.contains(section)) continue;
+          final ids = section.positions.map((position) => position.id).toList();
+          for (final id in ids) {
+            _removeAutomaticContributions(variant, id);
+          }
+          category.sections.remove(section);
+          _changed();
+          return;
+        }
+      }
+    }
+  }
+
   void setSectionSelection(QuoteSectionDraft section, bool selected) {
     for (final position in section.positions) {
       position.selected = selected;
@@ -576,14 +686,19 @@ final class QuoteController extends ChangeNotifier {
     QuoteSectionDraft section, {
     required double value,
     required bool markup,
+    String? fieldCode,
   }) {
+    final targetCode =
+        fieldCode ?? (markup ? 'markup_value' : 'discount_value');
     final selected = section.positions.where((position) => position.selected);
     final targets = selected.isEmpty ? section.positions : selected.toList();
     for (final position in targets) {
-      if (markup) {
+      if (targetCode == 'markup_value') {
         position.markupPercent = value;
-      } else {
+      } else if (targetCode == 'discount_value') {
         position.discountPercent = value;
+      } else {
+        position.values[targetCode] = value;
       }
     }
     if (markup) {
@@ -598,7 +713,7 @@ final class QuoteController extends ChangeNotifier {
     QuotePositionDraft? position,
     String? fieldCode,
   }) async {
-    _changed();
+    _changed(position: position, fieldCode: fieldCode);
     if (position == null) return;
     final previous = _behaviorQueues[position.id] ?? Future<void>.value();
     final queued = previous.then(
@@ -782,8 +897,16 @@ final class QuoteController extends ChangeNotifier {
       for (final section in category.sections) {
         for (final position in section.positions.toList(growable: false)) {
           final sources = _autoRelationSources(position);
-          if (!sources.remove(marker)) continue;
-          position.quantity -= 1;
+          final removed = sources
+              .where(
+                (source) => source == marker || source.startsWith('$marker|'),
+              )
+              .length;
+          if (removed == 0) continue;
+          sources.removeWhere(
+            (source) => source == marker || source.startsWith('$marker|'),
+          );
+          position.quantity -= removed;
           changed = true;
           if (position.quantity <= 0) {
             section.positions.remove(position);
@@ -844,14 +967,18 @@ final class QuoteController extends ChangeNotifier {
   String _relationMarker(String parentPositionId, String dependencyClientId) =>
       '$parentPositionId|$dependencyClientId';
 
-  void _changed() {
-    _recalculateConfiguredRules();
+  void _changed({QuotePositionDraft? position, String? fieldCode}) {
+    _recalculateConfiguredRules(position: position, fieldCode: fieldCode);
     dirty = true;
     successMessage = null;
     notifyListeners();
   }
 
-  void _recalculateConfiguredRules() {
+  void _recalculateConfiguredRules({
+    QuotePositionDraft? position,
+    String? fieldCode,
+    bool saving = false,
+  }) {
     final configuration = catalog;
     final document = draft;
     if (configuration == null || document == null) return;
@@ -859,9 +986,12 @@ final class QuoteController extends ChangeNotifier {
     _calculationError = null;
     if (error == previousCalculationError) error = null;
     try {
-      QuoteConfiguredCalculationEngine(
-        configuration,
-      ).calculateDocument(document);
+      QuoteConfiguredCalculationEngine(configuration).calculateDocument(
+        document,
+        changedPosition: position,
+        changedFieldCode: fieldCode,
+        saving: saving,
+      );
     } on FormatException catch (exception) {
       _calculationError = exception.message;
       error = _calculationError;
@@ -887,6 +1017,7 @@ final class QuoteController extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+    _recalculateConfiguredRules(saving: true);
     final validation = _validate(document);
     if (validation != null) {
       error = validation;
@@ -1006,6 +1137,7 @@ final class QuoteController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _successMessageTimer?.cancel();
     if (_ownsQuoteGateway) _quoteGateway.close();
     if (_ownsCatalogGateway) _catalogGateway.close();
     if (_ownsCompanyGateway && _companyGateway is CompanyApi) {

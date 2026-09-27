@@ -4,6 +4,23 @@ namespace SkladKomforta.Domain.Tests.Onboarding;
 
 public sealed class RuleCalculationEngineTests
 {
+    [Theory]
+    [InlineData(22, 220)]
+    [InlineData(0, 0)]
+    [InlineData(100, 1000)]
+    [InlineData(2.5, 25)]
+    public void FormulaUsesPercentFieldAsFraction(decimal percent, decimal expected)
+    {
+        var formula = new FormulaDraft([
+            new FormulaTokenDraft("field", FieldCode: "price"),
+            new FormulaTokenDraft("operator", Operator: "multiply"),
+            new FormulaTokenDraft("field", FieldCode: "discount")]);
+        var values = new Dictionary<string, decimal?> { ["price"] = 1000, ["discount"] = percent };
+        Assert.Equal(expected, RuleCalculationEngine.CalculateFormula(formula, values, new HashSet<string> { "discount" }));
+        Assert.Equal(1000 * percent, RuleCalculationEngine.CalculateFormula(formula, values));
+        Assert.Equal(percent, values["discount"]);
+    }
+
     [Fact]
     public void MoneyPipelineUsesFixedOperationOrder()
     {

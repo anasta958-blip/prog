@@ -610,7 +610,7 @@ public sealed class OnboardingValidatorTests
             true,
             null,
             [],
-            [new RuleActionDraft("calculate_field", TargetFieldCode: "custom_total", Formula: formula)]);
+            [new RuleActionDraft("calculate_field", TargetFieldCode: "line_total", Formula: formula)]);
         var pipeline = new MoneyPipelineDraft(
             "equipment",
             "base_price",
@@ -719,6 +719,25 @@ public sealed class OnboardingValidatorTests
             false));
 
         Assert.Equal("onboarding_formula_invalid", exception.Code);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void DraftRejectsRuleWritingPipelineResult(bool enabled)
+    {
+        var source = ValidDraft();
+        var category = CategoryWithCalculationFields();
+        var rule = new CalculationRuleDraft("copy", "Копировать цену", "equipment", "row_calculation", enabled,
+            null, [], [new RuleActionDraft("set_field", TargetFieldCode: "custom_total", SourceFieldCode: "base_price")]);
+        var pipeline = new MoneyPipelineDraft("equipment", "base_price", null, null, null, null, "custom_total", 2, true);
+        var exception = Assert.Throws<IdentityException>(() => OnboardingValidator.Validate(
+            source with { Categories = [category], Rules = [rule], MoneyPipelines = [pipeline] }, false));
+        Assert.Equal("onboarding_rule_target_conflict", exception.Code);
+        var second = rule with { ClientId = "copy2", Name = "Вторая запись" };
+        exception = Assert.Throws<IdentityException>(() => OnboardingValidator.Validate(
+            source with { Categories = [category], Rules = [rule, second] }, false));
+        Assert.Equal("onboarding_rule_target_conflict", exception.Code);
     }
 
     private static OrganizationOnboardingDraft ValidDraft() => new(

@@ -12,7 +12,12 @@ final class QuoteConfiguredCalculationEngine {
 
   final CatalogConfiguration configuration;
 
-  void calculateDocument(QuoteDraft document) {
+  void calculateDocument(
+    QuoteDraft document, {
+    QuotePositionDraft? changedPosition,
+    String? changedFieldCode,
+    bool saving = false,
+  }) {
     for (final type in document.proposalTypes) {
       for (final variant in type.variants) {
         for (final category in variant.categories) {
@@ -21,7 +26,26 @@ final class QuoteConfiguredCalculationEngine {
               .firstOrNull;
           for (final section in category.sections) {
             for (final position in section.positions) {
-              _calculatePosition(configuredCategory?.clientId, position);
+              try {
+                _calculatePosition(
+                  configuredCategory?.clientId,
+                  position,
+                  changedFieldCode: identical(position, changedPosition)
+                      ? changedFieldCode
+                      : null,
+                  saving: saving,
+                );
+              } on FormatException catch (error) {
+                var message = error.message;
+                for (final field
+                    in configuredCategory?.fields ?? <CatalogField>[]) {
+                  message = message.replaceAll(
+                    '«${field.code}»',
+                    '«${field.label}»',
+                  );
+                }
+                throw FormatException('Позиция «${position.name}»: $message');
+              }
             }
           }
         }
@@ -67,35 +91,109 @@ final class QuoteConfiguredCalculationEngine {
 
   void _calculatePosition(
     String? categoryClientId,
-    QuotePositionDraft position,
-  ) {
+    QuotePositionDraft position, {
+    String? changedFieldCode,
+    bool saving = false,
+  }) {
     position.configuredLineTotal = null;
     position.hiddenFieldCodes.clear();
     if (categoryClientId == null) return;
     final values = _valuesOf(position);
-    final rules = _rulesFor(categoryClientId).toList(growable: false);
+    final percentFields = configuration.categories
+        .where((category) => category.clientId == categoryClientId)
+        .expand((category) => category.fields)
+        .where((field) => field.fieldType == 'percent')
+        .map((field) => field.code)
+        .toSet();
+    for (final code in percentFields) {
+      final value = values[code];
+      if (value == null || (value is String && value.trim().isEmpty)) {
+        values[code] = 0.0;
+      }
+    }
+    final conditionalExclusions = _rulesFor(categoryClientId)
+        .where(
+          (rule) =>
+              rule.conditions.isNotEmpty &&
+              rule.actions.any((action) => action.actionType == 'exclude_row'),
+        )
+        .toList();
+    if (conditionalExclusions.isNotEmpty ||
+        values['_conditional_exclusion'] == true) {
+      values['excluded_from_calc'] =
+          values['_manual_excluded_from_calc'] == true ||
+          values['_unconditional_excluded_from_calc'] == true ||
+          conditionalExclusions.any(
+            (rule) => _matchesAll(values, rule.conditions),
+          );
+      values['_conditional_exclusion'] = true;
+    }
+    final rules = _rulesFor(categoryClientId)
+        .where(
+          (rule) =>
+              rule.eventType == 'row_calculation' ||
+              rule.eventType == 'variant_calculation' ||
+              (saving && rule.eventType == 'card_saving') ||
+              (rule.eventType == 'field_changed' &&
+                  changedFieldCode != null &&
+                  (rule.eventFieldCode == null ||
+                      rule.eventFieldCode == changedFieldCode)),
+        )
+        .toList(growable: false);
     var formulaDefinesLineTotal = false;
+    final calculations =
+        <({String target, Set<String> inputs, void Function() run})>[];
+    final systemInputs = Map<String, dynamic>.from(values);
     for (final rule in rules) {
       if (!_matchesAll(values, rule.conditions)) continue;
       for (final action in rule.actions) {
         switch (action.actionType) {
           case 'exclude_row':
+            if (rule.conditions.isEmpty) {
+              values['_unconditional_excluded_from_calc'] = true;
+            }
             position.excludeFromTotals = true;
             values['excluded_from_calc'] = true;
             break;
           case 'set_field':
             final sourceCode = action.sourceFieldCode;
-            values[action.targetFieldCode!] = sourceCode != null
-                ? values[sourceCode]
-                : _parseConstant(action.constantValue);
+            calculations.add((
+              target: action.targetFieldCode!,
+              inputs: {
+                if (sourceCode != null && sourceCode != action.targetFieldCode)
+                  sourceCode,
+              },
+              run: () {
+                values[action.targetFieldCode!] = sourceCode != null
+                    ? values[sourceCode]
+                    : _parseConstant(action.constantValue);
+                systemInputs[action.targetFieldCode!] =
+                    values[action.targetFieldCode!];
+              },
+            ));
             break;
           case 'calculate_field':
             final formula = action.formula;
             if (formula != null) {
-              values[action.targetFieldCode!] = _formula(formula, values);
-              formulaDefinesLineTotal =
-                  action.targetFieldCode == 'line_total' ||
-                  formulaDefinesLineTotal;
+              calculations.add((
+                target: action.targetFieldCode!,
+                inputs: formula.tokens
+                    .where((token) => token.tokenType == 'field')
+                    .map((token) => token.fieldCode!)
+                    .toSet(),
+                run: () {
+                  values[action.targetFieldCode!] = _formula(
+                    formula,
+                    values,
+                    percentFields,
+                  );
+                  systemInputs[action.targetFieldCode!] =
+                      values[action.targetFieldCode!];
+                  formulaDefinesLineTotal =
+                      action.targetFieldCode == 'line_total' ||
+                      formulaDefinesLineTotal;
+                },
+              ));
             }
             break;
           case 'set_field_visibility':
@@ -112,21 +210,48 @@ final class QuoteConfiguredCalculationEngine {
       }
     }
 
+    // Pipeline outputs must not become the next calculation's system inputs.
+    systemInputs.addAll(values);
     final pipelines = configuration.moneyPipelines
         .where((item) => item.categoryClientId == categoryClientId)
         .toList(growable: false);
     double? total = pipelines.isEmpty ? null : 0;
     for (final pipeline in pipelines) {
-      final source =
-          _number(values[pipeline.manualPriceFieldCode]) ??
-          _requiredNumber(values, pipeline.basePriceFieldCode);
-      final markup = _number(values[pipeline.markupFieldCode]) ?? 0;
-      final discount = _number(values[pipeline.discountFieldCode]) ?? 0;
-      final quantity = _number(values[pipeline.quantityFieldCode]) ?? 1;
-      final price = source * (1 + markup / 100) * (1 - discount / 100);
-      final lineTotal = _round(price * quantity, pipeline.decimalPlaces);
-      values[pipeline.resultFieldCode] = lineTotal;
-      if (pipeline.includeResultInTotals) total = (total ?? 0) + lineTotal;
+      calculations.add((
+        target: pipeline.resultFieldCode,
+        inputs: {
+          pipeline.basePriceFieldCode,
+          if (pipeline.manualPriceFieldCode != null)
+            pipeline.manualPriceFieldCode!,
+          if (pipeline.markupFieldCode != null) pipeline.markupFieldCode!,
+          if (pipeline.discountFieldCode != null) pipeline.discountFieldCode!,
+          if (pipeline.quantityFieldCode != null) pipeline.quantityFieldCode!,
+        }..remove(pipeline.resultFieldCode),
+        run: () {
+          final source =
+              _number(values[pipeline.manualPriceFieldCode]) ??
+              _requiredNumber(values, pipeline.basePriceFieldCode);
+          final markup = _number(values[pipeline.markupFieldCode]) ?? 0;
+          final discount = _number(values[pipeline.discountFieldCode]) ?? 0;
+          final quantity = _number(values[pipeline.quantityFieldCode]) ?? 1;
+          final price = source * (1 + markup / 100) * (1 - discount / 100);
+          final lineTotal = _round(price * quantity, pipeline.decimalPlaces);
+          values[pipeline.resultFieldCode] = lineTotal;
+          if (pipeline.includeResultInTotals) total = (total ?? 0) + lineTotal;
+        },
+      ));
+    }
+    while (calculations.isNotEmpty) {
+      final index = calculations.indexWhere(
+        (job) =>
+            !calculations.any((writer) => job.inputs.contains(writer.target)),
+      );
+      if (index < 0) {
+        throw const FormatException(
+          'Циклическая зависимость между формулами и конвейерами. Проверьте исходные поля и поля результата.',
+        );
+      }
+      calculations.removeAt(index).run();
     }
     if (total == null &&
         formulaDefinesLineTotal &&
@@ -143,23 +268,25 @@ final class QuoteConfiguredCalculationEngine {
           amount *= _number(values[action.quantityFieldCode]) ?? 1;
         }
         total ??= position.legacyLineTotal;
-        total += action.aggregationOperation == 'subtract' ? -amount : amount;
+        total =
+            total! +
+            (action.aggregationOperation == 'subtract' ? -amount : amount);
       }
     }
 
     position
-      ..quantity = _number(values['quantity']) ?? position.quantity
+      ..quantity = _number(systemInputs['quantity']) ?? position.quantity
       ..purchasePrice =
-          _number(values['purchase_price']) ?? position.purchasePrice
-      ..manualPrice = _effectiveManualPrice(values, position)
+          _number(systemInputs['purchase_price']) ?? position.purchasePrice
+      ..manualPrice = _effectiveManualPrice(systemInputs, position)
       ..markupPercent =
-          _number(values['markup_value']) ?? position.markupPercent
+          _number(systemInputs['markup_value']) ?? position.markupPercent
       ..discountPercent =
-          _number(values['discount_value']) ?? position.discountPercent
+          _number(systemInputs['discount_value']) ?? position.discountPercent
       ..excludeFromTotals = values['excluded_from_calc'] is bool
           ? values['excluded_from_calc'] as bool
           : position.excludeFromTotals
-      ..configuredLineTotal = total == null ? null : _round(total, 2);
+      ..configuredLineTotal = total == null ? null : _round(total!, 2);
     if ((position.configuredLineTotal ?? 0) < 0) {
       throw const FormatException(
         'Итоговая стоимость позиции не может быть отрицательной.',
@@ -230,7 +357,11 @@ final class QuoteConfiguredCalculationEngine {
     return double.tryParse(normalized.replaceAll(',', '.')) ?? normalized;
   }
 
-  static double _formula(FormulaDraft formula, Map<String, dynamic> values) {
+  static double _formula(
+    FormulaDraft formula,
+    Map<String, dynamic> values,
+    Set<String> percentFields,
+  ) {
     final output = <FormulaTokenDraft>[];
     final operators = <FormulaTokenDraft>[];
     const priorities = {'add': 1, 'subtract': 1, 'multiply': 2, 'divide': 2};
@@ -262,7 +393,10 @@ final class QuoteConfiguredCalculationEngine {
     final stack = <double>[];
     for (final token in output) {
       if (token.tokenType == 'field') {
-        stack.add(_requiredNumber(values, token.fieldCode!));
+        final value = _requiredNumber(values, token.fieldCode!);
+        stack.add(
+          percentFields.contains(token.fieldCode) ? value / 100 : value,
+        );
       } else if (token.tokenType == 'constant') {
         stack.add(token.constantValue!.toDouble());
       } else {

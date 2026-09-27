@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
 import 'package:flutter/services.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
 import 'package:sklad_komforta_app/core/widgets/mobile_collapsible_navigation.dart';
 import 'package:sklad_komforta_app/features/company/company_controller.dart';
 import 'package:sklad_komforta_app/features/company/company_models.dart';
+import 'package:sklad_komforta_app/features/company/company_audit.dart';
 import 'package:sklad_komforta_app/features/company/configuration_edit_guard.dart';
 import 'package:sklad_komforta_app/features/onboarding/organization_onboarding_page.dart';
 
@@ -528,60 +530,23 @@ final class _AuditSection extends StatelessWidget {
                       icon: Icons.history_outlined,
                       text: 'Изменений пока нет.',
                     )
-                  : ListView.separated(
-                      padding: const EdgeInsets.all(22),
-                      itemCount: controller.auditEntries.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 8),
-                      itemBuilder: (context, index) {
-                        final entry = controller.auditEntries[index];
-                        final details = _auditDetailLines(entry);
-                        return Card(
-                          clipBehavior: Clip.antiAlias,
-                          child: _SafeExpansionTile(
-                            leading: const Icon(
-                              Icons.history_toggle_off_outlined,
-                              color: Color(0xFF6EA3FF),
-                            ),
-                            title: Text(
-                              '${_auditActionLabel(entry.action)} · ${_auditEntityLabel(entry.entityType)}',
-                            ),
-                            subtitle: Text(
-                              '${entry.actorName ?? 'Системное действие'} · ${_dateTime(entry.createdAt)}',
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.fromLTRB(18, 0, 18, 16),
-                              child: details.isEmpty
-                                  ? const Align(
-                                      alignment: Alignment.centerLeft,
-                                      child: Text(
-                                        'Подробности для этой старой записи отсутствуют.',
-                                        style: TextStyle(
-                                          color: Color(0xFF8FA4C2),
-                                        ),
-                                      ),
-                                    )
-                                  : Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        for (final detail in details)
-                                          Padding(
-                                            padding: const EdgeInsets.only(
-                                              bottom: 7,
-                                            ),
-                                            child: Text(
-                                              detail,
-                                              style: const TextStyle(
-                                                fontSize: 12,
-                                                color: Color(0xFFD2DCEC),
-                                              ),
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                            ),
-                          ),
-                        );
+                  : CompanyAuditList(
+                      entries: controller.auditEntries,
+                      names: {
+                        ...auditReferenceNames(
+                          controller.configuration?.toJson(),
+                        ),
+                        for (final role in controller.roles) role.id: role.name,
+                        for (final permission in controller.permissions)
+                          permission.code: permission.name,
+                        for (final employee in controller.employees)
+                          employee.membershipId: employee.displayName,
+                        for (final employee in controller.employees)
+                          employee.userId: employee.displayName,
+                        for (final client in controller.clients)
+                          client.id: client.name,
+                        for (final entity in controller.legalEntities)
+                          entity.id: entity.name,
                       },
                     ),
             ),
@@ -2269,7 +2234,10 @@ final class _DialogError extends StatelessWidget {
   final String message;
 
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) =>
+      AutoDismissNotice(message: message, child: _content(context));
+
+  Widget _content(BuildContext context) => Container(
     width: double.infinity,
     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
     decoration: BoxDecoration(
@@ -2486,99 +2454,6 @@ String _permissionName(List<CompanyPermissionModel> values, String code) =>
     };
 String _date(DateTime value) =>
     '${value.day.toString().padLeft(2, '0')}.${value.month.toString().padLeft(2, '0')}.${value.year}';
-String _dateTime(DateTime value) =>
-    '${_date(value)} ${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
-
-String _auditActionLabel(String value) => switch (value) {
-  'created' || 'import_created' => 'Создание',
-  'updated' || 'import_updated' => 'Изменение',
-  'deleted' => 'Удаление',
-  'image_added' => 'Добавление изображения',
-  'image_deleted' => 'Удаление изображения',
-  'onboarding_completed' => 'Настройка организации',
-  _ => 'Изменение',
-};
-
-String _auditEntityLabel(String value) => switch (value) {
-  'legal_entity' => 'юридическое лицо',
-  'client' => 'клиент',
-  'employee' || 'employee_access' => 'сотрудник',
-  'role' => 'роль',
-  'catalog_item' => 'карточка каталога',
-  'catalog_item_image' => 'изображение товара',
-  'catalog_item_relation' => 'связь карточек',
-  'organization' ||
-  'company_profile' ||
-  'company_configuration' => 'организация',
-  _ => 'объект',
-};
-
-List<String> _auditDetailLines(CompanyAuditEntryModel entry) {
-  final before = _auditMap(entry.diff['before']);
-  final after = _auditMap(entry.diff['after']);
-  final keys = {...before.keys, ...after.keys}
-    ..removeWhere(
-      (key) => const {
-        'id',
-        'createdAt',
-        'updatedAt',
-        'createdBy',
-        'temporaryPassword',
-        'password',
-      }.contains(key),
-    );
-  final result = <String>[];
-  for (final key in keys) {
-    final oldValue = before[key];
-    final newValue = after[key];
-    if (_auditValue(oldValue) == _auditValue(newValue)) continue;
-    result.add(
-      '${_auditFieldLabel(key)}: ${_auditValue(oldValue)} → ${_auditValue(newValue)}',
-    );
-  }
-  return result;
-}
-
-Map<String, dynamic> _auditMap(Object? value) => value is Map
-    ? value.map((key, item) => MapEntry(key.toString(), item))
-    : const {};
-
-String _auditValue(Object? value) {
-  if (value == null || value == '') return '—';
-  if (value is bool) return value ? 'Да' : 'Нет';
-  if (value is List) return value.isEmpty ? '—' : value.join(', ');
-  if (value is Map) return 'изменён состав данных';
-  return value.toString();
-}
-
-String _auditFieldLabel(String value) => switch (value) {
-  'name' || 'displayName' => 'Название / имя',
-  'companyType' => 'Тип',
-  'companyName' => 'Название клиента',
-  'legalName' => 'Юридическое название',
-  'inn' => 'ИНН',
-  'kpp' => 'КПП',
-  'ogrn' => 'ОГРН / ОГРНИП',
-  'address' => 'Адрес',
-  'phone' => 'Телефон',
-  'email' => 'Email',
-  'website' => 'Сайт',
-  'directorName' => 'Директор',
-  'signatoryName' => 'Подписант',
-  'signatoryTitle' => 'Должность подписанта',
-  'bankName' => 'Банк',
-  'bankBik' => 'БИК',
-  'bankAccount' => 'Расчётный счёт',
-  'corrAccount' => 'Корреспондентский счёт',
-  'passportSeries' => 'Серия паспорта',
-  'passportNumber' => 'Номер паспорта',
-  'passportIssuedBy' => 'Кем выдан паспорт',
-  'roleId' => 'Роль',
-  'supervisorMembershipId' => 'Руководитель',
-  'isActive' => 'Активность',
-  'isDefault' => 'Исполнитель по умолчанию',
-  _ => value,
-};
 
 final class _CompanyError extends StatelessWidget {
   const _CompanyError({required this.message, required this.onRetry});

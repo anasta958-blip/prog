@@ -18,6 +18,7 @@ abstract interface class CatalogGateway {
     required String accessToken,
     String? categoryId,
     String? sectionId,
+    String? groupId,
     String? status,
     String? search,
     required int page,
@@ -66,6 +67,16 @@ abstract interface class CatalogRelationGateway {
 }
 
 /// XLSX и массовые операции вынесены из CRUD-контракта для независимого тестирования.
+abstract interface class CatalogBulkRelationGateway {
+  Future<CatalogBulkResult> editBulkRelation({
+    required String accessToken,
+    required List<String> itemIds,
+    required String dependencyId,
+    required String sourceItemId,
+    required bool remove,
+  });
+}
+
 abstract interface class CatalogTransferGateway {
   Future<CatalogSpreadsheetDownload> downloadTemplate({
     required String accessToken,
@@ -97,11 +108,34 @@ final class CatalogApi
         CatalogGateway,
         CatalogImageGateway,
         CatalogRelationGateway,
+        CatalogBulkRelationGateway,
         CatalogTransferGateway {
   CatalogApi(this._config) : _client = createPlatformHttpClient();
 
   final AppConfig _config;
   final http.Client _client;
+
+  @override
+  Future<CatalogBulkResult> editBulkRelation({
+    required String accessToken,
+    required List<String> itemIds,
+    required String dependencyId,
+    required String sourceItemId,
+    required bool remove,
+  }) async {
+    final data = await _send(
+      'POST',
+      '/catalog/items/bulk',
+      accessToken,
+      body: {
+        'itemIds': itemIds,
+        'action': remove ? 'remove_relation' : 'add_relation',
+        'dependencyId': dependencyId,
+        'sourceItemId': sourceItemId,
+      },
+    );
+    return CatalogBulkResult.fromJson(data as Map<String, dynamic>);
+  }
 
   @override
   Future<CatalogConfiguration> getConfiguration(String accessToken) async {
@@ -114,6 +148,7 @@ final class CatalogApi
     required String accessToken,
     String? categoryId,
     String? sectionId,
+    String? groupId,
     String? status,
     String? search,
     required int page,
@@ -127,6 +162,7 @@ final class CatalogApi
     };
     if (categoryId case final value?) query['categoryId'] = value;
     if (sectionId case final value?) query['sectionId'] = value;
+    if (groupId case final value?) query['groupId'] = value;
     final data = await _send(
       'GET',
       '/catalog/items',
