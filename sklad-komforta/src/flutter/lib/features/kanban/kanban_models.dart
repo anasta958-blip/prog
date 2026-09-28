@@ -217,6 +217,7 @@ final class KanbanCard {
     this.createdByName,
     this.updatedBy,
     this.updatedByName,
+    this.isArchived = false,
   });
 
   final String id;
@@ -233,6 +234,7 @@ final class KanbanCard {
   final String? updatedBy;
   final String? updatedByName;
   final DateTime updatedAt;
+  final bool isArchived;
 
   factory KanbanCard.fromJson(Map<String, dynamic> json) => KanbanCard(
     id: json['id'] as String,
@@ -251,6 +253,7 @@ final class KanbanCard {
     updatedBy: json['updatedBy'] as String?,
     updatedByName: json['updatedByName'] as String?,
     updatedAt: DateTime.parse(json['updatedAt'] as String),
+    isArchived: json['isArchived'] as bool? ?? false,
   );
 }
 

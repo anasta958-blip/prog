@@ -74,7 +74,8 @@ public sealed record KanbanCardSummary(
     DateTimeOffset CreatedAt,
     Guid? UpdatedBy,
     string? UpdatedByName,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    bool IsArchived = false);
 
 /// <summary>Страница карточек одного столбца и полное количество в нём.</summary>
 public sealed record KanbanCardPage(
@@ -95,7 +96,10 @@ public sealed record KanbanCardQuery(
     int Page = 1,
     int PageSize = 20,
     Guid? AuthorUserId = null,
-    bool IncludeOwn = true);
+    bool IncludeOwn = true,
+    bool Archived = false);
+
+public sealed record ArchiveKanbanCardRequest(bool Archived);
 
 /// <summary>Данные создания или полной замены универсальной карточки.</summary>
 public sealed record SaveKanbanCardRequest(
@@ -123,4 +127,5 @@ public interface IKanbanService
     Task<KanbanCardSummary> UpdateCardAsync(Guid actorUserId, Guid boardId, Guid cardId, SaveKanbanCardRequest request, CancellationToken cancellationToken);
     Task<KanbanCardSummary> MoveCardAsync(Guid actorUserId, Guid boardId, Guid cardId, MoveKanbanCardRequest request, CancellationToken cancellationToken);
     Task DeleteCardAsync(Guid actorUserId, Guid boardId, Guid cardId, CancellationToken cancellationToken);
+    Task<KanbanCardSummary> SetArchivedAsync(Guid actorUserId, Guid boardId, Guid cardId, bool archived, CancellationToken cancellationToken);
 }

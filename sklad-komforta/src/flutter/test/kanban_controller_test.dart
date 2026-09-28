@@ -21,6 +21,59 @@ void main() {
     environment: 'test',
   );
 
+  testWidgets(
+    'archive hides cards, persists after reload and restores content',
+    (tester) async {
+      final auth = _authorizedController(config);
+      final gateway = _MemoryKanbanGateway();
+      final controller = KanbanController(config, auth, gateway: gateway);
+      await controller.initialize();
+      await controller.saveCard(
+        KanbanCardDraft(
+          columnId: 'quote-first',
+          categoryId: 'equipment',
+          title: 'Архивная карточка',
+          values: {'note': 'Сохранить'},
+        ),
+      );
+      final card = controller.pageFor('quote-first')!.items.single;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData.dark(),
+          home: Scaffold(body: KanbanPage(controller: controller)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Действия карточки'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('В архив'));
+      await tester.pumpAndSettle();
+      expect(controller.pageFor('quote-first')!.items, isEmpty);
+      expect(controller.archiveFor('quote-first')!.total, 1);
+      expect(find.text('Архивная карточка'), findsNothing);
+      await tester.pump(const Duration(seconds: 6));
+      await tester.pumpAndSettle();
+      await controller.reload();
+      await tester.pumpAndSettle();
+      expect(controller.archiveFor('quote-first')!.total, 1);
+      await tester.tap(find.text('Архив').first);
+      await tester.pumpAndSettle();
+      expect(find.text('Архивная карточка'), findsOneWidget);
+      final archived = controller.archiveFor('quote-first')!.items.single;
+      expect(controller.canMoveCard(archived, 'quote-second'), isFalse);
+      await tester.tap(find.text('Из архива'));
+      await tester.pumpAndSettle();
+      final restored = controller.pageFor('quote-first')!.items.single;
+      expect(restored.id, card.id);
+      expect(restored.values, card.values);
+      expect(controller.archiveFor('quote-first')!.total, 0);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+      auth.dispose();
+    },
+  );
+
   test('контроллер открывает первый настроенный канбан', () async {
     final auth = _authorizedController(config);
     final gateway = _MemoryKanbanGateway();
@@ -348,11 +401,14 @@ final class _MemoryKanbanGateway implements KanbanGateway {
     required int pageSize,
     String? authorUserId,
     bool includeOwn = true,
+    bool archived = false,
   }) async {
     lastAuthorUserId = authorUserId;
     lastIncludeOwn = includeOwn;
-    cardRequests[columnId] = (cardRequests[columnId] ?? 0) + 1;
-    final source = cards[columnId] ?? const [];
+    if (!archived) cardRequests[columnId] = (cardRequests[columnId] ?? 0) + 1;
+    final source = (cards[columnId] ?? const <KanbanCard>[])
+        .where((card) => card.isArchived == archived)
+        .toList();
     final start = (page - 1) * pageSize;
     return KanbanCardPage(
       items: start >= source.length
@@ -362,6 +418,35 @@ final class _MemoryKanbanGateway implements KanbanGateway {
       pageSize: pageSize,
       total: source.length,
     );
+  }
+
+  @override
+  Future<void> setArchived(
+    String accessToken,
+    String boardId,
+    String cardId,
+    bool archived,
+  ) async {
+    for (final source in cards.values) {
+      final index = source.indexWhere((card) => card.id == cardId);
+      if (index < 0) continue;
+      final card = source[index];
+      source[index] = KanbanCard(
+        id: card.id,
+        number: card.number,
+        workflowId: card.workflowId,
+        columnId: card.columnId,
+        categoryId: card.categoryId,
+        sectionId: card.sectionId,
+        title: card.title,
+        values: card.values,
+        createdAt: card.createdAt,
+        updatedAt: card.updatedAt,
+        isArchived: archived,
+      );
+      return;
+    }
+    throw StateError('Card not found');
   }
 
   @override

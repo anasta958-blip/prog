@@ -36,6 +36,7 @@ internal static class KanbanEndpoints
                 int? pageSize,
                 Guid? authorUserId,
                 bool? includeOwn,
+                bool? archived,
                 IKanbanService service,
                 CancellationToken token) =>
                 Results.Ok(ApiResponse.Success(await service.GetCardsAsync(
@@ -46,7 +47,8 @@ internal static class KanbanEndpoints
                         page ?? 1,
                         pageSize ?? 20,
                         authorUserId,
-                        includeOwn ?? true),
+                        includeOwn ?? true,
+                        archived ?? false),
                     token))))
             .RequireTenantPermission("kanban.view");
         kanbans.MapGet("/{boardId:guid}/cards/{cardId:guid}", async (
@@ -98,6 +100,12 @@ internal static class KanbanEndpoints
                 return Results.Ok(ApiResponse.Success(new { deleted = true }));
             })
             .RequireTenantPermission("kanban.cards.delete");
+        kanbans.MapPost("/{boardId:guid}/cards/{cardId:guid}/archive", async (
+                HttpContext context, Guid boardId, Guid cardId,
+                ArchiveKanbanCardRequest request, IKanbanService service, CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.SetArchivedAsync(
+                    UserId(context.User), boardId, cardId, request.Archived, token))))
+            .RequireTenantPermission("kanban.cards.edit");
         return endpoints;
     }
 

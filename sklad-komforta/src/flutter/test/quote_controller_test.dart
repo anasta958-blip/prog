@@ -862,6 +862,132 @@ void main() {
     },
   );
 
+  testWidgets('group column is omitted only for sections without groups', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1600, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final auth = AuthController(
+      config,
+      api: _NoopAuthGateway(),
+      tokens: _MemoryTokenRepository(),
+    )..accessToken = 'access-token';
+    final controller = QuoteController(config, auth);
+    const emptySection = CatalogSection(
+      id: 'no-groups',
+      name: 'Без групп',
+      sortOrder: 1,
+      groups: [],
+    );
+    controller.catalog = CatalogConfiguration(
+      categories: [
+        CatalogCategory(
+          id: _equipmentCategory.id,
+          clientId: 'equipment',
+          name: 'Оборудование',
+          sortOrder: 0,
+          fields: _equipmentCategory.fields,
+          sections: [_equipmentSection, emptySection],
+        ),
+      ],
+      dictionaries: [],
+      dependencies: [],
+    );
+    final sections = [
+      for (final source in [_equipmentSection, emptySection])
+        QuoteSectionDraft(
+          id: source.id,
+          catalogSectionId: source.id,
+          name: source.name,
+          positions: [],
+        ),
+    ];
+    final category = QuoteCategoryDraft(
+      id: 'category',
+      catalogCategoryId: _equipmentCategory.id,
+      name: 'Оборудование',
+      sections: sections,
+    );
+    final variant = QuoteVariantDraft(
+      id: 'variant',
+      name: 'Вариант',
+      categories: [category],
+    );
+    final type = QuoteProposalTypeDraft(
+      id: 'type',
+      name: 'Тип',
+      variants: [variant],
+    );
+    controller
+      ..draft = QuoteDraft(
+        kind: QuoteKind.quote,
+        title: 'КП',
+        clientId: 'client',
+        executorCompanyId: 'executor',
+        selectionMode: 'variant',
+        proposalTypes: [type],
+      )
+      ..activeTypeId = type.id
+      ..activeVariantId = variant.id;
+    final board = KanbanBoard(
+      id: _quoteBoard.id,
+      code: _quoteBoard.code,
+      name: _quoteBoard.name,
+      specialization: _quoteBoard.specialization,
+      columns: [],
+      transitions: [],
+      categories: [
+        KanbanCategory(
+          categoryId: _equipmentCategory.id,
+          name: 'Оборудование',
+          sortOrder: 0,
+          sections: [],
+          fields: [
+            const KanbanField(
+              code: 'group',
+              label: 'Группа',
+              fieldType: 'dictionary',
+              isRequired: true,
+              sortOrder: -1,
+              options: [],
+            ),
+            ..._quoteBoard.categories.single.fields,
+          ],
+        ),
+      ],
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: QuoteEditorPage(
+            config: config,
+            authController: auth,
+            board: board,
+            controller: controller,
+            onBack: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('ГРУППА'), findsOneWidget);
+    await tester.tap(find.byTooltip('Добавить позицию').last);
+    await tester.pumpAndSettle();
+    final row = sections.last.positions.single;
+    expect(find.byKey(ValueKey('quote-entry-${row.id}-group')), findsNothing);
+    expect(
+      FocusManager.instance.primaryFocus?.debugLabel,
+      'quote-entry-${row.id}-name',
+    );
+    expect(row.values.containsKey('group'), isFalse);
+    expect(sections.first.positions, isEmpty);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+    auth.dispose();
+  });
+
   testWidgets('позиция вводится в строке: автопоиск, Enter и новая строка', (
     tester,
   ) async {

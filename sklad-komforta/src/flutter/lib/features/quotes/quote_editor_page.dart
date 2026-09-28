@@ -1616,7 +1616,14 @@ final class _CategoryBlock extends StatelessWidget {
                   controller: controller,
                   category: category,
                   section: section,
-                  fields: fields,
+                  fields: [
+                    for (final field in fields)
+                      if (field.code != 'group' ||
+                          controller
+                              .catalogGroups(category, section)
+                              .isNotEmpty)
+                        field,
+                  ],
                   expanded: expandedSections.contains(section.id),
                   onToggle: () => onToggleSection(section.id),
                   onAddPosition: () => onAddPosition(section),
@@ -3484,6 +3491,7 @@ final class _CatalogEntryFieldState extends State<_CatalogEntryField> {
   );
   final OverlayPortalController overlay = OverlayPortalController();
   final LayerLink link = LayerLink();
+
   /// Последнее подтверждённое значение. Фиксируется в [initState]: ленивая
   /// инициализация прочитала бы уже изменённое значение модели.
   late String committed;

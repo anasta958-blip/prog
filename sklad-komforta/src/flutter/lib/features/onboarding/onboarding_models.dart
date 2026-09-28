@@ -637,6 +637,36 @@ final class OrganizationOnboardingDraft {
   List<CalculationRuleDraft> rules;
   List<MoneyPipelineDraft> moneyPipelines;
 
+  /// Group is a structural field, available only for categories with groups.
+  void syncGroupFields() {
+    for (final category in categories) {
+      final hasGroups = category.sections.any(
+        (section) => section.groups.isNotEmpty,
+      );
+      if (hasGroups) {
+        if (!category.fields.any((field) => field.fieldCode == 'group')) {
+          category.fields.insert(
+            0,
+            CatalogFieldDraft(
+              fieldCode: 'group',
+              isVisible: true,
+              isRequired: false,
+            ),
+          );
+        }
+      } else {
+        category.fields.removeWhere((field) => field.fieldCode == 'group');
+        for (final workflow in workflows) {
+          for (final selection in workflow.categories) {
+            if (selection.categoryClientId == category.clientId) {
+              selection.fieldCodes.removeWhere((code) => code == 'group');
+            }
+          }
+        }
+      }
+    }
+  }
+
   Set<String> occupiedCalculationFields(
     String categoryClientId, {
     MoneyPipelineDraft? exceptPipeline,
@@ -716,18 +746,21 @@ final class OrganizationOnboardingDraft {
         .toList(),
   );
 
-  Map<String, dynamic> toJson() => {
-    'currentStep': currentStep,
-    'company': company.toJson(),
-    'workflows': workflows.map((item) => item.toJson()).toList(),
-    'categories': categories.map((item) => item.toJson()).toList(),
-    'fields': fields.map((item) => item.toJson()).toList(),
-    'roles': roles.map((item) => item.toJson()).toList(),
-    'dictionaries': dictionaries.map((item) => item.toJson()).toList(),
-    'dependencies': dependencies.map((item) => item.toJson()).toList(),
-    'rules': rules.map((item) => item.toJson()).toList(),
-    'moneyPipelines': moneyPipelines.map((item) => item.toJson()).toList(),
-  };
+  Map<String, dynamic> toJson() {
+    syncGroupFields();
+    return {
+      'currentStep': currentStep,
+      'company': company.toJson(),
+      'workflows': workflows.map((item) => item.toJson()).toList(),
+      'categories': categories.map((item) => item.toJson()).toList(),
+      'fields': fields.map((item) => item.toJson()).toList(),
+      'roles': roles.map((item) => item.toJson()).toList(),
+      'dictionaries': dictionaries.map((item) => item.toJson()).toList(),
+      'dependencies': dependencies.map((item) => item.toJson()).toList(),
+      'rules': rules.map((item) => item.toJson()).toList(),
+      'moneyPipelines': moneyPipelines.map((item) => item.toJson()).toList(),
+    };
+  }
 }
 
 /// Количество рабочих данных, которые зависят от удаляемой категории.

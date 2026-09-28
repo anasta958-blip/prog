@@ -27,6 +27,93 @@ final class KanbanController extends ChangeNotifier {
   bool includeOwnCards = true;
   final Map<String, KanbanCardPage> _columnPages = {};
   final Set<String> _loadingColumns = {};
+  final Map<String, KanbanCardPage> _archivePages = {};
+  final Set<String> expandedArchives = {};
+  bool archiveLoading = false;
+  KanbanCardPage? archiveFor(String columnId) => _archivePages[columnId];
+
+  void toggleArchive(String columnId) {
+    if (!expandedArchives.remove(columnId)) expandedArchives.add(columnId);
+    notifyListeners();
+  }
+
+  Future<void> _readArchive(String columnId, {int page = 1}) async {
+    final selectedBoard = board;
+    if (selectedBoard == null) return;
+    var result = await _authorized(
+      (token) => _gateway.getCards(
+        token,
+        selectedBoard.id,
+        columnId,
+        page: page,
+        pageSize: pageSize,
+        authorUserId: selectedAuthorUserId,
+        includeOwn: includeOwnCards,
+        archived: true,
+      ),
+    );
+    if (result.items.isEmpty && page > 1) {
+      result = await _authorized(
+        (token) => _gateway.getCards(
+          token,
+          selectedBoard.id,
+          columnId,
+          page: 1,
+          pageSize: pageSize,
+          authorUserId: selectedAuthorUserId,
+          includeOwn: includeOwnCards,
+          archived: true,
+        ),
+      );
+    }
+    if (board?.id == selectedBoard.id) _archivePages[columnId] = result;
+  }
+
+  Future<void> loadArchive(String columnId, {int page = 1}) async {
+    if (archiveLoading) return;
+    archiveLoading = true;
+    notifyListeners();
+    try {
+      await _readArchive(columnId, page: page);
+    } on ApiException catch (exception) {
+      error = exception.message;
+    } on Object {
+      error = 'Не удалось загрузить архив.';
+    } finally {
+      archiveLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> setArchived(KanbanCard card, bool archived) async {
+    final selectedBoard = board;
+    if (selectedBoard == null || saving || loading) return false;
+    saving = true;
+    error = null;
+    notifyListeners();
+    try {
+      await _authorized(
+        (token) =>
+            _gateway.setArchived(token, selectedBoard.id, card.id, archived),
+      );
+      await _reloadColumnSilently(card.columnId);
+      await _readArchive(
+        card.columnId,
+        page: _archivePages[card.columnId]?.page ?? 1,
+      );
+      return true;
+    } on ApiException catch (exception) {
+      error = exception.message;
+      return false;
+    } on Object {
+      error = 'Не удалось изменить состояние архива. Обновите канбан.';
+      return false;
+    } finally {
+      saving = false;
+      notifyListeners();
+    }
+  }
+
   bool loading = false;
   bool saving = false;
   String? error;
@@ -44,7 +131,7 @@ final class KanbanController extends ChangeNotifier {
   /// клиент использует ту же направленную матрицу переходов, что и backend.
   bool canMoveCard(KanbanCard card, String targetColumnId) {
     final selectedBoard = board;
-    if (selectedBoard == null) return false;
+    if (selectedBoard == null || card.isArchived) return false;
     if (card.columnId == targetColumnId) return true;
     return selectedBoard.transitions.any(
       (transition) =>
@@ -197,6 +284,7 @@ final class KanbanController extends ChangeNotifier {
         );
       }
       await _reloadColumnSilently(draft.columnId);
+      if (card?.isArchived == true) await _readArchive(draft.columnId);
       return true;
     } on ApiException catch (exception) {
       error = exception.message;
@@ -223,6 +311,12 @@ final class KanbanController extends ChangeNotifier {
       );
       final current = _columnPages[card.columnId]?.page ?? 1;
       await _reloadColumnSilently(card.columnId, requestedPage: current);
+      if (card.isArchived) {
+        await _readArchive(
+          card.columnId,
+          page: _archivePages[card.columnId]?.page ?? 1,
+        );
+      }
       return true;
     } on ApiException catch (exception) {
       error = exception.message;
@@ -304,6 +398,7 @@ final class KanbanController extends ChangeNotifier {
     final selectedBoard = board;
     if (selectedBoard == null) return;
     _columnPages.clear();
+    _archivePages.clear();
     final pages = await Future.wait([
       for (final column in selectedBoard.columns)
         _authorized(
@@ -320,6 +415,7 @@ final class KanbanController extends ChangeNotifier {
     ]);
     for (var index = 0; index < selectedBoard.columns.length; index++) {
       _columnPages[selectedBoard.columns[index].id] = pages[index];
+      await _readArchive(selectedBoard.columns[index].id);
     }
   }
 
@@ -341,8 +437,8 @@ final class KanbanController extends ChangeNotifier {
         includeOwn: includeOwnCards,
       ),
     );
-    if (result.items.isEmpty && result.total > 0 && targetPage > 1) {
-      targetPage = result.pageCount;
+    if (result.items.isEmpty && targetPage > 1) {
+      targetPage = result.total > 0 ? result.pageCount : 1;
       result = await _authorized(
         (token) => _gateway.getCards(
           token,

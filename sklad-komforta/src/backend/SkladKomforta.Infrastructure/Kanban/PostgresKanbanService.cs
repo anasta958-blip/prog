@@ -128,12 +128,13 @@ internal sealed class PostgresKanbanService(
                    card.category_id, card.section_id, card.title, card.values::text,
                    card.created_by, creator.display_name, card.created_at,
                    card.updated_by, updater.display_name, card.updated_at,
-                   count(*) OVER()
+                   card.is_archived, count(*) OVER()
             FROM kanban_cards AS card
             LEFT JOIN public.users AS creator ON creator.id = card.created_by
             LEFT JOIN public.users AS updater ON updater.id = card.updated_by
             WHERE card.workflow_id = @workflow_id
               AND card.column_id = @column_id
+              AND card.is_archived = @archived
               AND card.deleted_at IS NULL
               {visibilityFilter}
             ORDER BY card.sort_order, card.id
@@ -141,6 +142,7 @@ internal sealed class PostgresKanbanService(
             """;
         AddParameter(command, "workflow_id", boardId);
         AddParameter(command, "column_id", query.ColumnId);
+        AddParameter(command, "archived", query.Archived);
         AddParameter(command, "visible_user_ids", selectedUserIds);
         AddParameter(command, "limit", pageSize);
         AddParameter(command, "offset", (page - 1) * pageSize);
@@ -151,7 +153,7 @@ internal sealed class PostgresKanbanService(
         while (await reader.ReadAsync(cancellationToken))
         {
             items.Add(ReadCard(reader));
-            total = checked((int)reader.GetInt64(14));
+            total = checked((int)reader.GetInt64(15));
         }
         return new KanbanCardPage(items, page, pageSize, total);
     }
@@ -264,6 +266,8 @@ internal sealed class PostgresKanbanService(
         await LockBoardMoveAsync(connection, transaction, boardId, cancellationToken);
         var before = await ReadVisibleCardAsync(connection, transaction, actorUserId, boardId, cardId, cancellationToken);
         await EnsureColumnAsync(connection, transaction, boardId, request.TargetColumnId, cancellationToken);
+        if (before.IsArchived)
+            throw new IdentityException(409, "kanban_card_archived", "Сначала верните карточку из архива.");
         if (before.ColumnId != request.TargetColumnId)
             await EnsureTransitionAsync(
                 connection,
@@ -315,6 +319,42 @@ internal sealed class PostgresKanbanService(
         await WriteAuditAsync(connection, transaction, actorUserId, cardId, "moved", before, moved, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return moved;
+    }
+
+    public async Task<KanbanCardSummary> SetArchivedAsync(
+        Guid actorUserId, Guid boardId, Guid cardId, bool archived, CancellationToken cancellationToken)
+    {
+        await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await LockBoardMoveAsync(connection, transaction, boardId, cancellationToken);
+        var before = await ReadVisibleCardAsync(connection, transaction, actorUserId, boardId, cardId, cancellationToken);
+        if (before.IsArchived == archived)
+        {
+            await transaction.CommitAsync(cancellationToken);
+            return before;
+        }
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            UPDATE kanban_cards SET is_archived = @archived,
+                updated_by = @actor, updated_at = now(),
+                sort_order = CASE WHEN @archived THEN sort_order ELSE
+                    COALESCE((SELECT max(other.sort_order) + 1 FROM kanban_cards other
+                        WHERE other.workflow_id = @workflow_id AND other.column_id = @column_id
+                          AND other.deleted_at IS NULL AND NOT other.is_archived), 0) END
+            WHERE id = @id AND workflow_id = @workflow_id AND deleted_at IS NULL
+            """;
+        AddParameter(command, "archived", archived);
+        AddParameter(command, "actor", actorUserId);
+        AddParameter(command, "id", cardId);
+        AddParameter(command, "workflow_id", boardId);
+        AddParameter(command, "column_id", before.ColumnId);
+        if (await command.ExecuteNonQueryAsync(cancellationToken) != 1) throw CardNotFound();
+        var after = await ReadCardAsync(connection, transaction, boardId, cardId, cancellationToken);
+        await WriteAuditAsync(connection, transaction, actorUserId, cardId,
+            archived ? "archived" : "restored", before, after, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return after;
     }
 
     public async Task DeleteCardAsync(
@@ -783,6 +823,7 @@ internal sealed class PostgresKanbanService(
             WHERE workflow_id = @workflow_id
               AND column_id = @column_id
               AND deleted_at IS NULL
+              AND NOT is_archived
             ORDER BY sort_order, id
             """;
         AddParameter(command, "workflow_id", boardId);
@@ -834,7 +875,7 @@ internal sealed class PostgresKanbanService(
             SELECT card.id, card.card_number, card.workflow_id, card.column_id,
                    card.category_id, card.section_id, card.title, card.values::text,
                    card.created_by, creator.display_name, card.created_at,
-                   card.updated_by, updater.display_name, card.updated_at
+                   card.updated_by, updater.display_name, card.updated_at, card.is_archived
             FROM kanban_cards AS card
             LEFT JOIN public.users AS creator ON creator.id = card.created_by
             LEFT JOIN public.users AS updater ON updater.id = card.updated_by
@@ -1003,7 +1044,8 @@ internal sealed class PostgresKanbanService(
         new DateTimeOffset(reader.GetFieldValue<DateTime>(10)),
         reader.IsDBNull(11) ? null : reader.GetGuid(11),
         reader.IsDBNull(12) ? null : reader.GetString(12),
-        new DateTimeOffset(reader.GetFieldValue<DateTime>(13)));
+        new DateTimeOffset(reader.GetFieldValue<DateTime>(13)),
+        reader.GetBoolean(14));
 
     private static async Task WriteAuditAsync(
         DbConnection connection,

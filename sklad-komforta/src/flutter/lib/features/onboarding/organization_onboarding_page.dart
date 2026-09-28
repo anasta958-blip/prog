@@ -411,7 +411,12 @@ final class _OrganizationOnboardingPageState
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) {
+    draft.syncGroupFields();
+    return _buildPage(context);
+  }
+
+  Widget _buildPage(BuildContext context) => Scaffold(
     body: DecoratedBox(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
@@ -1306,7 +1311,9 @@ final class _OrganizationOnboardingPageState
               return _DraggableOrderedRow(
                 key: ValueKey('${category.clientId}:${field.fieldCode}'),
                 index: index,
-                onDelete: isFixedCatalogField(field.fieldCode)
+                onDelete:
+                    isFixedCatalogField(field.fieldCode) ||
+                        field.fieldCode == 'group'
                     ? null
                     : () => setState(() {
                         category.fields.remove(field);

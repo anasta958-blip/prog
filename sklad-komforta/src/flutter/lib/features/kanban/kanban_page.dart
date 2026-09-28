@@ -633,10 +633,30 @@ final class _KanbanColumnPanel extends StatelessWidget {
   final ValueChanged<Offset> onDragMove;
   final VoidCallback onDragEnd;
 
+  Future<void> _archiveCard(BuildContext context, KanbanCard card) async {
+    final success = await controller.setArchived(card, !card.isArchived);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        AppSnackBar(
+          content: Text(
+            success
+                ? (card.isArchived
+                      ? 'Карточка возвращена из архива.'
+                      : 'Карточка перемещена в архив.')
+                : (controller.error ?? 'Не удалось изменить архив.'),
+          ),
+        ),
+      );
+  }
+
   @override
   Widget build(BuildContext context) {
     final accent = _parseColor(column.color);
     final page = controller.pageFor(column.id);
+    final archive = controller.archiveFor(column.id);
+    final archiveExpanded = controller.expandedArchives.contains(column.id);
     final busy = controller.isColumnLoading(column.id);
     return Container(
       decoration: BoxDecoration(
@@ -757,6 +777,9 @@ final class _KanbanColumnPanel extends StatelessWidget {
                           accent: accent,
                           onTap: () => onOpen(card),
                           onDelete: () => onDelete(card),
+                          onArchive: controller.saving
+                              ? null
+                              : () => _archiveCard(context, card),
                           onDragMove: onDragMove,
                           onDragEnd: onDragEnd,
                         ),
@@ -772,6 +795,61 @@ final class _KanbanColumnPanel extends StatelessWidget {
               onPage: (value) => controller.loadColumn(column.id, page: value),
             ),
           ],
+          const Divider(height: 1, indent: 10, endIndent: 10),
+          TextButton(
+            onPressed: () => controller.toggleArchive(column.id),
+            child: Row(
+              children: [
+                const Text('Архив'),
+                const SizedBox(width: 8),
+                Text('${archive?.total ?? 0}'),
+                const Spacer(),
+                Icon(
+                  archiveExpanded ? Icons.expand_less : Icons.expand_more,
+                  size: 18,
+                ),
+              ],
+            ),
+          ),
+          if (archiveExpanded)
+            Flexible(
+              child: Column(
+                children: [
+                  Expanded(
+                    child: archive == null || archive.items.isEmpty
+                        ? const Center(child: Text('Архив пуст'))
+                        : ListView.separated(
+                            padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+                            itemCount: archive.items.length,
+                            separatorBuilder: (_, _) =>
+                                const SizedBox(height: 8),
+                            itemBuilder: (context, index) {
+                              final card = archive.items[index];
+                              return _KanbanCardTile(
+                                card: card,
+                                board: board,
+                                accent: accent,
+                                onTap: () => onOpen(card),
+                                onDelete: () => onDelete(card),
+                                onArchive: controller.saving
+                                    ? null
+                                    : () => _archiveCard(context, card),
+                                onDragMove: (_) {},
+                                onDragEnd: () {},
+                              );
+                            },
+                          ),
+                  ),
+                  if (archive != null && archive.pageCount > 1)
+                    _ColumnPager(
+                      page: archive,
+                      busy: controller.archiveLoading,
+                      onPage: (value) =>
+                          controller.loadArchive(column.id, page: value),
+                    ),
+                ],
+              ),
+            ),
         ],
       ),
     );
@@ -911,6 +989,7 @@ final class _KanbanCardTile extends StatelessWidget {
     required this.onDragMove,
     required this.onDragEnd,
     this.dragPreview = false,
+    this.onArchive,
   });
 
   final KanbanCard card;
@@ -921,6 +1000,7 @@ final class _KanbanCardTile extends StatelessWidget {
   final ValueChanged<Offset> onDragMove;
   final VoidCallback onDragEnd;
   final bool dragPreview;
+  final VoidCallback? onArchive;
 
   KanbanCategory? get category {
     for (final item in board.categories) {
@@ -977,6 +1057,21 @@ final class _KanbanCardTile extends StatelessWidget {
                       ),
                       if (!dragPreview) ...[
                         const SizedBox(width: 6),
+                        if (!card.isArchived)
+                          PopupMenuButton<String>(
+                            tooltip: 'Действия карточки',
+                            enabled: onArchive != null,
+                            padding: EdgeInsets.zero,
+                            icon: const Icon(Icons.more_vert, size: 18),
+                            constraints: const BoxConstraints(minWidth: 130),
+                            onSelected: (_) => onArchive?.call(),
+                            itemBuilder: (_) => const [
+                              PopupMenuItem(
+                                value: 'archive',
+                                child: Text('В архив'),
+                              ),
+                            ],
+                          ),
                         IconButton(
                           tooltip: 'Удалить',
                           onPressed: onDelete,
@@ -993,6 +1088,12 @@ final class _KanbanCardTile extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 5),
+                  if (card.isArchived && !dragPreview)
+                    TextButton.icon(
+                      onPressed: onArchive,
+                      icon: const Icon(Icons.unarchive_outlined, size: 16),
+                      label: const Text('Из архива'),
+                    ),
                   Text(
                     '№${card.number}',
                     style: const TextStyle(
@@ -1053,7 +1154,7 @@ final class _KanbanCardTile extends StatelessWidget {
       ),
     );
 
-    if (dragPreview) return cardBody;
+    if (dragPreview || card.isArchived) return cardBody;
 
     return Draggable<_CardDragPayload>(
       data: _CardDragPayload(card),

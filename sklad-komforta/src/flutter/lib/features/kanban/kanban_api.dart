@@ -20,6 +20,7 @@ abstract interface class KanbanGateway {
     required int pageSize,
     String? authorUserId,
     bool includeOwn = true,
+    bool archived = false,
   });
   Future<KanbanCard> createCard(
     String accessToken,
@@ -40,6 +41,12 @@ abstract interface class KanbanGateway {
     int targetIndex,
   );
   Future<void> deleteCard(String accessToken, String boardId, String cardId);
+  Future<void> setArchived(
+    String accessToken,
+    String boardId,
+    String cardId,
+    bool archived,
+  );
   void close();
 }
 
@@ -66,9 +73,7 @@ final class KanbanApi implements KanbanGateway {
         await _send('GET', '/kanbans/card-authors', accessToken)
             as List<dynamic>;
     return data
-        .map(
-          (item) => KanbanCardAuthor.fromJson(item as Map<String, dynamic>),
-        )
+        .map((item) => KanbanCardAuthor.fromJson(item as Map<String, dynamic>))
         .toList(growable: false);
   }
 
@@ -92,6 +97,7 @@ final class KanbanApi implements KanbanGateway {
     required int pageSize,
     String? authorUserId,
     bool includeOwn = true,
+    bool archived = false,
   }) async => KanbanCardPage.fromJson(
     await _send(
           'GET',
@@ -99,6 +105,7 @@ final class KanbanApi implements KanbanGateway {
           accessToken,
           query: {
             'columnId': columnId,
+            'archived': '$archived',
             'page': '$page',
             'pageSize': '$pageSize',
             'authorUserId': ?authorUserId,
@@ -166,6 +173,21 @@ final class KanbanApi implements KanbanGateway {
       'DELETE',
       '/kanbans/${Uri.encodeComponent(boardId)}/cards/${Uri.encodeComponent(cardId)}',
       accessToken,
+    );
+  }
+
+  @override
+  Future<void> setArchived(
+    String accessToken,
+    String boardId,
+    String cardId,
+    bool archived,
+  ) async {
+    await _send(
+      'POST',
+      '/kanbans/${Uri.encodeComponent(boardId)}/cards/${Uri.encodeComponent(cardId)}/archive',
+      accessToken,
+      body: {'archived': archived},
     );
   }
 
