@@ -13,6 +13,8 @@ class AppNumberField extends StatefulWidget {
     this.decoration = const InputDecoration(),
     this.style,
     this.validator,
+    this.focusNode,
+    this.onSubmitted,
   });
   final String value;
   final ValueChanged<String> onChanged;
@@ -22,6 +24,12 @@ class AppNumberField extends StatefulWidget {
   final InputDecoration decoration;
   final TextStyle? style;
   final FormFieldValidator<String>? validator;
+
+  /// Внешний узел фокуса для клавиатурной навигации между полями строки.
+  final FocusNode? focusNode;
+
+  /// Вызывается по Enter с текущим текстом поля.
+  final ValueChanged<String>? onSubmitted;
   @override
   State<AppNumberField> createState() => _AppNumberFieldState();
 }
@@ -68,8 +76,11 @@ class _AppNumberFieldState extends State<AppNumberField> {
   @override
   Widget build(BuildContext context) => TextFormField(
     controller: input,
+    focusNode: widget.focusNode,
     enabled: widget.enabled,
     style: widget.style,
+    textInputAction: widget.onSubmitted == null ? null : TextInputAction.next,
+    onFieldSubmitted: widget.onSubmitted,
     keyboardType: TextInputType.numberWithOptions(
       decimal: true,
       signed: widget.minimum == null || widget.minimum! < 0,

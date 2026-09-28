@@ -677,7 +677,7 @@ void main() {
 
     await tester.tap(find.bySemanticsLabel('Развернуть поля категории'));
     await tester.pumpAndSettle();
-    expect(find.byTooltip('Системное поле нельзя удалить'), findsNWidgets(4));
+    expect(find.byTooltip('Системное поле нельзя удалить'), findsNWidgets(5));
 
     final addFieldButton = find.text('Добавить поле');
     await Scrollable.ensureVisible(
@@ -726,6 +726,7 @@ void main() {
     expect(workflow.categories.single.fieldCodes, [
       'name',
       'marking',
+      'quantity',
       'unit',
       'base_price',
       customField.fieldCode,

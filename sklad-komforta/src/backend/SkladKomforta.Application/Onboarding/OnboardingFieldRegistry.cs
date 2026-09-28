@@ -30,6 +30,7 @@ public static class OnboardingFieldRegistry
     [
         new("name", true, true),
         new("marking", true, false),
+        new("quantity", true, false),
         new("unit", true, false),
         new("base_price", true, false),
     ];

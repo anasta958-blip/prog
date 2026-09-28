@@ -47,14 +47,21 @@ final class QuoteController extends ChangeNotifier {
   List<CompanyClientModel> clients = const [];
   List<LegalEntityModel> executors = const [];
   List<EmployeeModel> employees = const [];
-  List<CatalogItem> catalogSearchResults = const [];
   String? activeTypeId;
   String? activeVariantId;
   bool loading = false;
   bool saving = false;
   bool printing = false;
-  bool catalogSearching = false;
   bool dirty = false;
+
+  /// Строка, в первое поле которой редактор должен перевести фокус. Редактор
+  /// сбрасывает значение, как только выполнит запрос.
+  String? focusRequestPositionId;
+
+  /// Строки, созданные вводом в таблице в этом сеансе. Их поля группы,
+  /// наименования, маркировки и количества остаются полями ввода с автопоиском
+  /// и после связывания с каталогом. На сервер не сохраняется.
+  final Set<String> _entryPositionIds = <String>{};
   String? error;
   String? _successMessage;
   Timer? _successMessageTimer;
@@ -71,7 +78,6 @@ final class QuoteController extends ChangeNotifier {
 
   String? persistedCardId;
   List<double?> availableVatRates = [20];
-  int _catalogSearchGeneration = 0;
   String? _calculationError;
   final Map<String, Future<List<CatalogItemRelation>>> _relationRequests = {};
   final Map<String, Future<void>> _behaviorQueues = {};
@@ -343,47 +349,179 @@ final class QuoteController extends ChangeNotifier {
     _changed();
   }
 
-  /// Загружает каталог только для окна выбора позиции. Основной документ при
-  /// этом не перерисовывается и не перечитывается с сервера.
-  Future<void> searchCatalog({
-    required String categoryId,
-    String? sectionId,
-    String? groupId,
+  /// Строка вводится полями с автопоиском, а не обычными полями позиции:
+  /// новая строка ввода либо позиция, ещё не связанная с каталогом.
+  bool isEntryPosition(QuotePositionDraft position) =>
+      position.catalogItemId == null || _entryPositionIds.contains(position.id);
+
+  /// Добавляет в раздел пустую строку ввода и просит редактор перевести
+  /// фокус в её первое поле.
+  QuotePositionDraft addEntryPosition(QuoteSectionDraft section) {
+    final position = QuotePositionDraft(
+      id: newQuoteId(),
+      name: '',
+      marking: '',
+      unit: '',
+      quantity: 1,
+      basePrice: 0,
+      values: <String, dynamic>{},
+    );
+    _entryPositionIds.add(position.id);
+    section.positions.add(position);
+    focusRequestPositionId = position.id;
+    _changed();
+    return position;
+  }
+
+  /// Группы раздела каталога, соответствующего разделу предложения.
+  List<CatalogGroup> catalogGroups(
+    QuoteCategoryDraft category,
+    QuoteSectionDraft section,
+  ) {
+    final catalogCategory = catalog?.categories
+        .where((item) => item.id == category.catalogCategoryId)
+        .firstOrNull;
+    final catalogSection = catalogCategory?.sections
+        .where((item) => item.id == section.catalogSectionId)
+        .firstOrNull;
+    return catalogSection?.groups ?? const [];
+  }
+
+  /// Карточки каталога для автопоиска строки ввода: утверждённые позиции раздела,
+  /// при указанной группе — только этой группы. Сервер ищет [search] в
+  /// наименовании и маркировке. Ошибка сети не прерывает ввод: возвращается
+  /// пустой список, и строку можно заполнить вручную.
+  Future<List<CatalogItem>> lookupCatalogItems({
+    required QuoteCategoryDraft category,
+    required QuoteSectionDraft section,
+    String? groupName,
     String search = '',
   }) async {
-    final generation = ++_catalogSearchGeneration;
-    catalogSearching = true;
-    catalogSearchResults = const [];
-    error = null;
-    notifyListeners();
+    final categoryId = category.catalogCategoryId;
+    if (categoryId == null) return const [];
+    final normalizedGroup = groupName?.trim().toLowerCase() ?? '';
+    final groupId = normalizedGroup.isEmpty
+        ? null
+        : catalogGroups(category, section)
+              .where(
+                (group) => group.name.trim().toLowerCase() == normalizedGroup,
+              )
+              .firstOrNull
+              ?.id;
     try {
       final page = await _authorized(
         (token) => _catalogGateway.getItems(
           accessToken: token,
           categoryId: categoryId,
-          sectionId: sectionId,
+          sectionId: section.catalogSectionId,
           groupId: groupId,
           status: 'approved',
-          search: search,
+          search: search.trim(),
           page: 1,
-          pageSize: 50,
+          pageSize: 100,
         ),
       );
-      if (generation == _catalogSearchGeneration) {
-        catalogSearchResults = page.items;
-      }
-    } on ApiException catch (exception) {
-      if (generation == _catalogSearchGeneration) {
-        error = exception.message;
-      }
+      return page.items;
     } on Object {
-      if (generation == _catalogSearchGeneration) {
-        error = 'Не удалось загрузить позиции каталога.';
-      }
-    } finally {
-      if (generation == _catalogSearchGeneration) {
-        catalogSearching = false;
-        notifyListeners();
+      return const [];
+    }
+  }
+
+  /// Находит единственную карточку каталога по введённым в строку группе,
+  /// наименованию и маркировке (без учёта регистра и крайних пробелов).
+  /// Возвращает `null`, если совпадений нет или их несколько.
+  Future<CatalogItem?> resolveEntryItem({
+    required QuoteCategoryDraft category,
+    required QuoteSectionDraft section,
+    required QuotePositionDraft position,
+  }) async {
+    final name = position.name.trim().toLowerCase();
+    final marking = position.marking.trim().toLowerCase();
+    if (name.isEmpty && marking.isEmpty) return null;
+    final items = await lookupCatalogItems(
+      category: category,
+      section: section,
+      groupName: _textValue(position.values['group']),
+      search: name.isNotEmpty ? position.name : position.marking,
+    );
+    final matches = items
+        .where(
+          (item) =>
+              (name.isEmpty || item.name.trim().toLowerCase() == name) &&
+              (marking.isEmpty || item.marking.trim().toLowerCase() == marking),
+        )
+        .toList(growable: false);
+    return matches.length == 1 ? matches.single : null;
+  }
+
+  /// Заполняет строку данными карточки каталога: наименованием, маркировкой,
+  /// единицей, ценами и значениями полей. Введённое количество сохраняется.
+  /// Затем, как при выборе карточки в каталоге, добавляются связанные позиции.
+  Future<void> applyCatalogItem(
+    QuoteCategoryDraft category,
+    QuoteSectionDraft section,
+    QuotePositionDraft target,
+    CatalogItem item,
+  ) async {
+    final variant = activeVariant;
+    if (variant == null || target.catalogItemId == item.id) return;
+    if (target.catalogItemId != null) {
+      _removeAutomaticContributions(variant, target.id);
+    }
+    final source = _positionFromCatalogItem(
+      item,
+      groupName: _groupName(
+        category.catalogCategoryId,
+        section.catalogSectionId,
+        item.groupId,
+      ),
+    );
+    final typedGroup = target.values['group'];
+    target
+      ..catalogItemId = item.id
+      ..name = source.name
+      ..marking = source.marking
+      ..unit = source.unit
+      ..purchasePrice = source.purchasePrice
+      ..basePrice = source.basePrice
+      ..manualPrice = null;
+    target.values
+      ..clear()
+      ..addAll(source.values);
+    if (!target.values.containsKey('group') && typedGroup != null) {
+      target.values['group'] = typedGroup;
+    }
+    _changed();
+    await _attachCatalogRelations(variant, target, item);
+  }
+
+  /// Отвязывает строку от карточки каталога, когда введённые наименование или
+  /// маркировка ей больше не соответствуют. Данные строки остаются как есть.
+  void detachCatalogItem(QuotePositionDraft position) {
+    if (position.catalogItemId == null) return;
+    final variant = _variantContaining(position);
+    if (variant != null) _removeAutomaticContributions(variant, position.id);
+    position.catalogItemId = null;
+    _changed(position: position);
+  }
+
+  /// Пустые строки ввода не сохраняются: сервер требует наименование позиции,
+  /// а после Enter в количестве всегда появляется следующая пустая строка.
+  void _removeBlankEntryRows(QuoteDraft document) {
+    for (final type in document.proposalTypes) {
+      for (final variant in type.variants) {
+        for (final category in variant.categories) {
+          for (final section in category.sections) {
+            section.positions.removeWhere((position) {
+              final blank =
+                  position.catalogItemId == null &&
+                  position.name.trim().isEmpty &&
+                  position.marking.trim().isEmpty;
+              if (blank) _entryPositionIds.remove(position.id);
+              return blank;
+            });
+          }
+        }
       }
     }
   }
@@ -417,7 +555,21 @@ final class QuoteController extends ChangeNotifier {
         );
     if (existing == null) section.positions.add(primaryPosition);
     _changed();
+    await _attachCatalogRelations(
+      variant,
+      primaryPosition,
+      item,
+      additionalContribution: existing != null,
+    );
+  }
 
+  /// Материализует сохранённые связи карточки в варианте и пересчитывает строку.
+  Future<void> _attachCatalogRelations(
+    QuoteVariantDraft variant,
+    QuotePositionDraft primaryPosition,
+    CatalogItem item, {
+    bool additionalContribution = false,
+  }) async {
     final relationGateway = _catalogGateway is CatalogRelationGateway
         ? _catalogGateway as CatalogRelationGateway
         : null;
@@ -438,7 +590,7 @@ final class QuoteController extends ChangeNotifier {
                 relation,
                 parentPositionId: primaryPosition.id,
                 dependencyClientId: dependency.clientId,
-                additionalContribution: existing != null,
+                additionalContribution: additionalContribution,
               ) ||
               changed;
         }
@@ -1005,6 +1157,7 @@ final class QuoteController extends ChangeNotifier {
   }) async {
     final document = draft;
     if (document == null || saving) return false;
+    _removeBlankEntryRows(document);
     try {
       await Future.wait(_behaviorQueues.values.toList(growable: false));
       await _applyDocumentBehaviorRules('card_saving');

@@ -1698,7 +1698,9 @@ final class _OrganizationOnboardingPageState
       CatalogFieldDraft(
         fieldCode: code,
         isVisible: true,
-        isRequired: code == 'name' || code == 'quantity',
+        // Количество — системное, но необязательное: карточки каталога не
+        // должны требовать его заполнения.
+        isRequired: code == 'name',
         label: onboardingFieldByCode[code]!.label,
       ),
   ];

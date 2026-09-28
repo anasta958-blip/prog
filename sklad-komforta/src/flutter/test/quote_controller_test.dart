@@ -1,6 +1,5 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/core/models/workflow_specialization.dart';
@@ -488,29 +487,6 @@ void main() {
     expect(typeSummary.dy, variantSummary.dy);
     expect(typeSummary.dx, greaterThan(variantSummary.dx));
     expect(tester.takeException(), isNull);
-    await tester.tap(find.byTooltip('Добавить позицию'));
-    await tester.pumpAndSettle();
-    expect(find.text('Группа товаров'), findsOneWidget);
-    expect(find.text('Сначала выберите группу товаров.'), findsOneWidget);
-    await tester.tap(find.text('Группа товаров'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Вентиляторы').last);
-    await tester.pumpAndSettle();
-    final pickerSearch = find.descendant(
-      of: find.byType(AlertDialog),
-      matching: find.byType(TextField),
-    );
-    await tester.enterText(pickerSearch, 'вент');
-    await tester.pump(const Duration(milliseconds: 350));
-    await tester.pumpAndSettle();
-    expect(_CatalogGatewayWithRelations.lastSearch, 'вент');
-    expect(_CatalogGatewayWithRelations.lastGroupId, 'equipment-group');
-    await tester.enterText(pickerSearch, '');
-    await tester.pump(const Duration(milliseconds: 350));
-    await tester.pumpAndSettle();
-    expect(_CatalogGatewayWithRelations.lastSearch, '');
-    await tester.tap(find.text('Закрыть'));
-    await tester.pumpAndSettle();
     section.positions.single.marking = 'changed-by-rule';
     await controller.positionChanged();
     await tester.pump();
@@ -774,6 +750,265 @@ void main() {
     },
   );
 
+  test(
+    'строка ввода заполняется из каталога, пустые строки не сохраняются',
+    () async {
+      final auth = AuthController(
+        config,
+        api: _NoopAuthGateway(),
+        tokens: _MemoryTokenRepository(),
+      )..accessToken = 'access-token';
+      final gateway = _RecordingQuoteGateway();
+      final controller = QuoteController(
+        config,
+        auth,
+        quoteGateway: gateway,
+        catalogGateway: _CatalogGatewayWithRelations(),
+      )..persistedCardId = 'card-id';
+      final section = QuoteSectionDraft(
+        id: 'entry-section',
+        catalogSectionId: _equipmentSection.id,
+        name: _equipmentSection.name,
+        positions: [],
+      );
+      final category = QuoteCategoryDraft(
+        id: 'entry-category',
+        catalogCategoryId: _equipmentCategory.id,
+        name: _equipmentCategory.name,
+        sections: [section],
+      );
+      final variant = QuoteVariantDraft(
+        id: 'entry-variant',
+        name: 'Основной',
+        categories: [category],
+      );
+      final type = QuoteProposalTypeDraft(
+        id: 'entry-type',
+        name: 'Основное предложение',
+        variants: [variant],
+      );
+      controller
+        ..catalog = _configuration
+        ..draft = QuoteDraft(
+          kind: QuoteKind.quote,
+          title: 'КП',
+          clientId: 'client',
+          executorCompanyId: 'executor',
+          selectionMode: 'variant',
+          proposalTypes: [type],
+        )
+        ..activeTypeId = type.id
+        ..activeVariantId = variant.id;
+
+      final row = controller.addEntryPosition(section);
+      expect(controller.focusRequestPositionId, row.id);
+      expect(controller.isEntryPosition(row), isTrue);
+      expect(
+        controller.catalogGroups(category, section).map((group) => group.name),
+        ['Вентиляторы'],
+      );
+
+      await controller.lookupCatalogItems(
+        category: category,
+        section: section,
+        groupName: 'вентиляторы',
+        search: 'вент',
+      );
+      expect(_CatalogGatewayWithRelations.lastGroupId, 'equipment-group');
+
+      row
+        ..name = ' вентилятор '
+        ..quantity = 3;
+      final item = await controller.resolveEntryItem(
+        category: category,
+        section: section,
+        position: row,
+      );
+      expect(item?.id, _equipmentItem.id);
+      await controller.applyCatalogItem(category, section, row, item!);
+      expect(row.catalogItemId, _equipmentItem.id);
+      expect(row.name, 'Вентилятор');
+      expect(row.marking, 'V-1');
+      expect(row.unit, 'шт');
+      expect(row.basePrice, 1200);
+      expect(row.quantity, 3);
+      expect(controller.isEntryPosition(row), isTrue);
+
+      row.marking = 'другая';
+      expect(
+        await controller.resolveEntryItem(
+          category: category,
+          section: section,
+          position: row,
+        ),
+        isNull,
+      );
+      controller.detachCatalogItem(row);
+      expect(row.catalogItemId, isNull);
+      row.marking = 'V-1';
+
+      controller.addEntryPosition(section);
+      expect(section.positions, hasLength(2));
+      expect(await controller.save(board: _quoteBoard), isTrue);
+      final saved = gateway.savedDraft!.proposalTypes.single.variants.single;
+      final savedSection = saved.categories
+          .firstWhere((item) => item.id == category.id)
+          .sections
+          .single;
+      expect(savedSection.positions.map((item) => item.id), [row.id]);
+
+      controller.dispose();
+      auth.dispose();
+    },
+  );
+
+  testWidgets('позиция вводится в строке: автопоиск, Enter и новая строка', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1600, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    final auth = AuthController(
+      config,
+      api: _NoopAuthGateway(),
+      tokens: _MemoryTokenRepository(),
+    )..accessToken = 'access-token';
+    final controller = QuoteController(
+      config,
+      auth,
+      catalogGateway: _CatalogGatewayWithRelations(),
+    );
+    final section = QuoteSectionDraft(
+      id: 'entry-section',
+      catalogSectionId: _equipmentSection.id,
+      name: _equipmentSection.name,
+      positions: [],
+    );
+    final category = QuoteCategoryDraft(
+      id: 'entry-category',
+      catalogCategoryId: _equipmentCategory.id,
+      name: _equipmentCategory.name,
+      sections: [section],
+    );
+    final variant = QuoteVariantDraft(
+      id: 'entry-variant',
+      name: 'Основной',
+      categories: [category],
+    );
+    final type = QuoteProposalTypeDraft(
+      id: 'entry-type',
+      name: 'Основное предложение',
+      variants: [variant],
+    );
+    controller
+      ..catalog = _configuration
+      ..draft = QuoteDraft(
+        kind: QuoteKind.quote,
+        title: 'КП',
+        clientId: 'client',
+        executorCompanyId: 'executor',
+        selectionMode: 'variant',
+        proposalTypes: [type],
+      )
+      ..activeTypeId = type.id
+      ..activeVariantId = variant.id;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 1500,
+            height: 900,
+            child: QuoteEditorPage(
+              config: config,
+              authController: auth,
+              board: _quoteBoard,
+              controller: controller,
+              onBack: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    String? focused() => FocusManager.instance.primaryFocus?.debugLabel;
+    Finder input(String positionId, String code) => find.descendant(
+      of: find.byKey(ValueKey('quote-entry-$positionId-$code')),
+      matching: find.byType(TextField),
+    );
+
+    await tester.tap(find.byTooltip('Добавить позицию'));
+    await tester.pumpAndSettle();
+    expect(section.positions, hasLength(1));
+    final row = section.positions.single;
+    expect(focused(), 'quote-entry-${row.id}-name');
+
+    await tester.enterText(input(row.id, 'name'), 'вент');
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pumpAndSettle();
+    expect(_CatalogGatewayWithRelations.lastSearch, 'вент');
+    expect(
+      find.byKey(const ValueKey('quote-entry-option-Вентилятор')),
+      findsOneWidget,
+    );
+
+    // Enter выбирает подсвеченный вариант; единственная карточка с таким
+    // наименованием сразу заполняет строку, фокус переходит в маркировку.
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(row.catalogItemId, _equipmentItem.id);
+    expect(row.basePrice, 1200);
+    expect(focused(), 'quote-entry-${row.id}-marking');
+    expect(
+      tester.widget<TextField>(input(row.id, 'marking')).controller!.text,
+      'V-1',
+    );
+
+    // Стрелка открывает маркировки выбранного наименования.
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(ValueKey('quote-entry-${row.id}-marking')),
+        matching: find.byTooltip('Показать варианты'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('quote-entry-option-V-1')),
+      findsOneWidget,
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(focused(), 'quote-entry-${row.id}-quantity');
+
+    await tester.testTextInput.receiveAction(TextInputAction.next);
+    await tester.pumpAndSettle();
+    expect(section.positions, hasLength(2));
+    final next = section.positions.last;
+    expect(next.name, isEmpty);
+    expect(focused(), 'quote-entry-${next.id}-name');
+
+    // Enter в количестве пустой строки не плодит новые строки.
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(focused(), 'quote-entry-${next.id}-marking');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    await tester.testTextInput.receiveAction(TextInputAction.next);
+    await tester.pumpAndSettle();
+    expect(section.positions, hasLength(2));
+    expect(focused(), 'quote-entry-${next.id}-name');
+    expect(tester.takeException(), isNull);
+
+    controller.dispose();
+    auth.dispose();
+  });
+
   test('PDF доступен только для сохранённой версии предложения', () async {
     final auth = AuthController(
       config,
@@ -852,13 +1087,15 @@ final class _RecordingQuoteGateway implements QuoteGateway {
     String cardId,
   ) => throw UnimplementedError();
 
+  QuoteDraft? savedDraft;
+
   @override
   Future<QuoteDraft> saveQuote(
     String accessToken,
     String boardId,
     String cardId,
     QuoteDraft draft,
-  ) => throw UnimplementedError();
+  ) async => savedDraft = draft;
 
   @override
   void close() {}
@@ -1072,7 +1309,24 @@ final class _CatalogGatewayWithRelations
   }) async {
     lastSearch = search;
     lastGroupId = groupId;
-    return const CatalogItemPage(items: [], page: 1, pageSize: 50, total: 0);
+    final needle = (search ?? '').trim().toLowerCase();
+    final items = [_equipmentItem]
+        .where(
+          (item) =>
+              (categoryId == null || item.categoryId == categoryId) &&
+              (sectionId == null || item.sectionId == sectionId) &&
+              (groupId == null || item.groupId == groupId) &&
+              (needle.isEmpty ||
+                  item.name.toLowerCase().contains(needle) ||
+                  item.marking.toLowerCase().contains(needle)),
+        )
+        .toList();
+    return CatalogItemPage(
+      items: items,
+      page: 1,
+      pageSize: pageSize,
+      total: items.length,
+    );
   }
 
   @override

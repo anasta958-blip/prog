@@ -143,8 +143,15 @@ void main() {
     expect(onboardingFieldByCode['line_total']?.isCalculated, isTrue);
     expect(onboardingFieldByCode['line_total']?.canBeRequired, isFalse);
     expect(onboardingFieldByCode, isNot(contains('retail_price')));
-    expect(defaultCatalogFieldCodes, ['name', 'marking', 'unit', 'base_price']);
+    expect(defaultCatalogFieldCodes, [
+      'name',
+      'marking',
+      'quantity',
+      'unit',
+      'base_price',
+    ]);
     expect(isFixedCatalogField('name'), isTrue);
+    expect(isFixedCatalogField('quantity'), isTrue);
     expect(isFixedCatalogField('supplier'), isFalse);
   });
 

@@ -210,6 +210,7 @@ final onboardingFieldByCode = <String, OnboardingFieldDefinition>{
 const defaultCatalogFieldCodes = <String>[
   'name',
   'marking',
+  'quantity',
   'unit',
   'base_price',
 ];

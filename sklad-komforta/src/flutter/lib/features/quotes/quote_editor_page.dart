@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
@@ -614,24 +615,14 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
     ),
   );
 
-  Future<void> _addPosition(
-    QuoteCategoryDraft category,
-    QuoteSectionDraft section,
-  ) async {
-    final categoryId = category.catalogCategoryId;
-    if (categoryId == null) return;
-    if (!mounted) return;
-    final item = await showDialog<CatalogItem>(
-      context: context,
-      builder: (dialogContext) => _CatalogPickerDialog(
-        controller: controller,
-        categoryId: categoryId,
-        sectionId: section.catalogSectionId,
-      ),
-    );
-    if (item != null) {
-      await controller.addCatalogPosition(category, section, item);
-    }
+  /// Добавляет пустую строку ввода. Раздел раскрывается, а фокус переходит
+  /// в первое поле строки (см. [_SectionBlockState]).
+  void _addPosition(QuoteCategoryDraft category, QuoteSectionDraft section) {
+    setState(() {
+      expandedCategories.add(category.id);
+      expandedSections.add(section.id);
+    });
+    controller.addEntryPosition(section);
   }
 }
 
@@ -1623,6 +1614,7 @@ final class _CategoryBlock extends StatelessWidget {
               for (final section in category.sections)
                 _SectionBlock(
                   controller: controller,
+                  category: category,
                   section: section,
                   fields: fields,
                   expanded: expandedSections.contains(section.id),
@@ -1641,6 +1633,7 @@ final class _CategoryBlock extends StatelessWidget {
 final class _SectionBlock extends StatefulWidget {
   const _SectionBlock({
     required this.controller,
+    required this.category,
     required this.section,
     required this.fields,
     required this.expanded,
@@ -1651,6 +1644,7 @@ final class _SectionBlock extends StatefulWidget {
   });
 
   final QuoteController controller;
+  final QuoteCategoryDraft category;
   final QuoteSectionDraft section;
   final List<KanbanField> fields;
   final bool expanded;
@@ -1663,12 +1657,91 @@ final class _SectionBlock extends StatefulWidget {
   State<_SectionBlock> createState() => _SectionBlockState();
 }
 
+/// Порядок полей строки ввода: переход по Enter идёт по присутствующим в
+/// разделе полям в этом порядке, независимо от порядка колонок.
+const _entryFieldOrder = ['group', 'name', 'marking', 'quantity'];
+
 final class _SectionBlockState extends State<_SectionBlock> {
   final ScrollController horizontalScrollController = ScrollController();
+  final Map<String, FocusNode> _entryNodes = {};
+
+  List<String> get _entryCodes {
+    final present = widget.fields.map((field) => field.code).toSet();
+    return [
+      for (final code in _entryFieldOrder)
+        if (present.contains(code)) code,
+    ];
+  }
+
+  FocusNode _entryNode(String positionId, String code) =>
+      _entryNodes.putIfAbsent(
+        '$positionId|$code',
+        () => FocusNode(debugLabel: 'quote-entry-$positionId-$code'),
+      );
+
+  /// Узлы удалённых строк освобождаются после кадра, когда их поля уже
+  /// размонтированы.
+  void _pruneEntryNodes() {
+    final live = widget.section.positions.map((item) => item.id).toSet();
+    final removed = <FocusNode>[];
+    _entryNodes.removeWhere((key, node) {
+      final keep = live.contains(key.split('|').first);
+      if (!keep) removed.add(node);
+      return !keep;
+    });
+    if (removed.isEmpty) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      for (final node in removed) {
+        node.dispose();
+      }
+    });
+  }
+
+  /// Enter переводит фокус в следующее поле строки. После последнего поля
+  /// создаётся новая строка; у пустой строки фокус возвращается в её начало.
+  void _advance(QuotePositionDraft position, String code) {
+    final codes = _entryCodes;
+    final index = codes.indexOf(code);
+    if (index >= 0 && index < codes.length - 1) {
+      _entryNode(position.id, codes[index + 1]).requestFocus();
+      return;
+    }
+    if (position.name.trim().isEmpty && position.marking.trim().isEmpty) {
+      if (codes.isNotEmpty) _entryNode(position.id, codes.first).requestFocus();
+      return;
+    }
+    widget.onAddPosition();
+  }
+
+  /// Ищет в каталоге карточку по введённым группе, наименованию и маркировке и
+  /// заполняет строку её данными. Строку, которая больше не соответствует
+  /// связанной карточке, отвязывает от неё.
+  Future<void> _resolve(QuotePositionDraft position) async {
+    final controller = widget.controller;
+    final item = await controller.resolveEntryItem(
+      category: widget.category,
+      section: widget.section,
+      position: position,
+    );
+    if (!mounted) return;
+    if (item != null) {
+      await controller.applyCatalogItem(
+        widget.category,
+        widget.section,
+        position,
+        item,
+      );
+    } else if (position.catalogItemId != null) {
+      controller.detachCatalogItem(position);
+    }
+  }
 
   @override
   void dispose() {
     horizontalScrollController.dispose();
+    for (final node in _entryNodes.values) {
+      node.dispose();
+    }
     super.dispose();
   }
 
@@ -1678,6 +1751,26 @@ final class _SectionBlockState extends State<_SectionBlock> {
     final controller = widget.controller;
     final section = widget.section;
     final fields = widget.fields;
+    _pruneEntryNodes();
+    final entryCodes = _entryCodes;
+    final requested = controller.focusRequestPositionId;
+    if (requested != null &&
+        widget.expanded &&
+        entryCodes.isNotEmpty &&
+        section.positions.any((item) => item.id == requested)) {
+      controller.focusRequestPositionId = null;
+      final node = _entryNode(requested, entryCodes.first);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) node.requestFocus();
+      });
+    }
+    final entry = _EntryContext(
+      category: widget.category,
+      codes: entryCodes,
+      nodeFor: _entryNode,
+      onSubmitted: _advance,
+      resolve: _resolve,
+    );
     final expanded = widget.expanded;
     final onToggle = widget.onToggle;
     final onAddPosition = widget.onAddPosition;
@@ -1780,7 +1873,7 @@ final class _SectionBlockState extends State<_SectionBlock> {
                                     height: 56,
                                     child: Center(
                                       child: Text(
-                                        'В разделе нет позиций. Добавить из каталога',
+                                        'В разделе нет позиций. Нажмите, чтобы добавить строку',
                                         style: TextStyle(color: _muted),
                                       ),
                                     ),
@@ -1801,6 +1894,7 @@ final class _SectionBlockState extends State<_SectionBlock> {
                                   itemBuilder: (context, index) => _PositionRow(
                                     key: ValueKey(section.positions[index].id),
                                     controller: controller,
+                                    entry: entry,
                                     section: section,
                                     position: section.positions[index],
                                     fields: fields,
@@ -2344,9 +2438,28 @@ double _fieldWidth(KanbanField field) => switch (field.code) {
   _ => 145,
 };
 
+/// Клавиатурный ввод строк одного раздела: порядок полей, узлы фокуса и
+/// действия Enter/поиска в каталоге.
+final class _EntryContext {
+  const _EntryContext({
+    required this.category,
+    required this.codes,
+    required this.nodeFor,
+    required this.onSubmitted,
+    required this.resolve,
+  });
+
+  final QuoteCategoryDraft category;
+  final List<String> codes;
+  final FocusNode Function(String positionId, String code) nodeFor;
+  final void Function(QuotePositionDraft position, String code) onSubmitted;
+  final Future<void> Function(QuotePositionDraft position) resolve;
+}
+
 final class _PositionFieldCell extends StatelessWidget {
   const _PositionFieldCell({
     required this.controller,
+    required this.entry,
     required this.section,
     required this.position,
     required this.field,
@@ -2354,6 +2467,7 @@ final class _PositionFieldCell extends StatelessWidget {
   });
 
   final QuoteController controller;
+  final _EntryContext entry;
   final QuoteSectionDraft section;
   final QuotePositionDraft position;
   final KanbanField field;
@@ -2363,6 +2477,10 @@ final class _PositionFieldCell extends StatelessWidget {
   Widget build(BuildContext context) {
     if (position.hiddenFieldCodes.contains(field.code)) {
       return SizedBox(width: width);
+    }
+    if (const {'group', 'name', 'marking'}.contains(field.code) &&
+        controller.isEntryPosition(position)) {
+      return _entryCell(field.code);
     }
     switch (field.code) {
       case 'name':
@@ -2395,6 +2513,8 @@ final class _PositionFieldCell extends StatelessWidget {
           width: width,
           minimum: 0,
           minimumExclusive: true,
+          focusNode: entry.nodeFor(position.id, 'quantity'),
+          onSubmitted: () => entry.onSubmitted(position, 'quantity'),
           onChanged: (value) {
             if (value > 0) position.quantity = value;
             controller.positionChanged(
@@ -2534,6 +2654,93 @@ final class _PositionFieldCell extends StatelessWidget {
     );
   }
 
+  Widget _entryCell(String code) => _CatalogEntryField(
+    key: ValueKey('quote-entry-${position.id}-$code'),
+    width: width,
+    value: switch (code) {
+      'group' => _text(position.values['group']),
+      'name' => position.name,
+      _ => position.marking,
+    },
+    hint: switch (code) {
+      'group' => 'Группа',
+      'name' => 'Наименование',
+      _ => 'Маркировка',
+    },
+    focusNode: entry.nodeFor(position.id, code),
+    loadOptions: (query) => _entryOptions(code, query),
+    onChanged: (text) => _assignEntryValue(code, text),
+    onSubmitted: (text) async {
+      _assignEntryValue(code, text);
+      if (code != 'group') await entry.resolve(position);
+      entry.onSubmitted(position, code);
+    },
+    onCommitted: code == 'group'
+        ? null
+        : (text) async {
+            _assignEntryValue(code, text);
+            await entry.resolve(position);
+          },
+  );
+
+  void _assignEntryValue(String code, String text) {
+    switch (code) {
+      case 'group':
+        final trimmed = text.trim();
+        if (trimmed.isEmpty) {
+          position.values.remove('group');
+        } else {
+          position.values['group'] = trimmed;
+        }
+      case 'name':
+        position.name = text;
+      case 'marking':
+        position.marking = text;
+    }
+    controller.positionChanged(position: position, fieldCode: code);
+  }
+
+  /// Варианты автопоиска: группы раздела каталога; наименования с учётом
+  /// группы; маркировки выбранного наименования.
+  Future<List<String>> _entryOptions(String code, String query) async {
+    final needle = query.trim().toLowerCase();
+    bool matches(String value) =>
+        needle.isEmpty || value.toLowerCase().contains(needle);
+    if (code == 'group') {
+      return _distinct(
+        controller
+            .catalogGroups(entry.category, section)
+            .map((group) => group.name)
+            .where(matches),
+      );
+    }
+    final group = _text(position.values['group']);
+    if (code == 'name') {
+      final items = await controller.lookupCatalogItems(
+        category: entry.category,
+        section: section,
+        groupName: group,
+        search: query,
+      );
+      return _distinct(items.map((item) => item.name).where(matches));
+    }
+    final name = position.name.trim().toLowerCase();
+    final items = await controller.lookupCatalogItems(
+      category: entry.category,
+      section: section,
+      groupName: group,
+      search: name.isEmpty ? query : position.name,
+    );
+    return _distinct(
+      items
+          .where(
+            (item) => name.isEmpty || item.name.trim().toLowerCase() == name,
+          )
+          .map((item) => item.marking)
+          .where(matches),
+    );
+  }
+
   Widget _numberCell(
     double width,
     double? value,
@@ -2596,6 +2803,7 @@ double? _asDouble(dynamic value) {
 final class _PositionRow extends StatelessWidget {
   const _PositionRow({
     required this.controller,
+    required this.entry,
     required this.section,
     required this.position,
     required this.fields,
@@ -2605,6 +2813,7 @@ final class _PositionRow extends StatelessWidget {
   });
 
   final QuoteController controller;
+  final _EntryContext entry;
   final QuoteSectionDraft section;
   final QuotePositionDraft position;
   final List<KanbanField> fields;
@@ -2657,6 +2866,7 @@ final class _PositionRow extends StatelessWidget {
           for (final (fieldIndex, field) in fields.indexed)
             _PositionFieldCell(
               controller: controller,
+              entry: entry,
               section: section,
               position: position,
               field: field,
@@ -2868,149 +3078,6 @@ final class _PercentActionState extends State<_PercentAction> {
       ),
     ],
   );
-}
-
-final class _CatalogPickerDialog extends StatefulWidget {
-  const _CatalogPickerDialog({
-    required this.controller,
-    required this.categoryId,
-    required this.sectionId,
-  });
-  final QuoteController controller;
-  final String categoryId;
-  final String? sectionId;
-
-  @override
-  State<_CatalogPickerDialog> createState() => _CatalogPickerDialogState();
-}
-
-final class _CatalogPickerDialogState extends State<_CatalogPickerDialog> {
-  final search = TextEditingController();
-  Timer? debounce;
-  String? groupId;
-  bool pending = false;
-  List<CatalogGroup> get groups =>
-      widget.controller.catalog?.categories
-          .where((category) => category.id == widget.categoryId)
-          .expand((category) => category.sections)
-          .where(
-            (section) =>
-                widget.sectionId == null || section.id == widget.sectionId,
-          )
-          .expand((section) => section.groups)
-          .toList() ??
-      [];
-
-  @override
-  void initState() {
-    super.initState();
-    if (groups.isEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _search();
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    debounce?.cancel();
-    search.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Добавить позицию из каталога'),
-    content: SizedBox(
-      width: 640,
-      height: 520,
-      child: AnimatedBuilder(
-        animation: widget.controller,
-        builder: (context, _) => Column(
-          children: [
-            if (groups.isNotEmpty) ...[
-              AppSelectField<String>(
-                value: groupId,
-                label: 'Группа товаров',
-                options: [
-                  const AppSelectOption(value: '', label: 'Все группы'),
-                  for (final group in groups)
-                    AppSelectOption(value: group.id, label: group.name),
-                ],
-                onChanged: (value) {
-                  setState(() => groupId = value);
-                  _search();
-                },
-              ),
-              const SizedBox(height: 12),
-            ],
-            TextField(
-              controller: search,
-              autofocus: true,
-              decoration: InputDecoration(
-                labelText: 'Поиск по наименованию и маркировке',
-                suffixIcon: IconButton(
-                  onPressed: _search,
-                  icon: const Icon(Icons.search),
-                ),
-              ),
-              onSubmitted: (_) => _search(),
-              onChanged: (_) {
-                debounce?.cancel();
-                setState(() => pending = true);
-                debounce = Timer(const Duration(milliseconds: 300), _search);
-              },
-            ),
-            const SizedBox(height: 12),
-            Expanded(
-              child: groups.isNotEmpty && groupId == null
-                  ? const Center(
-                      child: Text('Сначала выберите группу товаров.'),
-                    )
-                  : pending || widget.controller.catalogSearching
-                  ? const Center(child: CircularProgressIndicator())
-                  : widget.controller.catalogSearchResults.isEmpty
-                  ? const Center(child: Text('Подходящие позиции не найдены.'))
-                  : ListView.separated(
-                      itemCount: widget.controller.catalogSearchResults.length,
-                      separatorBuilder: (_, _) => const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final item =
-                            widget.controller.catalogSearchResults[index];
-                        return ListTile(
-                          leading: const Icon(Icons.inventory_2_outlined),
-                          title: Text(item.name),
-                          subtitle: Text(item.marking),
-                          trailing: Text(_money(_catalogPrice(item))),
-                          onTap: () => Navigator.pop(context, item),
-                        );
-                      },
-                    ),
-            ),
-          ],
-        ),
-      ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('Закрыть'),
-      ),
-    ],
-  );
-
-  void _search() {
-    debounce?.cancel();
-    if (!mounted) return;
-    setState(() => pending = false);
-    if (groups.isNotEmpty && groupId == null) return;
-    widget.controller.searchCatalog(
-      categoryId: widget.categoryId,
-      sectionId: widget.sectionId,
-      groupId: groupId == '' ? null : groupId,
-      search: search.text,
-    );
-  }
 }
 
 final class _Panel extends StatelessWidget {
@@ -3323,12 +3390,16 @@ final class _RowNumber extends StatelessWidget {
     required this.onChanged,
     this.minimum,
     this.minimumExclusive = false,
+    this.focusNode,
+    this.onSubmitted,
   });
   final double value;
   final double width;
   final ValueChanged<double> onChanged;
   final double? minimum;
   final bool minimumExclusive;
+  final FocusNode? focusNode;
+  final VoidCallback? onSubmitted;
 
   @override
   Widget build(BuildContext context) => SizedBox(
@@ -3336,6 +3407,8 @@ final class _RowNumber extends StatelessWidget {
     child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 3),
       child: AppNumberField(
+        focusNode: focusNode,
+        onSubmitted: onSubmitted == null ? null : (_) => onSubmitted!(),
         minimum: minimum,
         minimumExclusive: minimumExclusive,
         style: const TextStyle(fontSize: 11),
@@ -3354,6 +3427,330 @@ final class _RowNumber extends StatelessWidget {
             onChanged(parsed);
           }
         },
+      ),
+    ),
+  );
+}
+
+List<String> _distinct(Iterable<String> values) {
+  final seen = <String>{};
+  final result = <String>[];
+  for (final value in values) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty || !seen.add(trimmed.toLowerCase())) continue;
+    result.add(trimmed);
+  }
+  result.sort(
+    (left, right) => left.toLowerCase().compareTo(right.toLowerCase()),
+  );
+  return result;
+}
+
+/// Поле строки ввода с автопоиском. Список вариантов открывается стрелкой
+/// справа (или клавишей «вниз») и при вводе фильтруется по тексту. Стрелки
+/// вверх/вниз выбирают вариант, Enter подтверждает выбранный вариант либо
+/// введённый текст и передаёт управление [onSubmitted].
+final class _CatalogEntryField extends StatefulWidget {
+  const _CatalogEntryField({
+    required this.width,
+    required this.value,
+    required this.hint,
+    required this.focusNode,
+    required this.loadOptions,
+    required this.onChanged,
+    required this.onSubmitted,
+    this.onCommitted,
+    super.key,
+  });
+
+  final double width;
+  final String value;
+  final String hint;
+  final FocusNode focusNode;
+  final Future<List<String>> Function(String query) loadOptions;
+  final ValueChanged<String> onChanged;
+  final ValueChanged<String> onSubmitted;
+
+  /// Вызывается при уходе из поля, если текст изменился после подтверждения.
+  final ValueChanged<String>? onCommitted;
+
+  @override
+  State<_CatalogEntryField> createState() => _CatalogEntryFieldState();
+}
+
+final class _CatalogEntryFieldState extends State<_CatalogEntryField> {
+  late final TextEditingController input = TextEditingController(
+    text: widget.value,
+  );
+  final OverlayPortalController overlay = OverlayPortalController();
+  final LayerLink link = LayerLink();
+  /// Последнее подтверждённое значение. Фиксируется в [initState]: ленивая
+  /// инициализация прочитала бы уже изменённое значение модели.
+  late String committed;
+  List<String> options = const [];
+  int highlighted = -1;
+  bool loading = false;
+  Timer? debounce;
+  int generation = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    committed = widget.value;
+    _attach(widget.focusNode);
+  }
+
+  @override
+  void didUpdateWidget(covariant _CatalogEntryField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.focusNode != widget.focusNode) {
+      _detach(oldWidget.focusNode);
+      _attach(widget.focusNode);
+    }
+    // Значение, подставленное из каталога, показывается сразу — даже если
+    // фокус уже перешёл в это поле, — пока пользователь сам в нём не печатал.
+    final externalChange =
+        oldWidget.value != widget.value && widget.value != input.text;
+    if (externalChange &&
+        (!widget.focusNode.hasFocus || input.text == committed)) {
+      input.value = TextEditingValue(
+        text: widget.value,
+        selection: TextSelection.collapsed(offset: widget.value.length),
+      );
+      committed = widget.value;
+    }
+  }
+
+  void _attach(FocusNode node) {
+    node.addListener(_focusChanged);
+    node.onKeyEvent = _handleKey;
+  }
+
+  void _detach(FocusNode node) {
+    node.removeListener(_focusChanged);
+    if (node.onKeyEvent == _handleKey) node.onKeyEvent = null;
+  }
+
+  @override
+  void dispose() {
+    debounce?.cancel();
+    _detach(widget.focusNode);
+    input.dispose();
+    super.dispose();
+  }
+
+  void _focusChanged() {
+    if (widget.focusNode.hasFocus) return;
+    _hide();
+    if (input.text != committed) {
+      committed = input.text;
+      widget.onCommitted?.call(input.text);
+    } else if (input.text != widget.value) {
+      input.text = widget.value;
+      committed = widget.value;
+    }
+  }
+
+  void _hide() {
+    debounce?.cancel();
+    generation++;
+    if (overlay.isShowing) overlay.hide();
+    if (mounted && (loading || highlighted != -1)) {
+      setState(() {
+        loading = false;
+        highlighted = -1;
+      });
+    }
+  }
+
+  void _load(String query, {bool immediate = false}) {
+    debounce?.cancel();
+    final current = ++generation;
+    setState(() => loading = true);
+    if (!overlay.isShowing) overlay.show();
+    debounce = Timer(
+      immediate ? Duration.zero : const Duration(milliseconds: 200),
+      () async {
+        final result = await widget.loadOptions(query);
+        if (!mounted || current != generation) return;
+        setState(() {
+          options = result;
+          loading = false;
+          highlighted = query.trim().isEmpty || result.isEmpty ? -1 : 0;
+        });
+      },
+    );
+  }
+
+  void _toggle() {
+    if (overlay.isShowing) {
+      _hide();
+      return;
+    }
+    widget.focusNode.requestFocus();
+    _load('', immediate: true);
+  }
+
+  void _select(String value) {
+    input.value = TextEditingValue(
+      text: value,
+      selection: TextSelection.collapsed(offset: value.length),
+    );
+    widget.onChanged(value);
+    _submit(value);
+  }
+
+  void _submit(String value) {
+    _hide();
+    committed = value;
+    widget.onSubmitted(value);
+  }
+
+  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.arrowDown) {
+      if (!overlay.isShowing) {
+        _load(input.text, immediate: true);
+      } else if (options.isNotEmpty) {
+        setState(() => highlighted = (highlighted + 1) % options.length);
+      }
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowUp && overlay.isShowing) {
+      if (options.isNotEmpty) {
+        setState(
+          () => highlighted = highlighted <= 0
+              ? options.length - 1
+              : highlighted - 1,
+        );
+      }
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.escape && overlay.isShowing) {
+      _hide();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter) {
+      if (overlay.isShowing &&
+          highlighted >= 0 &&
+          highlighted < options.length) {
+        _select(options[highlighted]);
+      } else {
+        _submit(input.text);
+      }
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: widget.width,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 3),
+      child: CompositedTransformTarget(
+        link: link,
+        child: OverlayPortal(
+          controller: overlay,
+          overlayChildBuilder: _buildOptions,
+          child: TextField(
+            controller: input,
+            focusNode: widget.focusNode,
+            style: const TextStyle(fontSize: 11),
+            textInputAction: TextInputAction.next,
+            // Фокусом управляет строка ввода, а не обход по умолчанию.
+            onEditingComplete: () {},
+            onSubmitted: _submit,
+            onChanged: (text) {
+              widget.onChanged(text);
+              _load(text);
+            },
+            decoration: InputDecoration(
+              isDense: true,
+              hintText: widget.hint,
+              hintStyle: const TextStyle(fontSize: 11, color: _muted),
+              contentPadding: const EdgeInsets.fromLTRB(7, 9, 0, 9),
+              suffixIconConstraints: const BoxConstraints(
+                minWidth: 24,
+                maxWidth: 24,
+                maxHeight: 30,
+              ),
+              suffixIcon: IconButton(
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                tooltip: 'Показать варианты',
+                onPressed: _toggle,
+                icon: const Icon(Icons.arrow_drop_down, size: 18),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  Widget _buildOptions(BuildContext context) => CompositedTransformFollower(
+    link: link,
+    showWhenUnlinked: false,
+    targetAnchor: Alignment.bottomLeft,
+    offset: const Offset(3, 2),
+    child: Align(
+      alignment: Alignment.topLeft,
+      // Нажатие на вариант не должно снимать фокус с поля до выбора.
+      child: TextFieldTapRegion(
+        child: Material(
+          color: const Color(0xFF142233),
+          elevation: 8,
+          borderRadius: BorderRadius.circular(8),
+          clipBehavior: Clip.antiAlias,
+          child: SizedBox(
+            width: math.max(widget.width, 240),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 260),
+              child: loading && options.isEmpty
+                  ? const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: LinearProgressIndicator(minHeight: 2),
+                    )
+                  : options.isEmpty
+                  ? const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: Text(
+                        'Совпадений нет — будет сохранён введённый текст',
+                        style: TextStyle(fontSize: 11, color: _muted),
+                      ),
+                    )
+                  : ListView.builder(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      itemCount: options.length,
+                      itemBuilder: (context, index) => InkWell(
+                        key: ValueKey('quote-entry-option-${options[index]}'),
+                        onTap: () => _select(options[index]),
+                        child: Container(
+                          color: index == highlighted
+                              ? const Color(0xFF24405F)
+                              : null,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          child: Text(
+                            options[index],
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        ),
+                      ),
+                    ),
+            ),
+          ),
+        ),
       ),
     ),
   );
@@ -3489,12 +3886,6 @@ Future<void> _rename(
   );
   input.dispose();
   if (value != null && value.isNotEmpty) onSave(value);
-}
-
-double _catalogPrice(CatalogItem item) {
-  final value = item.values['base_price'];
-  if (value is num) return value.toDouble();
-  return double.tryParse('$value'.replaceAll(',', '.')) ?? 0;
 }
 
 final _moneyFormat = NumberFormat.currency(

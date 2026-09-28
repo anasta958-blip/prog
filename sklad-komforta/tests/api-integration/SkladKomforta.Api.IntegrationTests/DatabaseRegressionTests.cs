@@ -247,7 +247,7 @@ public sealed class DatabaseRegressionTests
             [new WorkflowCategoryDraft("equipment", ["name", "marking", "unit", "base_price", "quantity"])], "quote_and_prequote")],
         [new CatalogCategoryDraft("equipment", "Оборудование",
             [new CatalogSectionDraft("Блоки", [])],
-            [.. OnboardingFieldRegistry.DefaultCatalogFields(), new CatalogFieldDraft("quantity", true, false),
+            [.. OnboardingFieldRegistry.DefaultCatalogFields(),
                 new CatalogFieldDraft("markup_value", true, false), new CatalogFieldDraft("discount_value", true, false),
                 new CatalogFieldDraft("custom_note", true, false, Label: "Проверка", FieldType: "text"),
                 new CatalogFieldDraft("custom_total", true, false, Label: "Итог", FieldType: "calculated_money"),

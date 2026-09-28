@@ -15,7 +15,7 @@ public sealed class OnboardingValidatorTests
             .ToArray();
 
         Assert.DoesNotContain("retail_price", OnboardingFieldRegistry.All.Select(field => field.Code));
-        Assert.Equal(["name", "marking", "unit", "base_price"], defaults);
+        Assert.Equal(["name", "marking", "quantity", "unit", "base_price"], defaults);
     }
 
     [Theory]
@@ -779,7 +779,6 @@ public sealed class OnboardingValidatorTests
         bool includeRelation = false)
     {
         var fields = OnboardingFieldRegistry.DefaultCatalogFields().ToList();
-        fields.Add(new CatalogFieldDraft("quantity", true, true));
         fields.Add(new CatalogFieldDraft("line_total", true, false));
         if (includeRelation) fields.Add(new CatalogFieldDraft("linked_services", true, false));
         return new CatalogCategoryDraft(clientId, name, [], fields);
