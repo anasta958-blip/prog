@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/widgets/collapse_toggle.dart';
 import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
 import 'package:sklad_komforta_app/core/models/workflow_specialization.dart';
 import 'package:sklad_komforta_app/core/widgets/mobile_collapsible_navigation.dart';
@@ -3318,41 +3319,32 @@ final class _CatalogSectionPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Column(
     children: [
-      Semantics(
-        button: true,
-        label: expanded ? 'Свернуть раздел' : 'Развернуть раздел',
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: onToggle,
-          child: Padding(
-            padding: const EdgeInsets.only(left: 12),
-            child: Row(
-              children: [
-                ExcludeSemantics(
-                  child: AnimatedRotation(
-                    turns: expanded ? .5 : 0,
-                    duration: const Duration(milliseconds: 180),
-                    child: const Icon(Icons.keyboard_arrow_down),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    title,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                ),
-                Semantics(
-                  button: true,
-                  label: 'Удалить раздел',
-                  child: IconButton(
-                    onPressed: onDelete,
-                    icon: const Icon(Icons.delete_outline),
-                  ),
-                ),
-              ],
+      Padding(
+        padding: const EdgeInsets.only(left: 4),
+        child: Row(
+          children: [
+            CollapseToggle(
+              expanded: expanded,
+              expandTooltip: 'Развернуть раздел',
+              collapseTooltip: 'Свернуть раздел',
+              onPressed: onToggle,
             ),
-          ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+            Semantics(
+              button: true,
+              label: 'Удалить раздел',
+              child: IconButton(
+                onPressed: onDelete,
+                icon: const Icon(Icons.delete_outline),
+              ),
+            ),
+          ],
         ),
       ),
       AnimatedSize(

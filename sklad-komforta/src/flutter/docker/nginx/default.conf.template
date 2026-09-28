@@ -48,7 +48,15 @@ server {
         add_header Cache-Control "no-cache, no-store, must-revalidate";
     }
 
-    location ~* \.(?:js|css|woff2|png|jpg|jpeg|gif|svg|webp|ico)$ {
+    # Имена файлов сборки Flutter Web (main.dart.js и др.) не зависят от версии,
+    # поэтому скрипты и стили перепроверяются при каждом открытии (ETag, 304),
+    # иначе после обновления браузер до часа показывает старую версию.
+    location ~* \.(?:js|mjs|wasm|css|json)$ {
+        try_files $uri =404;
+        add_header Cache-Control "no-cache";
+    }
+
+    location ~* \.(?:woff2|ttf|otf|png|jpg|jpeg|gif|svg|webp|ico)$ {
         try_files $uri =404;
         expires 1h;
         add_header Cache-Control "public, max-age=3600";

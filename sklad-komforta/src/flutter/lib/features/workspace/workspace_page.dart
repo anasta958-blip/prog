@@ -171,6 +171,9 @@ class _WorkspacePageState extends State<WorkspacePage> {
     Navigator.maybePop(context);
   }
 
+  /// Пункт «Компания» — исключение из правила «сворачивать только стрелкой»:
+  /// нажатие на всю строку открывает пространство, а повторное — сворачивает
+  /// или разворачивает его разделы.
   void _toggleCompany() {
     setState(() {
       if (selectedIndex != 2) {
@@ -210,6 +213,7 @@ final class _Navigation extends StatelessWidget {
     this.selectedIndex = 0,
   });
   final ValueChanged<int> onSelect;
+
   final VoidCallback onToggleCompany;
   final ValueChanged<CompanySection> onSelectCompanySection;
   final CompanySection companySection;
@@ -266,7 +270,7 @@ final class _Navigation extends StatelessWidget {
         label: 'Компания',
         selected: selectedIndex == 2,
         trailing: AnimatedRotation(
-          turns: companyExpanded ? .5 : 0,
+          turns: companyExpanded ? 0 : -0.25,
           duration: const Duration(milliseconds: 160),
           child: const Icon(Icons.expand_more, size: 18),
         ),

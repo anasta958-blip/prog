@@ -29,10 +29,7 @@ void main() {
 
     await tester.tap(find.text('Подтвердить выбор'));
     await tester.pumpAndSettle();
-    expect(
-      find.text('Выберите по одному варианту в каждом типе.'),
-      findsOneWidget,
-    );
+    expect(find.text('Выберите хотя бы один вариант.'), findsOneWidget);
     expect(requests, isEmpty);
 
     await tester.tap(find.byType(Radio<String>).first);
@@ -47,6 +44,79 @@ void main() {
     expect(requests.first, requests.last);
     expect(find.text('Выбор сохранён'), findsOneWidget);
     expect(find.text('Выбранный вариант недоступен.'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('шапка, частичный выбор и сворачивание типа', (tester) async {
+    tester.view.physicalSize = const Size(1400, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final requests = <Map<String, dynamic>>[];
+    await _open(tester, (request) async {
+      requests.add(jsonDecode(request.body) as Map<String, dynamic>);
+      return _ok(_quote(selected: true));
+    }, twoTypes: true);
+
+    expect(find.text('ЗАКАЗЧИК'), findsOneWidget);
+    expect(find.text('Тестовый заказчик'), findsOneWidget);
+    expect(find.text('ИСПОЛНИТЕЛЬ'), findsOneWidget);
+    expect(find.text('Тестовый исполнитель'), findsOneWidget);
+    expect(find.text('Вариант не выбран'), findsNWidgets(2));
+    expect(find.text('Бойлер'), findsOneWidget);
+
+    // Дополнительная информация — сразу под шапкой, выше типов.
+    expect(
+      tester
+          .getTopLeft(
+            find.byKey(const Key('client-quote-additional-information')),
+          )
+          .dy,
+      lessThan(
+        tester.getTopLeft(find.byKey(const Key('client-quote-type-type-1'))).dy,
+      ),
+    );
+
+    // Нажатие на полосу типа не сворачивает его — только стрелка.
+    await tester.tap(find.text('Горячая вода'));
+    await tester.pumpAndSettle();
+    expect(find.text('Бойлер'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('client-quote-type-toggle-type-2')));
+    await tester.pumpAndSettle();
+    expect(find.text('Бойлер'), findsNothing);
+    await tester.tap(find.byKey(const Key('client-quote-type-toggle-type-2')));
+    await tester.pumpAndSettle();
+    expect(find.text('Бойлер'), findsOneWidget);
+
+    // Вариант сворачивается своей стрелкой; нажатие на полосу его не сворачивает.
+    await tester.tap(
+      find.byKey(const Key('client-quote-variant-toggle-variant-2')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Бойлер'), findsNothing);
+    expect(find.text('Базовый'), findsOneWidget);
+    await tester.tap(
+      find.byKey(const Key('client-quote-variant-toggle-variant-2')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Бойлер'), findsOneWidget);
+
+    // Вариант выбирается только в первом типе; повторное нажатие снимает выбор.
+    await tester.tap(find.text('Оптимальный вариант с монтажом'));
+    await tester.pumpAndSettle();
+    expect(find.text('Выбран: Оптимальный вариант с монтажом'), findsOneWidget);
+    await tester.tap(find.text('Оптимальный вариант с монтажом'));
+    await tester.pumpAndSettle();
+    expect(find.text('Вариант не выбран'), findsNWidgets(2));
+    await tester.tap(find.text('Оптимальный вариант с монтажом'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Подтвердить выбор'));
+    await tester.pumpAndSettle();
+    expect(requests.single['variants'], [
+      {'proposalTypeId': 'type-1', 'variantId': 'variant-1'},
+    ]);
+    expect(find.text('Выбор сохранён'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -97,14 +167,15 @@ void main() {
 
 Future<void> _open(
   WidgetTester tester,
-  Future<http.Response> Function(http.Request) submit,
-) async {
+  Future<http.Response> Function(http.Request) submit, {
+  bool twoTypes = false,
+}) async {
   final client = MockClient((request) async {
     if (request.url.path.endsWith('/login')) {
       return _ok({
         'sessionToken': 'client-session',
         'expiresAt': '2030-01-01T00:00:00Z',
-        'quote': _quote(),
+        'quote': _quote(twoTypes: twoTypes),
       });
     }
     return submit(request);
@@ -142,11 +213,13 @@ http.Response _failure(int status, String message) => http.Response(
   headers: {'content-type': 'application/json; charset=utf-8'},
 );
 
-Map<String, dynamic> _quote({bool selected = false}) => {
+Map<String, dynamic> _quote({bool selected = false, bool twoTypes = false}) => {
   'id': 'quote-1',
   'quoteKind': 'quote',
   'title': 'Поставка и монтаж оборудования',
   'executorName': 'Тестовый исполнитель',
+  'clientName': 'Тестовый заказчик',
+  'additionalInformation': twoTypes ? 'Монтаж в течение 5 дней' : null,
   'selectionMode': 'variant',
   'updatedAt': '2026-09-13T10:00:00Z',
   'selectionSubmittedAt': selected ? '2026-09-13T10:00:00Z' : null,
@@ -186,5 +259,41 @@ Map<String, dynamic> _quote({bool selected = false}) => {
         },
       ],
     },
+    if (twoTypes)
+      {
+        'id': 'type-2',
+        'name': 'Горячая вода',
+        'selectedVariantId': null,
+        'variants': [
+          {
+            'id': 'variant-2',
+            'name': 'Базовый',
+            'vatRate': 20,
+            'subtotal': 50000,
+            'vatAmount': 10000,
+            'total': 60000,
+            'categories': [
+              {
+                'name': 'Оборудование',
+                'sections': [
+                  {
+                    'name': 'Бойлеры',
+                    'positions': [
+                      {
+                        'name': 'Бойлер',
+                        'marking': 'B-100',
+                        'unit': 'шт',
+                        'quantity': 1,
+                        'unitPrice': 50000,
+                        'lineTotal': 50000,
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
   ],
 };

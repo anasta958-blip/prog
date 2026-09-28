@@ -166,6 +166,13 @@ public sealed class DatabaseRegressionTests
                 $"/api/v1{quotePath}/pdf?proposalTypeId={printedTypeId}&variantId={printedVariantId}");
             Assert.Equal(HttpStatusCode.OK, variantPdf.StatusCode);
             Assert.Equal("application/pdf", variantPdf.Content.Headers.ContentType?.MediaType);
+            using var typePdf = await staff.GetAsync(
+                $"/api/v1{quotePath}/pdf?proposalTypeId={printedTypeId}");
+            Assert.Equal(HttpStatusCode.OK, typePdf.StatusCode);
+            Assert.Equal("application/pdf", typePdf.Content.Headers.ContentType?.MediaType);
+            using var missingTypePdf = await staff.GetAsync(
+                $"/api/v1{quotePath}/pdf?proposalTypeId={Guid.NewGuid()}");
+            Assert.Equal(HttpStatusCode.NotFound, missingTypePdf.StatusCode);
             using var missingVariantPdf = await staff.GetAsync(
                 $"/api/v1{quotePath}/pdf?proposalTypeId={printedTypeId}&variantId={Guid.NewGuid()}");
             Assert.Equal(HttpStatusCode.NotFound, missingVariantPdf.StatusCode);
@@ -191,7 +198,9 @@ public sealed class DatabaseRegressionTests
             });
             guest.DefaultRequestHeaders.Add("X-Quote-Client-Session", Text(clientLogin, "sessionToken"));
             var clientQuote = await Send(guest, HttpMethod.Get, "/client/quotes/current");
-            Assert.Equal("Исполнитель", Text(clientQuote, "executorName"));
+            Assert.Equal("ООО Исполнитель", Text(clientQuote, "executorName"));
+            Assert.Equal("Иванов Иван", Text(clientQuote, "clientName"));
+            Assert.Equal(2, clientQuote["proposalTypes"]!.AsArray().Count);
             Assert.DoesNotContain("purchasePrice", clientQuote.ToJsonString(), StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("markupPercent", clientQuote.ToJsonString(), StringComparison.OrdinalIgnoreCase);
             await Send(guest, HttpMethod.Get, "/company/clients", expected: HttpStatusCode.Unauthorized);
@@ -343,6 +352,18 @@ public sealed class DatabaseRegressionTests
                             id = Guid.NewGuid(), catalogItemId = productId, name = "Кондиционер", marking = "AC-24", unit = "шт",
                             quantity = 2m, purchasePrice = 8000m, basePrice = 10000m, manualPrice = 12000m,
                             markupPercent = 10m, discountPercent = 10m, excludeFromTotals = false,
+                        } },
+                    } },
+                } },
+            } },
+        }, new {
+            id = Guid.NewGuid(), name = "Бойлеры", variants = new[] { new {
+                id = Guid.NewGuid(), name = "Базовый", vatRate = 20m, categories = new[] { new {
+                    id = Guid.NewGuid(), catalogCategoryId = categoryId, name = "Оборудование", sections = new[] { new {
+                        id = Guid.NewGuid(), catalogSectionId = sectionId, name = "Блоки", positions = new[] { new {
+                            id = Guid.NewGuid(), catalogItemId = productId, name = "Кондиционер", marking = "AC-24", unit = "шт",
+                            quantity = 1m, purchasePrice = 8000m, basePrice = 10000m, manualPrice = 10000m,
+                            markupPercent = 0m, discountPercent = 0m, excludeFromTotals = false,
                         } },
                     } },
                 } },

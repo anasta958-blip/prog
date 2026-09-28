@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/widgets/collapse_toggle.dart';
 import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -34,6 +35,12 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
   late final QuoteClientAccessApi api;
   final passwordController = TextEditingController();
   final Map<String, String> selectedVariants = {};
+
+  /// Свёрнутые пользователем типы предложения.
+  final Set<String> collapsedTypes = {};
+
+  /// Свёрнутые пользователем варианты (внутри своих типов).
+  final Set<String> collapsedVariants = {};
   String? sessionToken;
   String? selectedTypeId;
   QuoteClientView? quote;
@@ -120,13 +127,14 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
     final token = sessionToken;
     if (current == null || token == null || loading) return;
     final typeMode = current.selectionMode == 'proposal_type';
+    // В режиме «один вариант» выбор нужен хотя бы в одном типе: остальные
+    // типы клиент может оставить без выбора.
     if ((typeMode && selectedTypeId == null) ||
-        (!typeMode &&
-            selectedVariants.length != current.proposalTypes.length)) {
+        (!typeMode && selectedVariants.isEmpty)) {
       setState(
         () => error = typeMode
             ? 'Выберите один тип предложения.'
-            : 'Выберите по одному варианту в каждом типе.',
+            : 'Выберите хотя бы один вариант.',
       );
       return;
     }
@@ -265,7 +273,7 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
   Widget _quoteView(QuoteClientView value) => Column(
     children: [
       Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
         decoration: const BoxDecoration(
           color: Color(0xFF0F1722),
           border: Border(bottom: BorderSide(color: _clientBorder)),
@@ -275,18 +283,11 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
             const Icon(Icons.description_outlined, color: _clientAccent),
             const SizedBox(width: 10),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    value.title,
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                  Text(
-                    value.executorName,
-                    style: const TextStyle(color: _clientMuted, fontSize: 12),
-                  ),
-                ],
+              child: Text(
+                value.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w800),
               ),
             ),
             if (submitted)
@@ -298,34 +299,45 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
         ),
       ),
       Expanded(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 18, 16, 110),
-          children: [
-            if (value.additionalInformation case final text?
-                when text.trim().isNotEmpty)
-              _ClientPanel(
-                child: Text(
-                  text,
-                  style: const TextStyle(color: _clientMuted, height: 1.5),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 720;
+            return SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(
+                compact ? 8 : 24,
+                compact ? 12 : 24,
+                compact ? 8 : 24,
+                24,
+              ),
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: Container(
+                  constraints: const BoxConstraints(maxWidth: 1040),
+                  padding: EdgeInsets.all(compact ? 16 : 40),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(compact ? 8 : 12),
+                  ),
+                  child: Theme(
+                    data: ThemeData(
+                      brightness: Brightness.light,
+                      colorScheme: const ColorScheme.light(
+                        primary: _paperSelected,
+                      ),
+                    ),
+                    child: DefaultTextStyle(
+                      style: const TextStyle(
+                        color: _paperText,
+                        fontSize: 13,
+                        height: 1.35,
+                      ),
+                      child: _document(value, compact),
+                    ),
+                  ),
                 ),
               ),
-            if (value.additionalInformation?.trim().isNotEmpty == true)
-              const SizedBox(height: 14),
-            RadioGroup<String>(
-              groupValue: selectedTypeId,
-              onChanged: _selectType,
-              child: Column(
-                children: value.proposalTypes
-                    .map(
-                      (type) => Padding(
-                        padding: const EdgeInsets.only(bottom: 14),
-                        child: _typeCard(value, type),
-                      ),
-                    )
-                    .toList(),
-              ),
-            ),
-          ],
+            );
+          },
         ),
       ),
       Container(
@@ -356,7 +368,7 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
                 final hint = Text(
                   value.selectionMode == 'proposal_type'
                       ? 'Выберите один тип со всеми вариантами'
-                      : 'Выберите один вариант в каждом типе',
+                      : 'Выберите по одному варианту в нужных типах',
                   style: const TextStyle(color: _clientMuted),
                 );
                 final button = FilledButton.icon(
@@ -390,6 +402,104 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
     ],
   );
 
+  /// Документ в виде «листа», как предпросмотр у менеджера: шапка с заказчиком
+  /// и исполнителем, сворачиваемые типы, варианты и таблицы позиций.
+  Widget _document(QuoteClientView value, bool compact) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Text(
+        value.kind == 'prequote'
+            ? 'ПРЕДВАРИТЕЛЬНОЕ КОММЕРЧЕСКОЕ ПРЕДЛОЖЕНИЕ'
+            : 'КОММЕРЧЕСКОЕ ПРЕДЛОЖЕНИЕ',
+        style: const TextStyle(
+          color: _paperMuted,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 1.1,
+        ),
+      ),
+      const SizedBox(height: 6),
+      Text(
+        value.title,
+        style: TextStyle(
+          fontSize: compact ? 22 : 30,
+          fontWeight: FontWeight.w800,
+          height: 1.15,
+        ),
+      ),
+      const SizedBox(height: 22),
+      Wrap(
+        spacing: 40,
+        runSpacing: 12,
+        children: [
+          _metadata('Заказчик', value.clientName),
+          _metadata('Исполнитель', value.executorName),
+        ],
+      ),
+      if (value.additionalInformation case final text?
+          when text.trim().isNotEmpty) ...[
+        const SizedBox(height: 20),
+        Container(
+          key: const Key('client-quote-additional-information'),
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: _paperHeader,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: _paperBorder),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Дополнительная информация',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 6),
+              Text(text.trim()),
+            ],
+          ),
+        ),
+      ],
+      const SizedBox(height: 26),
+      RadioGroup<String>(
+        groupValue: selectedTypeId,
+        onChanged: _selectType,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final type in value.proposalTypes)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 22),
+                child: _typeBlock(value, type),
+              ),
+          ],
+        ),
+      ),
+    ],
+  );
+
+  Widget _metadata(String label, String? text) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Text(
+        label.toUpperCase(),
+        style: const TextStyle(
+          color: _paperMuted,
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          letterSpacing: .8,
+        ),
+      ),
+      const SizedBox(height: 3),
+      Text(
+        text?.trim().isNotEmpty == true ? text!.trim() : 'Не указан',
+        style: const TextStyle(fontWeight: FontWeight.w700),
+      ),
+    ],
+  );
+
   void _selectType(String? typeId) {
     if (loading) return;
     setState(() {
@@ -399,27 +509,96 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
     });
   }
 
-  Widget _typeCard(QuoteClientView document, QuoteClientProposalType type) {
+  /// Выбор варианта в режиме «один вариант». Повторное нажатие на выбранный
+  /// вариант снимает выбор: тип можно оставить без выбора.
+  void _selectVariant(QuoteClientProposalType type, String? variantId) {
+    if (loading || variantId == null) return;
+    setState(() {
+      if (selectedVariants[type.id] == variantId) {
+        selectedVariants.remove(type.id);
+      } else {
+        selectedVariants[type.id] = variantId;
+      }
+      submitted = false;
+      error = null;
+    });
+  }
+
+  void _toggleType(String typeId) => setState(() {
+    if (!collapsedTypes.remove(typeId)) collapsedTypes.add(typeId);
+  });
+
+  void _toggleVariant(String variantId) => setState(() {
+    if (!collapsedVariants.remove(variantId)) collapsedVariants.add(variantId);
+  });
+
+  Widget _typeBlock(QuoteClientView document, QuoteClientProposalType type) {
     final typeMode = document.selectionMode == 'proposal_type';
-    return _ClientPanel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          InkWell(
-            borderRadius: BorderRadius.circular(10),
+    final collapsed = collapsedTypes.contains(type.id);
+    final chosenVariant = type.variants
+        .where((variant) => variant.id == selectedVariants[type.id])
+        .firstOrNull;
+    final status = typeMode
+        ? (selectedTypeId == type.id ? 'Тип выбран' : 'Выбирается тип целиком')
+        : chosenVariant == null
+        ? 'Вариант не выбран'
+        : 'Выбран: ${chosenVariant.name}';
+    return Column(
+      key: Key('client-quote-type-${type.id}'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Material(
+          color: _paperText,
+          borderRadius: BorderRadius.vertical(
+            top: const Radius.circular(8),
+            bottom: Radius.circular(collapsed ? 8 : 0),
+          ),
+          clipBehavior: Clip.antiAlias,
+          // Нажатие на полосу выбирает тип (в режиме «тип целиком»);
+          // сворачивает тип только стрелка.
+          child: InkWell(
+            key: Key('client-quote-type-bar-${type.id}'),
             onTap: typeMode && !loading ? () => _selectType(type.id) : null,
             child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
+              padding: const EdgeInsets.fromLTRB(2, 2, 14, 2),
               child: Row(
                 children: [
+                  CollapseToggle(
+                    key: Key('client-quote-type-toggle-${type.id}'),
+                    expanded: !collapsed,
+                    color: Colors.white,
+                    expandTooltip: 'Развернуть тип',
+                    collapseTooltip: 'Свернуть тип',
+                    onPressed: () => _toggleType(type.id),
+                  ),
                   if (typeMode)
-                    Radio<String>(value: type.id, enabled: !loading),
+                    Radio<String>(
+                      value: type.id,
+                      enabled: !loading,
+                      fillColor: const WidgetStatePropertyAll(Colors.white),
+                    )
+                  else
+                    const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       type.name,
                       style: const TextStyle(
-                        fontSize: 19,
+                        color: Colors.white,
+                        fontSize: 17,
                         fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Flexible(
+                    child: Text(
+                      status,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.end,
+                      style: const TextStyle(
+                        color: Color(0xFFCED7E5),
+                        fontSize: 12,
                       ),
                     ),
                   ),
@@ -427,178 +606,273 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
               ),
             ),
           ),
-          const Divider(color: _clientBorder),
-          if (typeMode)
-            ...type.variants.map(
-              (variant) => _variantCard(type, variant, typeMode),
-            )
-          else
-            RadioGroup<String>(
-              groupValue: selectedVariants[type.id],
-              onChanged: (variantId) {
-                if (variantId != null && !loading) {
-                  setState(() {
-                    selectedVariants[type.id] = variantId;
-                    submitted = false;
-                    error = null;
-                  });
-                }
-              },
-              child: Column(
-                children: type.variants
-                    .map((variant) => _variantCard(type, variant, typeMode))
-                    .toList(),
+        ),
+        if (!collapsed)
+          DecoratedBox(
+            decoration: const BoxDecoration(
+              border: Border(
+                left: BorderSide(color: _paperBorder),
+                right: BorderSide(color: _paperBorder),
+                bottom: BorderSide(color: _paperBorder),
               ),
             ),
-        ],
-      ),
+            child: typeMode
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (final variant in type.variants)
+                        _variantBlock(type, variant, typeMode),
+                    ],
+                  )
+                : RadioGroup<String>(
+                    groupValue: selectedVariants[type.id],
+                    onChanged: (variantId) => _selectVariant(type, variantId),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (final variant in type.variants)
+                          _variantBlock(type, variant, typeMode),
+                      ],
+                    ),
+                  ),
+          ),
+      ],
     );
   }
 
-  Widget _variantCard(
+  Widget _variantBlock(
     QuoteClientProposalType type,
     QuoteClientVariant variant,
     bool typeMode,
-  ) => Container(
-    margin: const EdgeInsets.only(top: 10),
-    decoration: BoxDecoration(
-      color: const Color(0xFF0D151F),
-      border: Border.all(
-        color: !typeMode && selectedVariants[type.id] == variant.id
-            ? _clientAccent
-            : _clientBorder,
-      ),
-      borderRadius: BorderRadius.circular(12),
-    ),
-    child: ExpansionTile(
-      initiallyExpanded: true,
-      shape: const Border(),
-      title: Row(
-        children: [
-          if (!typeMode) Radio<String>(value: variant.id, enabled: !loading),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+  ) {
+    final selected =
+        (!typeMode && selectedVariants[type.id] == variant.id) ||
+        (typeMode && selectedTypeId == type.id);
+    final collapsed = collapsedVariants.contains(variant.id);
+    return Column(
+      key: Key('client-quote-variant-${variant.id}'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Material(
+          color: selected ? _paperSelectedBackground : _paperVariant,
+          child: InkWell(
+            onTap: loading
+                ? null
+                : typeMode
+                ? () => _selectType(type.id)
+                : () => _selectVariant(type, variant.id),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(2, 2, 14, 2),
+              child: Row(
+                children: [
+                  CollapseToggle(
+                    key: Key('client-quote-variant-toggle-${variant.id}'),
+                    expanded: !collapsed,
+                    compact: true,
+                    color: _paperMuted,
+                    expandTooltip: 'Развернуть вариант',
+                    collapseTooltip: 'Свернуть вариант',
+                    onPressed: () => _toggleVariant(variant.id),
+                  ),
+                  if (!typeMode)
+                    Radio<String>(
+                      value: variant.id,
+                      enabled: !loading,
+                      toggleable: true,
+                    )
+                  else
+                    const SizedBox(width: 4),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          variant.name,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        if (variant.subtitle?.trim().isNotEmpty == true)
+                          Text(
+                            variant.subtitle!.trim(),
+                            style: const TextStyle(
+                              color: _paperMuted,
+                              fontSize: 12,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  // Сумма и отметка выбора в столбик, чтобы строка помещалась
+                  // и на узком телефоне.
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        _money(variant.total),
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      if (selected)
+                        const Text(
+                          'ВЫБРАН',
+                          style: TextStyle(
+                            color: _paperSelected,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: .8,
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        if (!collapsed)
+          for (final category in variant.categories)
+            for (final section in category.sections)
+              _positions(category.name, section),
+        if (!collapsed)
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: const BoxDecoration(
+              color: _paperHeader,
+              border: Border(bottom: BorderSide(color: _paperBorder)),
+            ),
+            child: Wrap(
+              alignment: WrapAlignment.end,
+              spacing: 22,
+              runSpacing: 6,
               children: [
-                Text(
-                  variant.name,
-                  style: const TextStyle(fontWeight: FontWeight.w800),
+                const Text(
+                  'Итого по варианту',
+                  style: TextStyle(fontWeight: FontWeight.w800),
                 ),
-                if (variant.subtitle?.trim().isNotEmpty == true)
-                  Text(
-                    variant.subtitle!,
-                    style: const TextStyle(color: _clientMuted, fontSize: 12),
-                  ),
+                Text('Сумма без НДС: ${_money(variant.subtotal)}'),
                 Text(
-                  _money(variant.total),
-                  style: const TextStyle(
-                    color: _clientAccent,
-                    fontWeight: FontWeight.w800,
-                  ),
+                  variant.vatRate == null
+                      ? 'Без НДС'
+                      : 'НДС ${_number(variant.vatRate!)}%: ${_money(variant.vatAmount)}',
+                ),
+                Text(
+                  'Итого: ${_money(variant.total)}',
+                  style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
               ],
             ),
           ),
+      ],
+    );
+  }
+
+  /// Таблица раздела с фиксированными колонками; на узком экране она
+  /// прокручивается по горизонтали, а сумма раздела стоит над колонкой «Сумма».
+  Widget _positions(String category, QuoteClientSection section) {
+    final sectionTotal = section.positions.fold<double>(
+      0,
+      (total, position) => total + position.lineTotal,
+    );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: _tableWidth),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(
+                    '$category · ${section.name}',
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  _money(sectionTotal),
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(
+              width: _tableWidth,
+              child: Table(
+                defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                border: TableBorder.all(color: _paperBorder),
+                columnWidths: {
+                  for (final (index, width) in _columnWidths.indexed)
+                    index: FixedColumnWidth(width),
+                },
+                children: [
+                  _row(const [
+                    '№',
+                    'Наименование',
+                    'Маркировка / размер',
+                    'Кол-во',
+                    'Ед.',
+                    'Цена',
+                    'Сумма',
+                  ], header: true),
+                  for (final (index, position) in section.positions.indexed)
+                    _row([
+                      '${index + 1}',
+                      position.name,
+                      position.marking,
+                      _number(position.quantity),
+                      position.unit,
+                      _money(position.unitPrice),
+                      _money(position.lineTotal),
+                    ]),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
-      children: [
-        for (final category in variant.categories)
-          for (final section in category.sections)
-            _positions(category.name, section),
-        Padding(
-          padding: const EdgeInsets.all(14),
-          child: Wrap(
-            alignment: WrapAlignment.end,
-            spacing: 18,
-            runSpacing: 8,
-            children: [
-              Text(
-                'Без НДС: ${_money(variant.subtotal)}',
-                style: const TextStyle(color: _clientMuted),
-              ),
-              Text(
-                variant.vatRate == null
-                    ? 'НДС: без НДС'
-                    : 'НДС ${_number(variant.vatRate!)}%: ${_money(variant.vatAmount)}',
-                style: const TextStyle(color: _clientMuted),
-              ),
-              Text(
-                'Итого: ${_money(variant.total)}',
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-            ],
-          ),
-        ),
-      ],
-    ),
-  );
-
-  Widget _positions(String category, QuoteClientSection section) => Padding(
-    padding: const EdgeInsets.fromLTRB(14, 4, 14, 10),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '$category · ${section.name}',
-          style: const TextStyle(
-            color: _clientMuted,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: 7),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: DataTable(
-            headingRowHeight: 36,
-            dataRowMinHeight: 42,
-            dataRowMaxHeight: 64,
-            columns: const [
-              DataColumn(label: Text('Наименование')),
-              DataColumn(label: Text('Маркировка')),
-              DataColumn(label: Text('Кол-во')),
-              DataColumn(label: Text('Ед.')),
-              DataColumn(label: Text('Цена')),
-              DataColumn(label: Text('Сумма')),
-            ],
-            rows: section.positions
-                .map(
-                  (position) => DataRow(
-                    cells: [
-                      DataCell(
-                        SizedBox(width: 220, child: Text(position.name)),
-                      ),
-                      DataCell(
-                        SizedBox(width: 140, child: Text(position.marking)),
-                      ),
-                      DataCell(Text(_number(position.quantity))),
-                      DataCell(Text(position.unit)),
-                      DataCell(Text(_money(position.unitPrice))),
-                      DataCell(Text(_money(position.lineTotal))),
-                    ],
-                  ),
-                )
-                .toList(),
-          ),
-        ),
-      ],
-    ),
-  );
+    );
+  }
 }
 
-final class _ClientPanel extends StatelessWidget {
-  const _ClientPanel({required this.child});
-  final Widget child;
+const _paperText = Color(0xFF172033);
+const _paperMuted = Color(0xFF5E6B7E);
+const _paperBorder = Color(0xFFD8DEE8);
+const _paperHeader = Color(0xFFF0F4F9);
+const _paperVariant = Color(0xFFF8FAFC);
+const _paperSelected = Color(0xFF2368C4);
+const _paperSelectedBackground = Color(0xFFE8F1FF);
 
-  @override
-  Widget build(BuildContext context) => DecoratedBox(
-    decoration: BoxDecoration(
-      color: _clientSurface,
-      border: Border.all(color: _clientBorder),
-      borderRadius: BorderRadius.circular(16),
-    ),
-    child: Padding(padding: const EdgeInsets.all(16), child: child),
-  );
-}
+/// Колонки таблицы позиций: №, наименование, маркировка, кол-во, ед., цена, сумма.
+const _columnWidths = <double>[38, 250, 160, 70, 60, 115, 125];
+
+/// Сумма ширин [_columnWidths].
+const double _tableWidth = 38.0 + 250 + 160 + 70 + 60 + 115 + 125;
+
+TableRow _row(List<String> values, {bool header = false}) => TableRow(
+  decoration: BoxDecoration(color: header ? _paperHeader : Colors.white),
+  children: [
+    for (final (index, value) in values.indexed)
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        child: Text(
+          value,
+          textAlign: index >= 5 ? TextAlign.end : TextAlign.start,
+          style: TextStyle(
+            color: _paperText,
+            fontSize: 12,
+            fontWeight: header ? FontWeight.w800 : FontWeight.w400,
+          ),
+        ),
+      ),
+  ],
+);
 
 final class _StatusBadge extends StatelessWidget {
   const _StatusBadge({required this.label, required this.icon});

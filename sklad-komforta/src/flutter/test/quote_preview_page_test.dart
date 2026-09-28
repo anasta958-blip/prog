@@ -86,6 +86,42 @@ void main() {
     expect(find.text('Сводка типа'), findsNothing);
   });
 
+  testWidgets('только тип показывает все его варианты и сводку типа', (
+    tester,
+  ) async {
+    final draft = _draft();
+    draft.proposalTypes.first.variants.add(
+      QuoteVariantDraft(id: 'variant-2', name: 'Премиум', categories: []),
+    );
+    draft.proposalTypes.add(
+      QuoteProposalTypeDraft(
+        id: 'type-2',
+        name: 'Бойлеры',
+        variants: [
+          QuoteVariantDraft(id: 'variant-3', name: 'Базовый', categories: []),
+        ],
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: QuotePreviewPage(draft: draft, proposalTypeId: 'type-1'),
+      ),
+    );
+
+    expect(find.byKey(const Key('quote-preview-type-type-1')), findsOneWidget);
+    expect(find.byKey(const Key('quote-preview-type-type-2')), findsNothing);
+    expect(
+      find.byKey(const Key('quote-preview-variant-variant-1')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('quote-preview-variant-variant-2')),
+      findsOneWidget,
+    );
+    expect(find.text('Сводка типа'), findsOneWidget);
+  });
+
   testWidgets('без выбранного варианта показывается весь документ', (
     tester,
   ) async {

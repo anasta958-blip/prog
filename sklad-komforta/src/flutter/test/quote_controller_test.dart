@@ -1135,6 +1135,133 @@ void main() {
     auth.dispose();
   });
 
+  testWidgets('предпросмотр и печать спрашивают: вариант, тип или всё', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1600, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    final auth = AuthController(
+      config,
+      api: _NoopAuthGateway(),
+      tokens: _MemoryTokenRepository(),
+    )..accessToken = 'access-token';
+    final gateway = _RecordingQuoteGateway();
+    final controller = QuoteController(
+      config,
+      auth,
+      quoteGateway: gateway,
+      catalogGateway: _CatalogGatewayWithRelations(),
+    );
+    controller
+      ..catalog = _configuration
+      ..draft = _twoTypeDraft()
+      ..activeTypeId = 'type-conditioners'
+      ..activeVariantId = 'variant-premium';
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 1500,
+            height: 900,
+            child: QuoteEditorPage(
+              config: config,
+              authController: auth,
+              board: _quoteBoard,
+              controller: controller,
+              onBack: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    Future<void> openPreviewWith(String optionKey) async {
+      await tester.tap(find.text('Предпросмотр'));
+      await tester.pumpAndSettle();
+      expect(find.text('Что показать?'), findsOneWidget);
+      await tester.tap(find.byKey(Key(optionKey)));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('quote-preview-page')), findsOneWidget);
+    }
+
+    // Окно называет то, что откроется, и считает содержимое.
+    await tester.tap(find.text('Предпросмотр'));
+    await tester.pumpAndSettle();
+    expect(find.text('Вариант «Премиум»'), findsOneWidget);
+    expect(find.text('Тип «Кондиционеры»'), findsWidgets);
+    expect(find.text('Все варианты типа: 2 варианта'), findsOneWidget);
+    expect(find.text('Все типы и варианты: 2 типа'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('print-scope-variant')));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const Key('quote-preview-variant-variant-premium')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('quote-preview-variant-variant-economy')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const Key('quote-preview-type-type-boilers')),
+      findsNothing,
+    );
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    await openPreviewWith('print-scope-type');
+    expect(
+      find.byKey(const Key('quote-preview-variant-variant-premium')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('quote-preview-variant-variant-economy')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('quote-preview-type-type-boilers')),
+      findsNothing,
+    );
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    await openPreviewWith('print-scope-all');
+    expect(
+      find.byKey(const Key('quote-preview-type-type-boilers')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const Key('quote-preview-variant-variant-economy')),
+      findsOneWidget,
+    );
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    // Печать: несохранённый документ не даёт выбрать — сразу понятная причина.
+    await tester.tap(find.text('Печать'));
+    await tester.pumpAndSettle();
+    expect(find.text('Что напечатать?'), findsNothing);
+    expect(controller.error, 'Сначала сохраните предложение.');
+
+    controller.persistedCardId = 'card-id';
+    await tester.tap(find.text('Печать'));
+    await tester.pumpAndSettle();
+    expect(find.text('Что напечатать?'), findsOneWidget);
+    // Отмена выбора ничего не печатает.
+    await tester.tapAt(const Offset(5, 5));
+    await tester.pumpAndSettle();
+    expect(find.text('Что напечатать?'), findsNothing);
+    expect(gateway.downloadCalls, 0);
+    expect(tester.takeException(), isNull);
+
+    controller.dispose();
+    auth.dispose();
+  });
+
   test('PDF доступен только для сохранённой версии предложения', () async {
     final auth = AuthController(
       config,
@@ -1149,16 +1276,27 @@ void main() {
       catalogGateway: _CatalogGatewayWithRelations(),
     )..persistedCardId = 'card-id';
 
+    controller
+      ..draft = _twoTypeDraft()
+      ..activeTypeId = 'type-conditioners'
+      ..activeVariantId = 'variant-premium';
+
     controller.dirty = true;
-    expect(await controller.downloadPdf(board: _quoteBoard), isNull);
+    expect(
+      await controller.downloadPdf(
+        board: _quoteBoard,
+        scope: QuotePrintScope.all,
+      ),
+      isNull,
+    );
     expect(controller.error, 'Сохраните изменения перед печатью.');
     expect(gateway.downloadCalls, 0);
 
-    controller
-      ..dirty = false
-      ..activeTypeId = 'type-conditioners'
-      ..activeVariantId = 'variant-premium';
-    final file = await controller.downloadPdf(board: _quoteBoard);
+    controller.dirty = false;
+    final file = await controller.downloadPdf(
+      board: _quoteBoard,
+      scope: QuotePrintScope.variant,
+    );
     expect(file?.fileName, 'КП.pdf');
     expect(file?.bytes, [0x25, 0x50, 0x44, 0x46]);
     expect(gateway.downloadCalls, 1);
@@ -1167,10 +1305,61 @@ void main() {
     expect(gateway.lastProposalTypeId, 'type-conditioners');
     expect(gateway.lastVariantId, 'variant-premium');
 
+    // «Тип»: только тип, без варианта — сервер вернёт все его варианты.
+    await controller.downloadPdf(
+      board: _quoteBoard,
+      scope: QuotePrintScope.type,
+    );
+    expect(gateway.lastProposalTypeId, 'type-conditioners');
+    expect(gateway.lastVariantId, isNull);
+
+    // «Всё»: без ограничений.
+    await controller.downloadPdf(
+      board: _quoteBoard,
+      scope: QuotePrintScope.all,
+    );
+    expect(gateway.lastProposalTypeId, isNull);
+    expect(gateway.lastVariantId, isNull);
+    expect(gateway.downloadCalls, 3);
+
     controller.dispose();
     auth.dispose();
   });
 }
+
+/// Документ с двумя типами: «Кондиционеры» (два варианта) и «Бойлеры».
+QuoteDraft _twoTypeDraft() => QuoteDraft(
+  kind: QuoteKind.quote,
+  title: 'КП',
+  clientId: 'client',
+  executorCompanyId: 'executor',
+  selectionMode: 'variant',
+  proposalTypes: [
+    QuoteProposalTypeDraft(
+      id: 'type-conditioners',
+      name: 'Кондиционеры',
+      variants: [
+        QuoteVariantDraft(
+          id: 'variant-economy',
+          name: 'Эконом',
+          categories: [],
+        ),
+        QuoteVariantDraft(
+          id: 'variant-premium',
+          name: 'Премиум',
+          categories: [],
+        ),
+      ],
+    ),
+    QuoteProposalTypeDraft(
+      id: 'type-boilers',
+      name: 'Бойлеры',
+      variants: [
+        QuoteVariantDraft(id: 'variant-basic', name: 'Базовый', categories: []),
+      ],
+    ),
+  ],
+);
 
 final class _RecordingQuoteGateway implements QuoteGateway {
   int downloadCalls = 0;

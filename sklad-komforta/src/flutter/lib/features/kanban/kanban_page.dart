@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui' show PointerDeviceKind;
 
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/widgets/collapse_toggle.dart';
 import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
 import 'package:intl/intl.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
@@ -438,35 +439,29 @@ final class _Toolbar extends StatelessWidget {
         ),
         child: Column(
           children: [
-            InkWell(
-              onTap: onToggle,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.view_kanban_outlined,
-                      color: Color(0xFF4D8DFF),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.view_kanban_outlined,
+                    color: Color(0xFF4D8DFF),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      controller.board?.name ?? 'Канбаны',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        controller.board?.name ?? 'Канбаны',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                    ),
-                    AnimatedRotation(
-                      turns: expanded ? .5 : 0,
-                      duration: const Duration(milliseconds: 160),
-                      child: const Icon(Icons.expand_more),
-                    ),
-                  ],
-                ),
+                  ),
+                  CollapseToggle(
+                    expanded: expanded,
+                    compact: true,
+                    onPressed: onToggle,
+                  ),
+                ],
               ),
             ),
             AnimatedCrossFade(
@@ -796,6 +791,8 @@ final class _KanbanColumnPanel extends StatelessWidget {
             ),
           ],
           const Divider(height: 1, indent: 10, endIndent: 10),
+          // Архив — исключение из правила «сворачивать только стрелкой»:
+          // строка целиком показывает и скрывает архив колонки.
           TextButton(
             onPressed: () => controller.toggleArchive(column.id),
             child: Row(
@@ -804,9 +801,10 @@ final class _KanbanColumnPanel extends StatelessWidget {
                 const SizedBox(width: 8),
                 Text('${archive?.total ?? 0}'),
                 const Spacer(),
-                Icon(
-                  archiveExpanded ? Icons.expand_less : Icons.expand_more,
-                  size: 18,
+                AnimatedRotation(
+                  turns: archiveExpanded ? 0 : -0.25,
+                  duration: const Duration(milliseconds: 160),
+                  child: const Icon(Icons.expand_more, size: 18),
                 ),
               ],
             ),

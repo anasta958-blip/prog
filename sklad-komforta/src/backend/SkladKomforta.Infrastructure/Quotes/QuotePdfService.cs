@@ -49,15 +49,20 @@ internal sealed class QuotePdfService(
             manager,
             salesHead,
             cardTask.Result.Number);
-        var printedVariant = variantId is null ? null : quote.ProposalTypes[0];
-        return new QuotePdfFile(BuildFileName(quote, printedVariant), content);
+        // Для печати одного варианта или одного типа в имя файла добавляются их названия.
+        var printedType = variantId is null && proposalTypeId is null ? null : quote.ProposalTypes[0];
+        var printedVariant = variantId is null ? null : printedType!.Variants[0];
+        return new QuotePdfFile(BuildFileName(quote, printedType, printedVariant), content);
     }
 
     /// <summary>
-    /// «КП - Название.pdf»; при печати одного варианта к имени добавляются тип и
-    /// вариант, чтобы файлы разных вариантов не перезаписывали друг друга.
+    /// «КП - Название.pdf»; при печати части документа к имени добавляются тип и
+    /// вариант, чтобы файлы не перезаписывали друг друга.
     /// </summary>
-    private static string BuildFileName(QuoteDetails quote, QuoteProposalTypeDetails? printedType)
+    private static string BuildFileName(
+        QuoteDetails quote,
+        QuoteProposalTypeDetails? printedType,
+        QuoteVariantDetails? printedVariant)
     {
         var kind = quote.QuoteKind == QuoteKindCodes.Prequote ? "ПКП" : "КП";
         var invalid = Path.GetInvalidFileNameChars().ToHashSet();
@@ -72,7 +77,7 @@ internal sealed class QuotePdfService(
         if (title.Length > 0) parts.Add(title);
         if (printedType is not null)
         {
-            parts.AddRange(new[] { Clean(printedType.Name, 40), Clean(printedType.Variants[0].Name, 40) }
+            parts.AddRange(new[] { Clean(printedType.Name, 40), Clean(printedVariant?.Name ?? string.Empty, 40) }
                 .Where(part => part.Length > 0));
         }
 

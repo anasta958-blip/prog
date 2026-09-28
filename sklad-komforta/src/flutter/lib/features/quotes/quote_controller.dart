@@ -1219,26 +1219,47 @@ final class QuoteController extends ChangeNotifier {
     }
   }
 
-  /// Загружает PDF только для сохранённой и не изменённой версии предложения.
-  /// Это исключает ситуацию, когда экран показывает одно, а сервер печатает
-  /// предыдущую версию документа. В PDF попадают только открытые сейчас тип
-  /// предложения и вариант.
-  Future<QuotePdfDownload?> downloadPdf({
-    required KanbanBoard board,
-    KanbanCard? card,
-  }) async {
-    if (printing) return null;
-    final cardId = persistedCardId ?? card?.id;
-    if (cardId == null) {
+  /// Идентификаторы для запроса PDF: [QuotePrintScope.variant] — открытые
+  /// сейчас тип и вариант, [QuotePrintScope.type] — только открытый тип,
+  /// [QuotePrintScope.all] — без ограничений.
+  ({String? typeId, String? variantId}) printSelection(QuotePrintScope scope) =>
+      switch (scope) {
+        QuotePrintScope.variant => (
+          typeId: activeType?.id,
+          variantId: activeVariant?.id,
+        ),
+        QuotePrintScope.type => (typeId: activeType?.id, variantId: null),
+        QuotePrintScope.all => (typeId: null, variantId: null),
+      };
+
+  /// Проверяет, что предложение можно печатать: оно сохранено и без
+  /// несохранённых изменений. Иначе записывает причину в [error].
+  bool ensurePrintable({KanbanCard? card}) {
+    if ((persistedCardId ?? card?.id) == null) {
       error = 'Сначала сохраните предложение.';
       notifyListeners();
-      return null;
+      return false;
     }
     if (dirty) {
       error = 'Сохраните изменения перед печатью.';
       notifyListeners();
-      return null;
+      return false;
     }
+    return true;
+  }
+
+  /// Загружает PDF только для сохранённой и не изменённой версии предложения.
+  /// Это исключает ситуацию, когда экран показывает одно, а сервер печатает
+  /// предыдущую версию документа. Содержимое PDF задаёт [scope].
+  Future<QuotePdfDownload?> downloadPdf({
+    required KanbanBoard board,
+    required QuotePrintScope scope,
+    KanbanCard? card,
+  }) async {
+    if (printing) return null;
+    if (!ensurePrintable(card: card)) return null;
+    final cardId = (persistedCardId ?? card?.id)!;
+    final selection = printSelection(scope);
     printing = true;
     error = null;
     successMessage = null;
@@ -1249,8 +1270,8 @@ final class QuoteController extends ChangeNotifier {
           token,
           board.id,
           cardId,
-          proposalTypeId: activeTypeId,
-          variantId: activeVariantId,
+          proposalTypeId: selection.typeId,
+          variantId: selection.variantId,
         ),
       );
     } on ApiException catch (exception) {

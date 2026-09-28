@@ -308,7 +308,7 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
         else
         {
             if (request.ProposalTypeId.HasValue)
-                throw Failure(400, "quote_client_variant_selection_invalid", "Для каждого типа выберите один вариант.");
+                throw Failure(400, "quote_client_variant_selection_invalid", "Выберите варианты в нужных типах.");
             await ValidateVariantSelectionsAsync(
                 connection, transaction, session.QuoteId, selections, cancellationToken);
             await ExecuteAsync(connection, transaction,
@@ -417,8 +417,12 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
         IReadOnlyList<QuoteClientVariantSelection> selections,
         CancellationToken cancellationToken)
     {
-        if (selections.Count == 0 || selections.Select(item => item.ProposalTypeId).Distinct().Count() != selections.Count)
-            throw Failure(400, "quote_client_variant_selection_invalid", "Для каждого типа выберите один вариант.");
+        // Клиент выбирает по одному варианту только в нужных ему типах: пропуск
+        // типа допустим, но хотя бы один выбор и не больше одного варианта на тип.
+        if (selections.Count == 0)
+            throw Failure(400, "quote_client_variant_selection_invalid", "Выберите хотя бы один вариант.");
+        if (selections.Select(item => item.ProposalTypeId).Distinct().Count() != selections.Count)
+            throw Failure(400, "quote_client_variant_selection_invalid", "В каждом типе можно выбрать только один вариант.");
         await using var command = new NpgsqlCommand("""
             SELECT proposal_type.id, variant.id
               FROM quote_proposal_types AS proposal_type
@@ -427,15 +431,13 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
             """, connection, transaction);
         command.Parameters.AddWithValue("quote_id", quoteId);
         var allowed = new HashSet<(Guid TypeId, Guid VariantId)>();
-        var typeIds = new HashSet<Guid>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            typeIds.Add(reader.GetGuid(0));
             allowed.Add((reader.GetGuid(0), reader.GetGuid(1)));
         }
-        if (selections.Count != typeIds.Count || selections.Any(item => !allowed.Contains((item.ProposalTypeId, item.VariantId))))
-            throw Failure(400, "quote_client_variant_selection_invalid", "Для каждого типа выберите один доступный вариант.");
+        if (selections.Any(item => !allowed.Contains((item.ProposalTypeId, item.VariantId))))
+            throw Failure(400, "quote_client_variant_selection_invalid", "Выбранный вариант недоступен.");
     }
 
     private static async Task<bool> ProposalTypeBelongsToQuoteAsync(
@@ -461,12 +463,14 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
         await using var connection = await OpenTenantConnectionAsync(schema, cancellationToken);
         ClientHeader header;
         await using (var command = new NpgsqlCommand("""
-            SELECT quote.id, quote.quote_kind, quote.title, company.name,
+            SELECT quote.id, quote.quote_kind, quote.title,
+                   COALESCE(NULLIF(btrim(company.legal_name), ''), company.name),
                    quote.selection_mode, quote.additional_information,
                    selected_type.proposal_type_id, quote.client_selection_submitted_at,
-                   quote.updated_at
+                   quote.updated_at, client.name
               FROM quotes AS quote
               JOIN companies AS company ON company.id = quote.executor_company_id
+              LEFT JOIN clients AS client ON client.id = quote.client_id
               LEFT JOIN quote_client_type_selections AS selected_type ON selected_type.quote_id = quote.id
              WHERE quote.id = @quote_id AND quote.deleted_at IS NULL
             """, connection))
@@ -479,7 +483,8 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
                 reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
                 reader.GetString(4), reader.IsDBNull(5) ? null : reader.GetString(5),
                 reader.IsDBNull(6) ? null : reader.GetGuid(6),
-                reader.IsDBNull(7) ? null : ReadTimestamp(reader, 7), ReadTimestamp(reader, 8));
+                reader.IsDBNull(7) ? null : ReadTimestamp(reader, 7), ReadTimestamp(reader, 8),
+                reader.IsDBNull(9) ? null : reader.GetString(9));
         }
 
         var types = new List<MutableClientType>();
@@ -594,7 +599,8 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
         return new QuoteClientView(
             header.Id, header.Kind, header.Title, header.ExecutorName, header.SelectionMode,
             header.AdditionalInformation, header.SelectedProposalTypeId,
-            types.Select(item => item.ToDetails()).ToArray(), header.SubmittedAt, header.UpdatedAt);
+            types.Select(item => item.ToDetails()).ToArray(), header.SubmittedAt, header.UpdatedAt,
+            header.ClientName);
     }
 
     private async Task<NpgsqlConnection> OpenTenantConnectionAsync(
@@ -690,7 +696,8 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
         string? AdditionalInformation,
         Guid? SelectedProposalTypeId,
         DateTimeOffset? SubmittedAt,
-        DateTimeOffset UpdatedAt);
+        DateTimeOffset UpdatedAt,
+        string? ClientName);
 
     private sealed class MutableClientType(Guid id, string name, Guid? selectedVariantId)
     {

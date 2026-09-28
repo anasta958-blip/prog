@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/widgets/collapse_toggle.dart';
 import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
 import 'package:intl/intl.dart';
@@ -603,33 +604,25 @@ final class _MobileControlsToggle extends StatelessWidget {
       borderRadius: BorderRadius.circular(10),
       side: const BorderSide(color: Color(0xFF29384D)),
     ),
-    child: InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Row(
-          children: [
-            const Icon(Icons.tune, size: 18, color: Color(0xFF6DA2FF)),
-            const SizedBox(width: 9),
-            const Expanded(
-              child: Text(
-                'Управление каталогом',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-              ),
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(12, 2, 4, 2),
+      child: Row(
+        children: [
+          const Icon(Icons.tune, size: 18, color: Color(0xFF6DA2FF)),
+          const SizedBox(width: 9),
+          const Expanded(
+            child: Text(
+              'Управление каталогом',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
             ),
-            Text(
-              selectedCount > 0 ? 'Выбрано: $selectedCount' : '$total',
-              style: const TextStyle(fontSize: 11, color: Color(0xFF8FA4C2)),
-            ),
-            const SizedBox(width: 6),
-            AnimatedRotation(
-              turns: expanded ? .5 : 0,
-              duration: const Duration(milliseconds: 160),
-              child: const Icon(Icons.expand_more, size: 20),
-            ),
-          ],
-        ),
+          ),
+          Text(
+            selectedCount > 0 ? 'Выбрано: $selectedCount' : '$total',
+            style: const TextStyle(fontSize: 11, color: Color(0xFF8FA4C2)),
+          ),
+          const SizedBox(width: 6),
+          CollapseToggle(expanded: expanded, compact: true, onPressed: onTap),
+        ],
       ),
     ),
   );

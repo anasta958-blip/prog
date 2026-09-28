@@ -3,34 +3,36 @@ using SkladKomforta.Application.Identity;
 namespace SkladKomforta.Application.Quotes;
 
 /// <summary>
-/// Ограничивает печатную версию предложения одним типом и одним вариантом —
-/// теми, что открыты у менеджера в редакторе.
+/// Ограничивает печатную версию предложения тем, что выбрал менеджер: одним
+/// вариантом, всеми вариантами одного типа либо всем документом.
 /// </summary>
 public static class QuotePrintSelection
 {
     /// <summary>
-    /// Возвращает копию предложения, в которой оставлены только указанные тип и вариант.
+    /// Возвращает копию предложения с выбранным содержимым.
     /// </summary>
     /// <param name="quote">Сохранённое предложение.</param>
     /// <param name="proposalTypeId">Тип предложения; необязателен, если указан вариант.</param>
     /// <param name="variantId">
-    /// Печатаемый вариант. Если не указаны ни тип, ни вариант, возвращается весь документ.
+    /// Печатаемый вариант. Без варианта, но с типом остаются все варианты этого типа;
+    /// если не указаны ни тип, ни вариант, возвращается весь документ.
     /// </param>
-    /// <returns>Предложение с одним типом и одним вариантом либо исходный документ.</returns>
+    /// <returns>Предложение с одним вариантом, одним типом либо исходный документ.</returns>
     /// <exception cref="IdentityException">
-    /// 400 <c>quote_print_variant_required</c> — указан тип без варианта;
+    /// 404 <c>quote_print_type_not_found</c> — тип не найден в предложении;
     /// 404 <c>quote_print_variant_not_found</c> — вариант не принадлежит предложению или типу.
     /// </exception>
     public static QuoteDetails Apply(QuoteDetails quote, Guid? proposalTypeId, Guid? variantId)
     {
         if (variantId is null)
         {
-            return proposalTypeId is null
-                ? quote
-                : throw new IdentityException(
-                    400,
-                    "quote_print_variant_required",
-                    "Выберите вариант предложения для печати.");
+            if (proposalTypeId is null) return quote;
+            var wholeType = quote.ProposalTypes.FirstOrDefault(item => item.Id == proposalTypeId)
+                ?? throw new IdentityException(
+                    404,
+                    "quote_print_type_not_found",
+                    "Выбранный тип не найден в сохранённом предложении. Обновите документ и повторите печать.");
+            return quote with { ProposalTypes = [wholeType] };
         }
 
         var type = quote.ProposalTypes.FirstOrDefault(item =>

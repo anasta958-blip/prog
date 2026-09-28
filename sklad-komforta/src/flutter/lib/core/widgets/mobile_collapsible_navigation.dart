@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/widgets/collapse_toggle.dart';
 
 /// Сворачивает служебную навигацию страницы на узком экране.
 ///
@@ -41,47 +42,44 @@ final class _MobileCollapsibleNavigationState
         Material(
           color: const Color(0xFF131D2A),
           shape: const Border(bottom: BorderSide(color: Color(0xFF29384D))),
-          child: InkWell(
-            onTap: () => setState(() => expanded = !expanded),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-              child: Row(
-                children: [
-                  const Icon(Icons.tune, size: 18, color: Color(0xFF6DA2FF)),
-                  const SizedBox(width: 9),
-                  Expanded(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 2, 4, 2),
+            child: Row(
+              children: [
+                const Icon(Icons.tune, size: 18, color: Color(0xFF6DA2FF)),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Text(
+                    widget.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                if (widget.summary case final summary?) ...[
+                  const SizedBox(width: 8),
+                  Flexible(
                     child: Text(
-                      widget.title,
+                      summary,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
+                        fontSize: 11,
+                        color: Color(0xFF8FA4C2),
                       ),
                     ),
-                  ),
-                  if (widget.summary case final summary?) ...[
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        summary,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: Color(0xFF8FA4C2),
-                        ),
-                      ),
-                    ),
-                  ],
-                  const SizedBox(width: 4),
-                  AnimatedRotation(
-                    turns: expanded ? .5 : 0,
-                    duration: const Duration(milliseconds: 160),
-                    child: const Icon(Icons.expand_more, size: 20),
                   ),
                 ],
-              ),
+                const SizedBox(width: 4),
+                CollapseToggle(
+                  expanded: expanded,
+                  compact: true,
+                  onPressed: () => setState(() => expanded = !expanded),
+                ),
+              ],
             ),
           ),
         ),

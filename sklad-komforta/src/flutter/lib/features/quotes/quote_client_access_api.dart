@@ -213,12 +213,16 @@ final class QuoteClientView {
     required this.proposalTypes,
     required this.selectionSubmittedAt,
     required this.updatedAt,
+    this.clientName,
   });
 
   final String id;
   final String kind;
   final String title;
   final String executorName;
+
+  /// Заказчик для шапки документа; отсутствует у старых версий API.
+  final String? clientName;
   final String selectionMode;
   final String? additionalInformation;
   final String? selectedProposalTypeId;
@@ -232,6 +236,7 @@ final class QuoteClientView {
         kind: json['quoteKind'] as String,
         title: json['title'] as String,
         executorName: json['executorName'] as String,
+        clientName: json['clientName'] as String?,
         selectionMode: json['selectionMode'] as String? ?? 'variant',
         additionalInformation: json['additionalInformation'] as String?,
         selectedProposalTypeId: json['selectedProposalTypeId'] as String?,

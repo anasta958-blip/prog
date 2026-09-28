@@ -68,12 +68,23 @@ public sealed class QuotePrintSelectionTests
     }
 
     [Fact]
-    public void TypeWithoutVariantIsRejected()
+    public void TypeWithoutVariantKeepsAllVariantsOfThatType()
+    {
+        var printed = QuotePrintSelection.Apply(Quote, ConditionersId, null);
+
+        var type = Assert.Single(printed.ProposalTypes);
+        Assert.Equal(ConditionersId, type.Id);
+        Assert.Equal([EconomyId, PremiumId], type.Variants.Select(item => item.Id));
+    }
+
+    [Fact]
+    public void UnknownTypeIsRejected()
     {
         var error = Assert.Throws<IdentityException>(() =>
-            QuotePrintSelection.Apply(Quote, ConditionersId, null));
+            QuotePrintSelection.Apply(Quote, Guid.NewGuid(), null));
 
-        Assert.Equal(400, error.StatusCode);
+        Assert.Equal(404, error.StatusCode);
+        Assert.Equal("quote_print_type_not_found", error.Code);
     }
 
     private static QuoteVariantDetails Variant(Guid id, string name, int sortOrder) =>

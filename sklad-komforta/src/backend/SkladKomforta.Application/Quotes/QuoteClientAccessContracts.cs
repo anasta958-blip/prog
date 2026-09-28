@@ -38,7 +38,10 @@ public sealed record QuoteClientLoginResult(
     DateTimeOffset ExpiresAt,
     QuoteClientView Quote);
 
-/// <summary>Выбор клиента согласно режиму конкретного предложения.</summary>
+/// <summary>
+/// Выбор клиента согласно режиму конкретного предложения: один тип целиком либо
+/// по одному варианту в тех типах, которые нужны клиенту (не обязательно во всех).
+/// </summary>
 public sealed record SubmitQuoteClientSelectionRequest(
     Guid? ProposalTypeId,
     IReadOnlyList<QuoteClientVariantSelection> Variants);
@@ -47,6 +50,8 @@ public sealed record SubmitQuoteClientSelectionRequest(
 public sealed record QuoteClientVariantSelection(Guid ProposalTypeId, Guid VariantId);
 
 /// <summary>Безопасное клиентское представление без закупки, маржи и служебных полей.</summary>
+/// <param name="ExecutorName">Юридическое название исполнителя (или краткое, если юридического нет).</param>
+/// <param name="ClientName">Название заказчика для шапки документа.</param>
 public sealed record QuoteClientView(
     Guid Id,
     string QuoteKind,
@@ -57,7 +62,8 @@ public sealed record QuoteClientView(
     Guid? SelectedProposalTypeId,
     IReadOnlyList<QuoteClientProposalType> ProposalTypes,
     DateTimeOffset? SelectionSubmittedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    string? ClientName = null);
 
 /// <summary>Тип предложения и доступные клиенту варианты.</summary>
 public sealed record QuoteClientProposalType(

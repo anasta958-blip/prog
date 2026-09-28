@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/widgets/collapse_toggle.dart';
 import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
 import 'package:flutter/services.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
@@ -2201,47 +2202,41 @@ final class _SafeExpansionTileState extends State<_SafeExpansionTile> {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      InkWell(
-        onTap: () => setState(() => expanded = !expanded),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Row(
-            children: [
-              if (widget.leading != null) ...[
-                widget.leading!,
-                const SizedBox(width: 14),
-              ],
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    widget.title,
-                    if (widget.subtitle != null) ...[
-                      const SizedBox(height: 3),
-                      DefaultTextStyle.merge(
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Color(0xFF8FA4C2),
-                        ),
-                        child: widget.subtitle!,
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              if (widget.trailing != null) ...[
-                widget.trailing!,
-                const SizedBox(width: 8),
-              ],
-              ExcludeSemantics(
-                child: AnimatedRotation(
-                  turns: expanded ? .5 : 0,
-                  duration: const Duration(milliseconds: 160),
-                  child: const Icon(Icons.keyboard_arrow_down),
-                ),
-              ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
+        child: Row(
+          children: [
+            if (widget.leading != null) ...[
+              widget.leading!,
+              const SizedBox(width: 14),
             ],
-          ),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  widget.title,
+                  if (widget.subtitle != null) ...[
+                    const SizedBox(height: 3),
+                    DefaultTextStyle.merge(
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF8FA4C2),
+                      ),
+                      child: widget.subtitle!,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            if (widget.trailing != null) ...[
+              widget.trailing!,
+              const SizedBox(width: 8),
+            ],
+            CollapseToggle(
+              expanded: expanded,
+              onPressed: () => setState(() => expanded = !expanded),
+            ),
+          ],
         ),
       ),
       AnimatedSize(

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/widgets/collapse_toggle.dart';
 import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -335,9 +336,31 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
     );
   }
 
-  void _openPreview() {
+  /// Спрашивает, что показать или напечатать. `null` — пользователь отказался.
+  Future<QuotePrintScope?> _askPrintScope({required String title}) {
+    final type = controller.activeType;
+    final variant = controller.activeVariant;
+    final draft = controller.draft;
+    if (type == null || variant == null || draft == null) {
+      return Future.value(QuotePrintScope.all);
+    }
+    return showDialog<QuotePrintScope>(
+      context: context,
+      builder: (_) => _PrintScopeDialog(
+        title: title,
+        type: type,
+        variant: variant,
+        typeCount: draft.proposalTypes.length,
+      ),
+    );
+  }
+
+  Future<void> _openPreview() async {
     final draft = controller.draft;
     if (draft == null) return;
+    final scope = await _askPrintScope(title: 'Что показать?');
+    if (scope == null || !mounted) return;
+    final selection = controller.printSelection(scope);
 
     final client = controller.clients
         .where((item) => item.id == draft.clientId)
@@ -361,17 +384,24 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
           managerName: manager?.displayName,
           salesHeadName: salesHead?.displayName,
           cardNumber: widget.card?.number,
-          proposalTypeId: controller.activeTypeId,
-          variantId: controller.activeVariantId,
+          proposalTypeId: selection.typeId,
+          variantId: selection.variantId,
         ),
       ),
     );
   }
 
   Future<void> _printPdf() async {
+    // Сначала проверяем, что печать возможна, чтобы не спрашивать зря.
+    if (controller.printing || !controller.ensurePrintable(card: widget.card)) {
+      return;
+    }
+    final scope = await _askPrintScope(title: 'Что напечатать?');
+    if (scope == null || !mounted) return;
     final file = await controller.downloadPdf(
       board: widget.board,
       card: widget.card,
+      scope: scope,
     );
     if (file == null || !mounted) return;
     try {
@@ -712,13 +742,13 @@ final class _CommandBar extends StatelessWidget {
               const SizedBox(width: 7),
               IconButton.outlined(
                 onPressed: onPreview,
-                tooltip: 'Предпросмотр выбранного варианта',
+                tooltip: 'Предпросмотр',
                 icon: const Icon(Icons.visibility_outlined, size: 18),
               ),
               const SizedBox(width: 7),
               IconButton.outlined(
                 onPressed: controller.printing ? null : onPrint,
-                tooltip: 'Печать выбранного варианта',
+                tooltip: 'Печать',
                 icon: controller.printing
                     ? const SizedBox.square(
                         dimension: 16,
@@ -781,6 +811,112 @@ final class _CommandAction extends StatelessWidget {
       onPressed: onPressed,
       icon: Icon(icon, size: 17),
       label: Text(label),
+    ),
+  );
+}
+
+/// Выбор содержимого предпросмотра и печати: вариант, тип или весь документ.
+final class _PrintScopeDialog extends StatelessWidget {
+  const _PrintScopeDialog({
+    required this.title,
+    required this.type,
+    required this.variant,
+    required this.typeCount,
+  });
+
+  final String title;
+  final QuoteProposalTypeDraft type;
+  final QuoteVariantDraft variant;
+  final int typeCount;
+
+  static String _named(String value) =>
+      value.trim().isEmpty ? 'без названия' : value.trim();
+
+  static String _plural(int count, String one, String few, String many) {
+    final lastTwo = count % 100;
+    final last = count % 10;
+    if (lastTwo >= 11 && lastTwo <= 14) return '$count $many';
+    if (last == 1) return '$count $one';
+    if (last >= 2 && last <= 4) return '$count $few';
+    return '$count $many';
+  }
+
+  @override
+  Widget build(BuildContext context) => SimpleDialog(
+    title: Text(title),
+    children: [
+      _PrintScopeOption(
+        key: const Key('print-scope-variant'),
+        icon: Icons.layers_outlined,
+        title: 'Вариант «${_named(variant.name)}»',
+        subtitle: 'Тип «${_named(type.name)}»',
+        scope: QuotePrintScope.variant,
+      ),
+      _PrintScopeOption(
+        key: const Key('print-scope-type'),
+        icon: Icons.category_outlined,
+        title: 'Тип «${_named(type.name)}»',
+        subtitle:
+            'Все варианты типа: ${_plural(type.variants.length, 'вариант', 'варианта', 'вариантов')}',
+        scope: QuotePrintScope.type,
+      ),
+      _PrintScopeOption(
+        key: const Key('print-scope-all'),
+        icon: Icons.description_outlined,
+        title: 'Весь документ',
+        subtitle:
+            'Все типы и варианты: ${_plural(typeCount, 'тип', 'типа', 'типов')}',
+        scope: QuotePrintScope.all,
+      ),
+    ],
+  );
+}
+
+final class _PrintScopeOption extends StatelessWidget {
+  const _PrintScopeOption({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.scope,
+    super.key,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final QuotePrintScope scope;
+
+  @override
+  Widget build(BuildContext context) => SimpleDialogOption(
+    onPressed: () => Navigator.pop(context, scope),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Icon(icon, color: _accent),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: _muted, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     ),
   );
 }
@@ -1545,58 +1681,58 @@ final class _CategoryBlock extends StatelessWidget {
       ),
       child: Column(
         children: [
-          InkWell(
-            onTap: onToggle,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              child: Row(
-                children: [
-                  Icon(expanded ? Icons.expand_more : Icons.chevron_right),
-                  const Icon(Icons.folder_outlined, size: 18, color: _accent),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            category.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontWeight: FontWeight.w800),
-                          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 4, 12, 4),
+            child: Row(
+              children: [
+                CollapseToggle(
+                  expanded: expanded,
+                  expandTooltip: 'Развернуть категорию',
+                  collapseTooltip: 'Свернуть категорию',
+                  onPressed: onToggle,
+                ),
+                const Icon(Icons.folder_outlined, size: 18, color: _accent),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          category.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w800),
                         ),
-                        IconButton(
-                          tooltip: 'Добавить раздел',
-                          onPressed: onAddSection,
-                          icon: const Icon(Icons.create_new_folder_outlined),
-                        ),
-                        const SizedBox(width: 8),
-                        _MoneyLabel('Закупка', category.purchaseTotal),
-                        const SizedBox(width: 16),
-                        _MoneyLabel('Розница', category.clientTotal),
-                        const SizedBox(width: 8),
-                        IconButton(
-                          tooltip: 'Удалить категорию',
-                          color: const Color(0xFFFF7676),
-                          icon: const Icon(Icons.delete_outline, size: 20),
-                          onPressed: controller.saving
-                              ? null
-                              : () => _confirmTabRemoval(
-                                  context,
-                                  title:
-                                      'Удалить категорию «${category.name}»?',
-                                  content:
-                                      'Категория и все её разделы с позициями будут удалены из этого варианта. Связанные автоматические позиции будут пересчитаны. Каталог товаров не изменится.',
-                                  onConfirmed: () =>
-                                      controller.removeCategory(category),
-                                ),
-                        ),
-                      ],
-                    ),
+                      ),
+                      IconButton(
+                        tooltip: 'Добавить раздел',
+                        onPressed: onAddSection,
+                        icon: const Icon(Icons.create_new_folder_outlined),
+                      ),
+                      const SizedBox(width: 8),
+                      _MoneyLabel('Закупка', category.purchaseTotal),
+                      const SizedBox(width: 16),
+                      _MoneyLabel('Розница', category.clientTotal),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        tooltip: 'Удалить категорию',
+                        color: const Color(0xFFFF7676),
+                        icon: const Icon(Icons.delete_outline, size: 20),
+                        onPressed: controller.saving
+                            ? null
+                            : () => _confirmTabRemoval(
+                                context,
+                                title: 'Удалить категорию «${category.name}»?',
+                                content:
+                                    'Категория и все её разделы с позициями будут удалены из этого варианта. Связанные автоматические позиции будут пересчитаны. Каталог товаров не изменится.',
+                                onConfirmed: () =>
+                                    controller.removeCategory(category),
+                              ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
           if (expanded) ...[
@@ -1965,10 +2101,12 @@ final class _SectionHeader extends StatelessWidget {
       final title = Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          IconButton(
-            visualDensity: VisualDensity.compact,
+          CollapseToggle(
+            expanded: expanded,
+            compact: true,
+            expandTooltip: 'Развернуть раздел',
+            collapseTooltip: 'Свернуть раздел',
             onPressed: onToggle,
-            icon: Icon(expanded ? Icons.expand_more : Icons.chevron_right),
           ),
           const Icon(Icons.folder_open_outlined, size: 17),
           const SizedBox(width: 7),

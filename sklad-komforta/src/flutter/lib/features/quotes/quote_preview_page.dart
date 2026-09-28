@@ -15,9 +15,9 @@ const _paperHeader = Color(0xFFF0F4F9);
 /// сохранённые изменения. Закупочные цены намеренно не входят в клиентскую
 /// таблицу и остаются доступными только в рабочем редакторе.
 ///
-/// Как и печать, предпросмотр показывает только открытые в редакторе тип и
-/// вариант ([proposalTypeId], [variantId]). Если вариант не указан или не
-/// найден, выводится весь документ.
+/// Как и печать, предпросмотр показывает то, что выбрал пользователь: один
+/// вариант ([proposalTypeId] и [variantId]), все варианты одного типа (только
+/// [proposalTypeId]) либо весь документ (оба не указаны или не найдены).
 final class QuotePreviewPage extends StatelessWidget {
   const QuotePreviewPage({
     required this.draft,
@@ -82,7 +82,7 @@ final class QuotePreviewPage extends StatelessWidget {
                 style: const TextStyle(color: _paperText, height: 1.35),
                 child: _Document(
                   draft: draft,
-                  selection: _selection(),
+                  visible: _visible(),
                   client: client,
                   executor: executor,
                   managerName: managerName,
@@ -98,23 +98,38 @@ final class QuotePreviewPage extends StatelessWidget {
     ),
   );
 
-  /// Тип и вариант для показа либо `null`, если нужно вывести весь документ.
-  (QuoteProposalTypeDraft, QuoteVariantDraft)? _selection() {
-    if (variantId == null) return null;
-    for (final type in draft.proposalTypes) {
-      if (proposalTypeId != null && type.id != proposalTypeId) continue;
-      for (final variant in type.variants) {
-        if (variant.id == variantId) return (type, variant);
+  /// Показываемые типы и, если выбран вариант, единственный вариант типа.
+  _Visible _visible() {
+    if (variantId != null) {
+      for (final type in draft.proposalTypes) {
+        if (proposalTypeId != null && type.id != proposalTypeId) continue;
+        for (final variant in type.variants) {
+          if (variant.id == variantId) {
+            return _Visible([type], variant);
+          }
+        }
+      }
+    } else if (proposalTypeId != null) {
+      for (final type in draft.proposalTypes) {
+        if (type.id == proposalTypeId) return _Visible([type], null);
       }
     }
-    return null;
+    return _Visible(draft.proposalTypes, null);
   }
+}
+
+/// Что выводит предпросмотр: типы и (для режима «вариант») единственный вариант.
+final class _Visible {
+  const _Visible(this.types, this.onlyVariant);
+
+  final List<QuoteProposalTypeDraft> types;
+  final QuoteVariantDraft? onlyVariant;
 }
 
 final class _Document extends StatelessWidget {
   const _Document({
     required this.draft,
-    required this.selection,
+    required this.visible,
     required this.client,
     required this.executor,
     required this.managerName,
@@ -124,7 +139,7 @@ final class _Document extends StatelessWidget {
   });
 
   final QuoteDraft draft;
-  final (QuoteProposalTypeDraft, QuoteVariantDraft)? selection;
+  final _Visible visible;
   final CompanyClientModel? client;
   final LegalEntityModel? executor;
   final String? managerName;
@@ -178,25 +193,16 @@ final class _Document extends StatelessWidget {
         Text(intro),
       ],
       const SizedBox(height: 30),
-      if (selection case (final type, final variant))
-        Padding(
+      ...visible.types.map(
+        (type) => Padding(
           padding: const EdgeInsets.only(bottom: 30),
           child: _ProposalType(
             type: type,
             selectionMode: draft.selectionMode,
-            onlyVariant: variant,
-          ),
-        )
-      else
-        ...draft.proposalTypes.map(
-          (type) => Padding(
-            padding: const EdgeInsets.only(bottom: 30),
-            child: _ProposalType(
-              type: type,
-              selectionMode: draft.selectionMode,
-            ),
+            onlyVariant: visible.onlyVariant,
           ),
         ),
+      ),
       if (_text(draft.additionalInformation) case final information?) ...[
         const Divider(height: 42, color: _paperBorder),
         const Text(
