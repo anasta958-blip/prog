@@ -443,29 +443,13 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
 
     setState(() => creatingClientAccess = true);
     try {
-      final status = await widget.authController.executeAuthorized(
-        (token) =>
-            clientAccessApi.getLinkStatus(token, widget.board.id, cardId),
-      );
-      if (!mounted) return;
-      await showDialog<void>(
+      await showQuoteClientAccessDialog(
         context: context,
-        builder: (dialogContext) => _ClientAccessDialog(
-          initialStatus: status,
-          publicAppBaseUrl: widget.config.resolvedPublicAppBaseUrl,
-          onCreate: (lifetimeDays) => widget.authController.executeAuthorized(
-            (token) => clientAccessApi.createLink(
-              token,
-              widget.board.id,
-              cardId,
-              lifetimeDays: lifetimeDays,
-            ),
-          ),
-          onRevoke: () => widget.authController.executeAuthorized(
-            (token) =>
-                clientAccessApi.revokeLink(token, widget.board.id, cardId),
-          ),
-        ),
+        config: widget.config,
+        auth: widget.authController,
+        boardId: widget.board.id,
+        cardId: cardId,
+        api: clientAccessApi,
       );
     } on ApiException catch (exception) {
       if (mounted) {
@@ -921,6 +905,51 @@ final class _PrintScopeOption extends StatelessWidget {
   );
 }
 
+Future<void> showQuoteClientAccessDialog({
+  required BuildContext context,
+  required AppConfig config,
+  required AuthController auth,
+  required String boardId,
+  required String cardId,
+  QuoteClientAccessApi? api,
+}) async {
+  final client = api ?? QuoteClientAccessApi(config);
+  try {
+    final status = await auth.executeAuthorized(
+      (token) => client.getLinkStatus(token, boardId, cardId),
+    );
+    if (!context.mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _ClientAccessDialog(
+        initialStatus: status,
+        publicAppBaseUrl: config.resolvedPublicAppBaseUrl,
+        onCreate: (days) => auth.executeAuthorized(
+          (token) =>
+              client.createLink(token, boardId, cardId, lifetimeDays: days),
+        ),
+        onRevoke: () => auth.executeAuthorized(
+          (token) => client.revokeLink(token, boardId, cardId),
+        ),
+      ),
+    );
+  } on Object catch (exception) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        AppSnackBar(
+          content: Text(
+            exception is ApiException
+                ? exception.message
+                : 'Не удалось открыть управление клиентской ссылкой.',
+          ),
+        ),
+      );
+    }
+  } finally {
+    if (api == null) client.close();
+  }
+}
+
 final class _ClientAccessDialog extends StatefulWidget {
   const _ClientAccessDialog({
     required this.initialStatus,
@@ -966,6 +995,7 @@ final class _ClientAccessDialogState extends State<_ClientAccessDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
+    scrollable: true,
     title: const Row(
       children: [
         Icon(Icons.lock_outline, color: _accent),

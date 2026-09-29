@@ -1,7 +1,13 @@
 import 'dart:ui' show PointerDeviceKind;
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:sklad_komforta_app/core/models/workflow_specialization.dart';
+import 'package:sklad_komforta_app/features/quotes/quote_client_access_api.dart';
+import 'package:sklad_komforta_app/features/quotes/quote_editor_page.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/core/security/token_store.dart';
@@ -19,6 +25,158 @@ void main() {
   const config = AppConfig(
     apiBaseUrl: 'https://api.example.test/api/v1',
     environment: 'test',
+  );
+
+  for (final create in [false, true]) {
+    testWidgets(
+      'quote editor hides toolbar and pins source board (create=$create)',
+      (tester) async {
+        final auth = _authorizedController(config);
+        final gateway = _MemoryKanbanGateway()
+          ..specialization = WorkflowSpecialization.quoteAndPrequote
+          ..creationActions = [WorkflowCreationAction.prequote];
+        final controller = KanbanController(config, auth, gateway: gateway);
+        await controller.initialize();
+        if (!create) {
+          await controller.saveCard(
+            KanbanCardDraft(
+              columnId: 'quote-first',
+              categoryId: 'equipment',
+              title: 'Предложение',
+            ),
+          );
+        }
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: KanbanPage(
+                controller: controller,
+                config: config,
+                authController: auth,
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Рабочий канбан'), findsOneWidget);
+        await tester.tap(
+          find.text(
+            create ? WorkflowCreationAction.prequote.label : 'Предложение',
+          ),
+        );
+        await tester.pump();
+        expect(find.byType(QuoteEditorPage), findsOneWidget);
+        expect(find.text('Рабочий канбан'), findsNothing);
+        expect(find.text('Карточки пользователя'), findsNothing);
+        expect(find.byTooltip('Обновить'), findsNothing);
+        final editor = tester.widget<QuoteEditorPage>(
+          find.byType(QuoteEditorPage),
+        );
+        expect(editor.board.id, 'board-quotes');
+        await controller.selectBoard('board-orders');
+        await tester.pump();
+        expect(
+          tester.widget<QuoteEditorPage>(find.byType(QuoteEditorPage)).board.id,
+          'board-quotes',
+        );
+        editor.onBack();
+        await tester.pumpAndSettle();
+        expect(find.byType(QuoteEditorPage), findsNothing);
+        expect(find.text('Рабочий канбан'), findsOneWidget);
+        expect(controller.board?.id, 'board-orders');
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+        controller.dispose();
+        auth.dispose();
+      },
+    );
+  }
+
+  testWidgets(
+    'quote menu exposes link and shared dialog loads existing secrets',
+    (tester) async {
+      final auth = _authorizedController(config);
+      final gateway = _MemoryKanbanGateway()
+        ..specialization = WorkflowSpecialization.quote;
+      final controller = KanbanController(config, auth, gateway: gateway);
+      await controller.initialize();
+      await controller.saveCard(
+        KanbanCardDraft(
+          columnId: 'quote-first',
+          categoryId: 'equipment',
+          title: 'КП',
+        ),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: KanbanPage(
+              controller: controller,
+              config: config,
+              authController: auth,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Действия карточки'));
+      await tester.pumpAndSettle();
+      expect(find.text('Ссылка'), findsOneWidget);
+      expect(find.text('В архив'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+      final api = QuoteClientAccessApi(
+        config,
+        client: MockClient((request) async {
+          expect(request.method, 'GET');
+          expect(
+            request.url.path,
+            endsWith('/kanbans/board-quotes/cards/card-1/quote/client-access'),
+          );
+          return http.Response(
+            jsonEncode({
+              'ok': true,
+              'data': {
+                'isActive': true,
+                'accessToken': 'existing-token',
+                'password': 'existing-password',
+                'createdAt': '2026-09-01T12:00:00Z',
+                'expiresAt': '2027-09-01T12:00:00Z',
+              },
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => showQuoteClientAccessDialog(
+                  context: context,
+                  config: config,
+                  auth: auth,
+                  boardId: 'board-quotes',
+                  cardId: 'card-1',
+                  api: api,
+                ),
+                child: const Text('Open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.text('existing-password'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      api.close();
+      controller.dispose();
+      auth.dispose();
+    },
   );
 
   testWidgets(
@@ -44,8 +202,18 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      final menuButton = find.byTooltip('Действия карточки');
+      final deleteButton = find.byTooltip('Удалить');
+      final menuRect = tester.getRect(menuButton);
+      expect(menuRect.size, const Size(30, 30));
+      expect(tester.getRect(deleteButton).size, menuRect.size);
+      expect(tester.getRect(deleteButton).center.dy, menuRect.center.dy);
       await tester.tap(find.byTooltip('Действия карточки'));
       await tester.pumpAndSettle();
+      final menuItem = tester.getRect(find.byType(PopupMenuItem<String>));
+      expect(menuItem.top, greaterThanOrEqualTo(menuRect.bottom + 4));
+      expect(menuItem.width, 112);
+      expect(menuItem.height, inInclusiveRange(32, 40));
       await tester.tap(find.text('В архив'));
       await tester.pumpAndSettle();
       expect(controller.pageFor('quote-first')!.items, isEmpty);
@@ -291,6 +459,8 @@ void main() {
 }
 
 final class _MemoryKanbanGateway implements KanbanGateway {
+  WorkflowSpecialization specialization = WorkflowSpecialization.standard;
+  List<WorkflowCreationAction> creationActions = [];
   int listRequests = 0;
   int boardRequests = 0;
   int nextNumber = 1;
@@ -359,11 +529,13 @@ final class _MemoryKanbanGateway implements KanbanGateway {
     }
     return KanbanBoard(
       id: 'board-quotes',
+      specialization: specialization,
       code: 'quotes',
       name: 'Коммерческие предложения',
       columns: [
         KanbanColumn(
           id: 'quote-first',
+          creationActions: creationActions,
           name: 'Составить КП',
           color: '#4D8DFF',
           sortOrder: 0,

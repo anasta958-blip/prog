@@ -38,9 +38,35 @@ final class _KanbanPageState extends State<KanbanPage> {
   Timer? _autoScrollTimer;
   double _autoScrollDirection = 0;
   bool _mobileToolbarExpanded = false;
+  bool _openingClientLink = false;
+
+  Future<void> _openClientLink(KanbanCard card) async {
+    final config = widget.config;
+    final auth = widget.authController;
+    if (_openingClientLink || config == null || auth == null) return;
+    setState(() => _openingClientLink = true);
+    try {
+      await showQuoteClientAccessDialog(
+        context: context,
+        config: config,
+        auth: auth,
+        boardId: card.workflowId,
+        cardId: card.id,
+      );
+    } finally {
+      if (mounted) setState(() => _openingClientLink = false);
+    }
+  }
+
   KanbanCard? _openedQuoteCard;
   String? _newQuoteColumnId;
   QuoteKind? _newQuoteKind;
+  KanbanBoard? _quoteBoard;
+
+  bool get _quoteEditorOpen =>
+      _quoteBoard != null &&
+      widget.config != null &&
+      widget.authController != null;
 
   @override
   void dispose() {
@@ -157,7 +183,11 @@ final class _KanbanPageState extends State<KanbanPage> {
         opensQuoteEditor &&
         widget.config != null &&
         widget.authController != null) {
-      setState(() => _openedQuoteCard = card);
+      _stopAutoScroll();
+      setState(() {
+        _openedQuoteCard = card;
+        _quoteBoard = board;
+      });
       return;
     }
     final availableCategories = board.categories;
@@ -244,7 +274,10 @@ final class _KanbanPageState extends State<KanbanPage> {
       );
       return;
     }
+    if (widget.config == null || widget.authController == null) return;
+    _stopAutoScroll();
     setState(() {
+      _quoteBoard = widget.controller.board;
       _openedQuoteCard = null;
       _newQuoteColumnId = column.id;
       _newQuoteKind = action == WorkflowCreationAction.prequote
@@ -256,13 +289,16 @@ final class _KanbanPageState extends State<KanbanPage> {
   Future<void> _closeQuoteEditor() async {
     final card = _openedQuoteCard;
     final newColumnId = _newQuoteColumnId;
+    final boardId = _quoteBoard?.id;
     if (card == null && newColumnId == null) return;
     final columnId = card?.columnId ?? newColumnId!;
     setState(() {
       _openedQuoteCard = null;
       _newQuoteColumnId = null;
       _newQuoteKind = null;
+      _quoteBoard = null;
     });
+    if (widget.controller.board?.id != boardId) return;
     final currentPage = widget.controller.pageFor(columnId)?.page ?? 1;
     await widget.controller.loadColumn(columnId, page: currentPage);
   }
@@ -279,14 +315,15 @@ final class _KanbanPageState extends State<KanbanPage> {
           color: const Color(0xFF0B1119),
           child: Column(
             children: [
-              _Toolbar(
-                controller: widget.controller,
-                compact: compact,
-                expanded: _mobileToolbarExpanded,
-                onToggle: () => setState(
-                  () => _mobileToolbarExpanded = !_mobileToolbarExpanded,
+              if (!_quoteEditorOpen)
+                _Toolbar(
+                  controller: widget.controller,
+                  compact: compact,
+                  expanded: _mobileToolbarExpanded,
+                  onToggle: () => setState(
+                    () => _mobileToolbarExpanded = !_mobileToolbarExpanded,
+                  ),
                 ),
-              ),
               Expanded(child: _body(compact)),
             ],
           ),
@@ -297,6 +334,20 @@ final class _KanbanPageState extends State<KanbanPage> {
 
   Widget _body(bool compact) {
     final controller = widget.controller;
+    if (_quoteEditorOpen) {
+      return QuoteEditorPage(
+        key: ValueKey(
+          'quote:${_quoteBoard!.id}:${_openedQuoteCard?.id ?? _newQuoteColumnId}:${_newQuoteKind?.name}',
+        ),
+        config: widget.config!,
+        authController: widget.authController!,
+        board: _quoteBoard!,
+        card: _openedQuoteCard,
+        creationColumnId: _newQuoteColumnId,
+        createKind: _newQuoteKind,
+        onBack: () => unawaited(_closeQuoteEditor()),
+      );
+    }
     if (controller.loading && controller.board == null) {
       return const _LoadingBoard();
     }
@@ -323,20 +374,6 @@ final class _KanbanPageState extends State<KanbanPage> {
         icon: Icons.view_column_outlined,
         title: 'В канбане нет столбцов',
         message: 'Добавьте столбцы в настройках организации.',
-      );
-    }
-    final openedCard = _openedQuoteCard;
-    if ((openedCard != null || _newQuoteColumnId != null) &&
-        widget.config != null &&
-        widget.authController != null) {
-      return QuoteEditorPage(
-        config: widget.config!,
-        authController: widget.authController!,
-        board: board,
-        card: openedCard,
-        creationColumnId: _newQuoteColumnId,
-        createKind: _newQuoteKind,
-        onBack: () => unawaited(_closeQuoteEditor()),
       );
     }
     return KeyedSubtree(
@@ -380,6 +417,16 @@ final class _KanbanPageState extends State<KanbanPage> {
                         onOpen: (card) =>
                             _openEditor(board.columns[index], card: card),
                         onDelete: _deleteCard,
+                        onShare:
+                            widget.config != null &&
+                                widget.authController != null &&
+                                (board.specialization ==
+                                        WorkflowSpecialization.quote ||
+                                    board.specialization ==
+                                        WorkflowSpecialization.quoteAndPrequote)
+                            ? _openClientLink
+                            : null,
+                        sharingBusy: _openingClientLink,
                         onDrop: (card, targetIndex) => _dropCard(
                           card,
                           board.columns[index].id,
@@ -613,6 +660,8 @@ final class _KanbanColumnPanel extends StatelessWidget {
     required this.onDrop,
     required this.onDragMove,
     required this.onDragEnd,
+    this.onShare,
+    this.sharingBusy = false,
   });
 
   final KanbanController controller;
@@ -627,6 +676,8 @@ final class _KanbanColumnPanel extends StatelessWidget {
   final Future<void> Function(KanbanCard card, int targetIndex) onDrop;
   final ValueChanged<Offset> onDragMove;
   final VoidCallback onDragEnd;
+  final ValueChanged<KanbanCard>? onShare;
+  final bool sharingBusy;
 
   Future<void> _archiveCard(BuildContext context, KanbanCard card) async {
     final success = await controller.setArchived(card, !card.isArchived);
@@ -772,6 +823,10 @@ final class _KanbanColumnPanel extends StatelessWidget {
                           accent: accent,
                           onTap: () => onOpen(card),
                           onDelete: () => onDelete(card),
+                          onShare: onShare == null
+                              ? null
+                              : () => onShare!(card),
+                          sharingBusy: sharingBusy,
                           onArchive: controller.saving
                               ? null
                               : () => _archiveCard(context, card),
@@ -829,6 +884,10 @@ final class _KanbanColumnPanel extends StatelessWidget {
                                 accent: accent,
                                 onTap: () => onOpen(card),
                                 onDelete: () => onDelete(card),
+                                onShare: onShare == null
+                                    ? null
+                                    : () => onShare!(card),
+                                sharingBusy: sharingBusy,
                                 onArchive: controller.saving
                                     ? null
                                     : () => _archiveCard(context, card),
@@ -988,6 +1047,8 @@ final class _KanbanCardTile extends StatelessWidget {
     required this.onDragEnd,
     this.dragPreview = false,
     this.onArchive,
+    this.onShare,
+    this.sharingBusy = false,
   });
 
   final KanbanCard card;
@@ -999,6 +1060,8 @@ final class _KanbanCardTile extends StatelessWidget {
   final VoidCallback onDragEnd;
   final bool dragPreview;
   final VoidCallback? onArchive;
+  final VoidCallback? onShare;
+  final bool sharingBusy;
 
   KanbanCategory? get category {
     for (final item in board.categories) {
@@ -1055,32 +1118,75 @@ final class _KanbanCardTile extends StatelessWidget {
                       ),
                       if (!dragPreview) ...[
                         const SizedBox(width: 6),
-                        if (!card.isArchived)
-                          PopupMenuButton<String>(
-                            tooltip: 'Действия карточки',
-                            enabled: onArchive != null,
-                            padding: EdgeInsets.zero,
-                            icon: const Icon(Icons.more_vert, size: 18),
-                            constraints: const BoxConstraints(minWidth: 130),
-                            onSelected: (_) => onArchive?.call(),
-                            itemBuilder: (_) => const [
-                              PopupMenuItem(
-                                value: 'archive',
-                                child: Text('В архив'),
+                        if (!card.isArchived || onShare != null)
+                          SizedBox.square(
+                            dimension: 30,
+                            child: PopupMenuButton<String>(
+                              tooltip: 'Действия карточки',
+                              enabled:
+                                  onArchive != null ||
+                                  (onShare != null && !sharingBusy),
+                              padding: EdgeInsets.zero,
+                              icon: const Icon(Icons.more_vert, size: 18),
+                              position: PopupMenuPosition.under,
+                              offset: const Offset(0, 4),
+                              menuPadding: const EdgeInsets.symmetric(
+                                vertical: 4,
                               ),
-                            ],
+                              constraints: const BoxConstraints.tightFor(
+                                width: 112,
+                              ),
+                              onSelected: (action) {
+                                if (action == 'share') {
+                                  onShare?.call();
+                                } else {
+                                  onArchive?.call();
+                                }
+                              },
+                              itemBuilder: (_) => [
+                                if (onShare != null)
+                                  PopupMenuItem(
+                                    value: 'share',
+                                    enabled: !sharingBusy,
+                                    height: 32,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                    ),
+                                    child: const Text(
+                                      'Ссылка',
+                                      style: TextStyle(fontSize: 13),
+                                    ),
+                                  ),
+                                if (!card.isArchived)
+                                  PopupMenuItem(
+                                    value: 'archive',
+                                    enabled: onArchive != null,
+                                    height: 32,
+                                    padding: EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                    ),
+                                    child: Text(
+                                      'В архив',
+                                      style: TextStyle(fontSize: 13),
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
-                        IconButton(
-                          tooltip: 'Удалить',
-                          onPressed: onDelete,
-                          visualDensity: VisualDensity.compact,
-                          constraints: const BoxConstraints.tightFor(
-                            width: 30,
-                            height: 30,
+                        SizedBox.square(
+                          dimension: 30,
+                          child: IconButton(
+                            tooltip: 'Удалить',
+                            onPressed: onDelete,
+                            visualDensity: VisualDensity.standard,
+                            constraints: const BoxConstraints.tightFor(
+                              width: 30,
+                              height: 30,
+                            ),
+                            padding: EdgeInsets.zero,
+                            color: const Color(0xFFEF6674),
+                            icon: const Icon(Icons.delete_outline, size: 18),
                           ),
-                          padding: EdgeInsets.zero,
-                          color: const Color(0xFFEF6674),
-                          icon: const Icon(Icons.delete_outline, size: 17),
                         ),
                       ],
                     ],

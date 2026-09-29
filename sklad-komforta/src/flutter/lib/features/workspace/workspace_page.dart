@@ -226,7 +226,7 @@ final class _Navigation extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       const Padding(
-        padding: EdgeInsets.fromLTRB(20, 22, 16, 20),
+        padding: EdgeInsets.fromLTRB(20, 19, 16, 17),
         child: Row(
           children: [
             _BrandMark(),
