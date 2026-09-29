@@ -94,6 +94,14 @@ public sealed class DatabaseRegressionTests
         };
         var product = await Send(staff, HttpMethod.Post, "/catalog/items", productRequest);
         var productId = Text(product, "id");
+        // Товар может лежать прямо в категории, без раздела.
+        var directProduct = await Send(staff, HttpMethod.Post, "/catalog/items", new
+        {
+            categoryId, sectionId = (string?)null, groupId = (string?)null, name = "Расходник без раздела", marking = "", status = "approved",
+            values = new Dictionary<string, object> { ["unit"] = unitId, ["base_price"] = 100m },
+        });
+        Assert.True(directProduct["sectionId"] is null);
+        await Send(staff, HttpMethod.Delete, $"/catalog/items/{Text(directProduct, "id")}");
         var auditBeforeProductSave = (await Send(staff, HttpMethod.Get, "/company/audit")).AsArray().Count;
         await Send(staff, HttpMethod.Put, $"/catalog/items/{productId}", productRequest);
         Assert.Equal(auditBeforeProductSave, (await Send(staff, HttpMethod.Get, "/company/audit")).AsArray().Count);
@@ -138,6 +146,9 @@ public sealed class DatabaseRegressionTests
             await Send(staff, HttpMethod.Put, quotePath, proposal);
             var moved = await Send(staff, HttpMethod.Post, path + "/move", new { targetColumnId, targetIndex = 0 });
             Assert.Equal(targetColumnId, Text(moved, "columnId"));
+            // Перенос записывается отдельно («Статус изменил») и не считается правкой.
+            Assert.NotNull(moved["movedByName"]);
+            Assert.True(moved["updatedAt"]!.GetValue<DateTimeOffset>() < moved["movedAt"]!.GetValue<DateTimeOffset>());
             await Send(staff, HttpMethod.Get, $"/kanbans/{boardId}/cards?columnId={targetColumnId}");
             var beforeArchive = await Send(staff, HttpMethod.Get, quotePath);
             var archived = await Send(staff, HttpMethod.Post, path + "/archive", new { archived = true });
@@ -230,6 +241,38 @@ public sealed class DatabaseRegressionTests
                 Assert.Equal(variantId, Text(employeeView["proposalTypes"]![0]!, "selectedVariantId"));
             }
 
+            // Сводка КП на карточке канбана: стороны, выбор с суммой и просмотры ссылки.
+            var columnPage = await Send(staff, HttpMethod.Get,
+                $"/kanbans/{boardId}/cards?columnId={targetColumnId}");
+            Assert.Equal(28512m, columnPage["selectedTotal"]!.GetValue<decimal>());
+            var cardWithQuote = columnPage["items"]!
+                .AsArray().Single(item => Text(item!, "id") == cardId)!;
+
+            // Поиск по подстроке названия и по номеру; итог столбца учитывает поиск.
+            var number = cardWithQuote["number"]!.GetValue<long>();
+            foreach (var search in new[] { "тестовое", $"%23{number}", number.ToString(System.Globalization.CultureInfo.InvariantCulture) })
+            {
+                var found = await Send(staff, HttpMethod.Get,
+                    $"/kanbans/{boardId}/cards?columnId={targetColumnId}&search={search}");
+                Assert.Contains(found["items"]!.AsArray(), item => Text(item!, "id") == cardId);
+            }
+            var notFound = await Send(staff, HttpMethod.Get,
+                $"/kanbans/{boardId}/cards?columnId={targetColumnId}&search=нет-такой-карточки");
+            Assert.Empty(notFound["items"]!.AsArray());
+            Assert.Null(notFound["selectedTotal"]);
+            var summary = cardWithQuote["quote"]!;
+            Assert.Equal(kind, Text(summary, "quoteKind"));
+            Assert.Equal("Иванов Иван", Text(summary, "clientName"));
+            Assert.Equal("ООО Исполнитель", Text(summary, "executorName"));
+            Assert.Equal(1, summary["linkViews"]!.GetValue<int>());
+            Assert.NotNull(summary["lastViewedAt"]);
+            var chosen = summary["selections"]!.AsArray().Single()!;
+            Assert.Equal("Кондиционеры", Text(chosen, "proposalTypeName"));
+            Assert.Equal(28512m, chosen["total"]!.GetValue<decimal>());
+            if (typeMode) Assert.Null(chosen["variantName"]);
+            else Assert.Equal("Оптимальный", Text(chosen, "variantName"));
+            Assert.NotNull(cardWithQuote["movedByName"]);
+
             await Send(staff, HttpMethod.Delete, quotePath + "/client-access");
             await Send(guest, HttpMethod.Get, "/client/quotes/current", expected: HttpStatusCode.Unauthorized);
             var revokedStatus = await Send(staff, HttpMethod.Get, quotePath + "/client-access");
@@ -240,8 +283,9 @@ public sealed class DatabaseRegressionTests
         }
 
         var impact = await Send(staff, HttpMethod.Get, "/company/configuration/categories/equipment/deletion-impact");
-        // Deletion impact includes the soft-deleted second bulk-edit target.
-        Assert.Equal(2, impact["itemCount"]!.GetValue<int>());
+        // Deletion impact includes the soft-deleted second bulk-edit target
+        // and the soft-deleted item without a section.
+        Assert.Equal(3, impact["itemCount"]!.GetValue<int>());
         var emptyDraft = draft with
         {
             Categories = [],

@@ -399,7 +399,7 @@ final class _KanbanPageState extends State<KanbanPage> {
                     index++
                   ) ...[
                     SizedBox(
-                      width: compact ? 286 : 318,
+                      width: compact ? 286 : 330,
                       child: _KanbanColumnPanel(
                         controller: controller,
                         board: board,
@@ -519,6 +519,8 @@ final class _Toolbar extends StatelessWidget {
                   children: [
                     selector,
                     const SizedBox(height: 8),
+                    _CardSearchField(controller: controller),
+                    const SizedBox(height: 8),
                     Row(
                       children: [
                         Expanded(child: authorSelector),
@@ -566,6 +568,13 @@ final class _Toolbar extends StatelessWidget {
           SizedBox(width: 320, child: selector),
           const SizedBox(width: 12),
           SizedBox(width: 320, child: authorSelector),
+          const SizedBox(width: 12),
+          Flexible(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 280),
+              child: _CardSearchField(controller: controller),
+            ),
+          ),
           const Spacer(),
           if (controller.board case final board?)
             _MetaChip(
@@ -582,6 +591,72 @@ final class _Toolbar extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Поиск карточек по названию или номеру. Запрос отправляется через 350 мс
+/// после окончания ввода, чтобы не нагружать сервер на каждую букву.
+final class _CardSearchField extends StatefulWidget {
+  const _CardSearchField({required this.controller});
+
+  final KanbanController controller;
+
+  @override
+  State<_CardSearchField> createState() => _CardSearchFieldState();
+}
+
+final class _CardSearchFieldState extends State<_CardSearchField> {
+  late final TextEditingController input = TextEditingController(
+    text: widget.controller.cardSearch,
+  );
+  Timer? debounce;
+
+  @override
+  void dispose() {
+    debounce?.cancel();
+    input.dispose();
+    super.dispose();
+  }
+
+  void _changed(String value) {
+    debounce?.cancel();
+    debounce = Timer(
+      const Duration(milliseconds: 350),
+      () => widget.controller.setCardSearch(value),
+    );
+    setState(() {});
+  }
+
+  void _clear() {
+    debounce?.cancel();
+    input.clear();
+    widget.controller.setCardSearch('');
+    setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) => TextField(
+    key: const Key('kanban-card-search'),
+    controller: input,
+    onChanged: _changed,
+    onSubmitted: (value) {
+      debounce?.cancel();
+      widget.controller.setCardSearch(value);
+    },
+    textInputAction: TextInputAction.search,
+    style: const TextStyle(fontSize: 13),
+    decoration: InputDecoration(
+      isDense: true,
+      hintText: 'Поиск: название или номер',
+      prefixIcon: const Icon(Icons.search, size: 18),
+      suffixIcon: input.text.isEmpty
+          ? null
+          : IconButton(
+              tooltip: 'Очистить поиск',
+              icon: const Icon(Icons.close, size: 16),
+              onPressed: _clear,
+            ),
+    ),
+  );
 }
 
 final class _BoardSelector extends StatelessWidget {
@@ -704,6 +779,18 @@ final class _KanbanColumnPanel extends StatelessWidget {
     final archive = controller.archiveFor(column.id);
     final archiveExpanded = controller.expandedArchives.contains(column.id);
     final busy = controller.isColumnLoading(column.id);
+    final selectedTotal = page?.selectedTotal;
+    final columnTotal = selectedTotal == null
+        ? null
+        : Text(
+            'Выбрано на ${NumberFormat.currency(locale: 'ru_RU', symbol: '₽', decimalDigits: 2).format(selectedTotal)}',
+            key: Key('kanban-column-total-${column.id}'),
+            style: const TextStyle(
+              color: Color(0xFF9FB6D6),
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          );
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF111A26),
@@ -758,12 +845,20 @@ final class _KanbanColumnPanel extends StatelessWidget {
               ],
             ),
           ),
-          if (column.creationActions.isNotEmpty) ...[
+          // Сумма выбранного стоит в одной строке с кнопками создания, а если
+          // кнопок нет — отдельной строкой под заголовком.
+          if (column.creationActions.isNotEmpty || columnTotal != null)
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 11),
+              padding: EdgeInsets.fromLTRB(
+                column.creationActions.isEmpty ? 32 : 12,
+                0,
+                12,
+                column.creationActions.isEmpty ? 10 : 11,
+              ),
               child: Wrap(
                 spacing: 8,
                 runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   for (final action in column.creationActions)
                     OutlinedButton.icon(
@@ -778,10 +873,10 @@ final class _KanbanColumnPanel extends StatelessWidget {
                       ),
                       label: Text(action.label),
                     ),
+                  ?columnTotal,
                 ],
               ),
             ),
-          ],
           const Divider(height: 1),
           Expanded(
             child: busy && page == null
@@ -1110,7 +1205,7 @@ final class _KanbanCardTile extends StatelessWidget {
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                            fontSize: 13,
+                            fontSize: 16,
                             fontWeight: FontWeight.w800,
                             height: 1.25,
                           ),
@@ -1198,58 +1293,64 @@ final class _KanbanCardTile extends StatelessWidget {
                       icon: const Icon(Icons.unarchive_outlined, size: 16),
                       label: const Text('Из архива'),
                     ),
-                  Text(
-                    '№${card.number}',
-                    style: const TextStyle(
-                      color: Color(0xFF8EA5C4),
-                      fontSize: 11,
-                    ),
-                  ),
-                  if (category != null) ...[
-                    const SizedBox(height: 9),
-                    _CategoryChip(label: category!.name, accent: accent),
-                  ],
-                  for (final field in configuredFields) ...[
-                    const SizedBox(height: 8),
-                    _CardValue(
-                      label: field.label,
-                      value: _displayValue(field, card.values[field.code]),
-                    ),
-                  ],
-                  const SizedBox(height: 10),
-                  const Divider(height: 1),
-                  const SizedBox(height: 9),
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.person_outline,
-                        size: 14,
-                        color: Color(0xFF7188A8),
+                  if (card.quote case final quote?)
+                    _QuoteCardDetails(card: card, quote: quote)
+                  else ...[
+                    Text(
+                      '№${card.number}',
+                      style: const TextStyle(
+                        color: Color(0xFF8EA5C4),
+                        fontSize: 11,
                       ),
-                      const SizedBox(width: 5),
-                      Expanded(
-                        child: Text(
-                          card.updatedByName ?? card.createdByName ?? 'Система',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Color(0xFF93A9C6),
-                            fontSize: 10,
-                          ),
-                        ),
-                      ),
-                      Text(
-                        DateFormat(
-                          'dd.MM.yy, HH:mm',
-                          'ru',
-                        ).format(card.updatedAt.toLocal()),
-                        style: const TextStyle(
-                          color: Color(0xFF7188A8),
-                          fontSize: 9,
-                        ),
+                    ),
+                    if (category != null) ...[
+                      const SizedBox(height: 9),
+                      _CategoryChip(label: category!.name, accent: accent),
+                    ],
+                    for (final field in configuredFields) ...[
+                      const SizedBox(height: 8),
+                      _CardValue(
+                        label: field.label,
+                        value: _displayValue(field, card.values[field.code]),
                       ),
                     ],
-                  ),
+                    const SizedBox(height: 10),
+                    const Divider(height: 1),
+                    const SizedBox(height: 9),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.person_outline,
+                          size: 14,
+                          color: Color(0xFF7188A8),
+                        ),
+                        const SizedBox(width: 5),
+                        Expanded(
+                          child: Text(
+                            card.updatedByName ??
+                                card.createdByName ??
+                                'Система',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Color(0xFF93A9C6),
+                              fontSize: 10,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          DateFormat(
+                            'dd.MM.yy, HH:mm',
+                            'ru',
+                          ).format(card.updatedAt.toLocal()),
+                          style: const TextStyle(
+                            color: Color(0xFF7188A8),
+                            fontSize: 9,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -1319,6 +1420,164 @@ final class _KanbanCardTile extends StatelessWidget {
     if (field.fieldType == 'percent') return '$value%';
     return '$value';
   }
+}
+
+/// Подробности карточки КП/ПКП: номер, стороны, создание, выбранное с суммой,
+/// просмотры ссылки, последнее изменение и последний перенос между колонками.
+final class _QuoteCardDetails extends StatelessWidget {
+  const _QuoteCardDetails({required this.card, required this.quote});
+
+  final KanbanCard card;
+  final KanbanQuoteSummary quote;
+
+  static const _muted = Color(0xFF8EA5C4);
+  static const _faint = Color(0xFF7188A8);
+
+  static String _dateTime(DateTime value) =>
+      DateFormat('dd.MM.yyyy, HH:mm', 'ru').format(value.toLocal());
+
+  static String _money(double value) => NumberFormat.currency(
+    locale: 'ru_RU',
+    symbol: '₽',
+    decimalDigits: 2,
+  ).format(value);
+
+  /// «Имя · Роль», без роли — только имя.
+  static String _person(String? name, String? role) {
+    final person = name?.trim().isNotEmpty == true ? name!.trim() : 'Система';
+    return role?.trim().isNotEmpty == true
+        ? '$person · ${role!.trim()}'
+        : person;
+  }
+
+  Widget _line(String label, String? value, {Key? key}) => Padding(
+    key: key,
+    padding: const EdgeInsets.only(top: 4),
+    child: Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(
+            text: '$label:  ',
+            style: const TextStyle(color: _muted),
+          ),
+          TextSpan(
+            text: value?.trim().isNotEmpty == true ? value!.trim() : '—',
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(fontSize: 13, height: 1.3),
+    ),
+  );
+
+  Widget _trace(
+    String label,
+    String? name,
+    String? role,
+    DateTime at,
+    Key key,
+  ) => Padding(
+    padding: const EdgeInsets.only(top: 3),
+    child: Text(
+      '$label: ${_person(name, role)} (${_dateTime(at)})',
+      key: key,
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(color: _faint, fontSize: 10, height: 1.3),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        '${quote.kindLabel} №${card.number}',
+        key: Key('kanban-quote-number-${card.id}'),
+        style: const TextStyle(
+          color: _muted,
+          fontSize: 14,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      _line('Исполнитель', quote.executorName),
+      _line('Заказчик', quote.clientName),
+      _line(
+        'Создано',
+        '${_dateTime(card.createdAt)} · ${_person(card.createdByName, card.createdByRole)}',
+      ),
+      const SizedBox(height: 8),
+      if (quote.selections.isEmpty)
+        Text('Не выбрано', style: const TextStyle(color: _muted, fontSize: 12))
+      else
+        for (final selection in quote.selections)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 3),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(
+                    selection.variantName == null
+                        ? '${selection.proposalTypeName} (тип целиком)'
+                        : '${selection.proposalTypeName}: ${selection.variantName}',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  _money(selection.total),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+      const SizedBox(height: 6),
+      Row(
+        children: [
+          const Icon(Icons.visibility_outlined, size: 13, color: _faint),
+          const SizedBox(width: 5),
+          Expanded(
+            child: Text(
+              quote.linkViews == 0
+                  ? 'Ссылку ещё не открывали'
+                  : 'Просмотров ссылки: ${quote.linkViews}'
+                        '${quote.lastViewedAt == null ? '' : ' · ${_dateTime(quote.lastViewedAt!)}'}',
+              key: Key('kanban-quote-views-${card.id}'),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: _muted, fontSize: 10),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 8),
+      const Divider(height: 1),
+      const SizedBox(height: 4),
+      _trace(
+        'Изменил',
+        card.updatedByName,
+        card.updatedByRole,
+        card.updatedAt,
+        Key('kanban-quote-updated-${card.id}'),
+      ),
+      if (card.movedAt case final movedAt?)
+        _trace(
+          'Статус изменил',
+          card.movedByName,
+          card.movedByRole,
+          movedAt,
+          Key('kanban-quote-moved-${card.id}'),
+        ),
+    ],
+  );
 }
 
 final class _CategoryChip extends StatelessWidget {

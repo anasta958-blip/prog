@@ -787,7 +787,10 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
               children: [
                 Expanded(
                   child: Text(
-                    '$category · ${section.name}',
+                    section.name.trim().toLowerCase() ==
+                            category.trim().toLowerCase()
+                        ? category
+                        : '$category · ${section.name}',
                     style: const TextStyle(fontWeight: FontWeight.w800),
                   ),
                 ),

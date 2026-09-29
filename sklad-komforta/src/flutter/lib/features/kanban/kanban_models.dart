@@ -218,6 +218,13 @@ final class KanbanCard {
     this.updatedBy,
     this.updatedByName,
     this.isArchived = false,
+    this.movedBy,
+    this.movedByName,
+    this.movedAt,
+    this.createdByRole,
+    this.updatedByRole,
+    this.movedByRole,
+    this.quote,
   });
 
   final String id;
@@ -235,6 +242,19 @@ final class KanbanCard {
   final String? updatedByName;
   final DateTime updatedAt;
   final bool isArchived;
+
+  /// Кто и когда последним перенёс карточку в другую колонку.
+  final String? movedBy;
+  final String? movedByName;
+  final DateTime? movedAt;
+
+  /// Роли пользователей в организации — для подписи «Имя · Роль».
+  final String? createdByRole;
+  final String? updatedByRole;
+  final String? movedByRole;
+
+  /// Сводка предложения; есть только у карточек КП/ПКП.
+  final KanbanQuoteSummary? quote;
 
   factory KanbanCard.fromJson(Map<String, dynamic> json) => KanbanCard(
     id: json['id'] as String,
@@ -254,7 +274,86 @@ final class KanbanCard {
     updatedByName: json['updatedByName'] as String?,
     updatedAt: DateTime.parse(json['updatedAt'] as String),
     isArchived: json['isArchived'] as bool? ?? false,
+    movedBy: json['movedBy'] as String?,
+    movedByName: json['movedByName'] as String?,
+    movedAt: json['movedAt'] == null
+        ? null
+        : DateTime.parse(json['movedAt'] as String),
+    createdByRole: json['createdByRole'] as String?,
+    updatedByRole: json['updatedByRole'] as String?,
+    movedByRole: json['movedByRole'] as String?,
+    quote: json['quote'] == null
+        ? null
+        : KanbanQuoteSummary.fromJson(json['quote'] as Map<String, dynamic>),
   );
+}
+
+/// Сводка КП/ПКП на карточке канбана.
+final class KanbanQuoteSummary {
+  const KanbanQuoteSummary({
+    required this.quoteKind,
+    required this.selectionMode,
+    required this.selections,
+    required this.linkViews,
+    this.clientName,
+    this.executorName,
+    this.lastViewedAt,
+  });
+
+  /// `quote` или `prequote`.
+  final String quoteKind;
+  final String? clientName;
+  final String? executorName;
+
+  /// `variant` или `proposal_type`.
+  final String selectionMode;
+
+  /// Выбранные варианты или выбранный тип целиком; пусто — ничего не выбрано.
+  final List<KanbanQuoteSelection> selections;
+
+  /// Сколько раз клиент входил по ссылке.
+  final int linkViews;
+  final DateTime? lastViewedAt;
+
+  String get kindLabel => quoteKind == 'prequote' ? 'ПКП' : 'КП';
+
+  factory KanbanQuoteSummary.fromJson(Map<String, dynamic> json) =>
+      KanbanQuoteSummary(
+        quoteKind: json['quoteKind'] as String? ?? 'quote',
+        clientName: json['clientName'] as String?,
+        executorName: json['executorName'] as String?,
+        selectionMode: json['selectionMode'] as String? ?? 'variant',
+        selections: [
+          for (final item in json['selections'] as List<dynamic>? ?? const [])
+            KanbanQuoteSelection.fromJson(item as Map<String, dynamic>),
+        ],
+        linkViews: json['linkViews'] as int? ?? 0,
+        lastViewedAt: json['lastViewedAt'] == null
+            ? null
+            : DateTime.parse(json['lastViewedAt'] as String),
+      );
+}
+
+/// Выбранный вариант типа или тип целиком (без [variantName]) с итогом.
+final class KanbanQuoteSelection {
+  const KanbanQuoteSelection({
+    required this.proposalTypeName,
+    required this.total,
+    this.variantName,
+  });
+
+  final String proposalTypeName;
+  final String? variantName;
+
+  /// Итог для клиента с НДС.
+  final double total;
+
+  factory KanbanQuoteSelection.fromJson(Map<String, dynamic> json) =>
+      KanbanQuoteSelection(
+        proposalTypeName: json['proposalTypeName'] as String,
+        variantName: json['variantName'] as String?,
+        total: (json['total'] as num).toDouble(),
+      );
 }
 
 /// Одна серверная страница карточек отдельного столбца.
@@ -264,12 +363,17 @@ final class KanbanCardPage {
     required this.page,
     required this.pageSize,
     required this.total,
+    this.selectedTotal,
   });
 
   final List<KanbanCard> items;
   final int page;
   final int pageSize;
   final int total;
+
+  /// Сумма выбранных вариантов и типов (с НДС) по всем карточкам столбца с
+  /// учётом фильтров; `null`, если в столбце нет КП/ПКП.
+  final double? selectedTotal;
 
   int get pageCount => total == 0 ? 1 : (total / pageSize).ceil();
 
@@ -280,6 +384,7 @@ final class KanbanCardPage {
     page: json['page'] as int,
     pageSize: json['pageSize'] as int,
     total: json['total'] as int,
+    selectedTotal: (json['selectedTotal'] as num?)?.toDouble(),
   );
 }
 

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/core/widgets/mobile_collapsible_navigation.dart';
 import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
@@ -42,12 +43,37 @@ class _WorkspacePageState extends State<WorkspacePage> {
   int selectedIndex = 0;
   CompanySection companySection = CompanySection.settings;
   bool companyExpanded = false;
+
+  /// Боковая панель на широком экране свёрнута до иконок.
+  bool sidebarCollapsed = false;
   final ConfigurationEditGuard configurationEditGuard =
       ConfigurationEditGuard();
+
+  static const _sidebarStorageKey = 'workspace.sidebar_collapsed.v1';
+  static const FlutterSecureStorage _preferences = FlutterSecureStorage();
+
+  /// Восстанавливает состояние панели с прошлого запуска. Ошибка хранилища не
+  /// мешает работе: панель просто остаётся развёрнутой.
+  Future<void> _restoreSidebar() async {
+    try {
+      final stored = await _preferences.read(key: _sidebarStorageKey);
+      if (mounted && stored == 'true') {
+        setState(() => sidebarCollapsed = true);
+      }
+    } catch (_) {}
+  }
+
+  void _toggleSidebar() {
+    setState(() => sidebarCollapsed = !sidebarCollapsed);
+    _preferences
+        .write(key: _sidebarStorageKey, value: '$sidebarCollapsed')
+        .catchError((Object _) {});
+  }
 
   @override
   void initState() {
     super.initState();
+    _restoreSidebar();
     ownsCatalogController = widget.catalogController == null;
     catalogController =
         widget.catalogController ??
@@ -131,8 +157,11 @@ class _WorkspacePageState extends State<WorkspacePage> {
           }
           return Row(
             children: [
-              SizedBox(
-                width: 220,
+              AnimatedContainer(
+                key: const Key('workspace-sidebar'),
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOutCubic,
+                width: sidebarCollapsed ? 72 : 220,
                 child: DecoratedBox(
                   decoration: const BoxDecoration(
                     color: Color(0xFF101823),
@@ -146,6 +175,8 @@ class _WorkspacePageState extends State<WorkspacePage> {
                     onSelect: _select,
                     onToggleCompany: _toggleCompany,
                     onSelectCompanySection: _selectCompanySection,
+                    collapsed: sidebarCollapsed,
+                    onToggleSidebar: _toggleSidebar,
                   ),
                 ),
               ),
@@ -211,6 +242,8 @@ final class _Navigation extends StatelessWidget {
     required this.companyExpanded,
     this.lifecycle,
     this.selectedIndex = 0,
+    this.collapsed = false,
+    this.onToggleSidebar,
   });
   final ValueChanged<int> onSelect;
 
@@ -221,122 +254,203 @@ final class _Navigation extends StatelessWidget {
   final OrganizationLifecycle? lifecycle;
   final int selectedIndex;
 
+  /// Панель свёрнута пользователем до иконок (только на широком экране).
+  final bool collapsed;
+
+  /// Кнопка сворачивания панели; в выдвижном меню телефона её нет.
+  final VoidCallback? onToggleSidebar;
+
+  // Компактная раскладка выбирается по фактической ширине, поэтому во время
+  // анимации ширины подписи не вылезают за край панели.
   @override
-  Widget build(BuildContext context) => Column(
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) =>
+        _build(context, iconsOnly: collapsed || constraints.maxWidth < 180),
+  );
+
+  Widget _sidebarToggle() => IconButton(
+    key: const Key('workspace-sidebar-toggle'),
+    tooltip: collapsed ? 'Развернуть панель' : 'Свернуть панель',
+    onPressed: onToggleSidebar,
+    icon: Icon(
+      collapsed
+          ? Icons.keyboard_double_arrow_right
+          : Icons.keyboard_double_arrow_left,
+      size: 20,
+    ),
+  );
+
+  Widget _build(BuildContext context, {required bool iconsOnly}) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      const Padding(
-        padding: EdgeInsets.fromLTRB(20, 19, 16, 17),
-        child: Row(
-          children: [
-            _BrandMark(),
-            SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'Склад Комфорта',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-              ),
-            ),
-          ],
-        ),
-      ),
-      const Divider(height: 1),
-      const Padding(
-        padding: EdgeInsets.fromLTRB(20, 20, 20, 8),
-        child: Text(
-          'РАБОЧЕЕ ПРОСТРАНСТВО',
-          style: TextStyle(
-            color: Color(0xFF6F86A7),
-            fontSize: 10,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 1.1,
-          ),
-        ),
-      ),
-      _NavigationItem(
-        icon: Icons.view_kanban_outlined,
-        label: 'Канбаны',
-        selected: selectedIndex == 0,
-        onTap: () => onSelect(0),
-      ),
-      _NavigationItem(
-        icon: Icons.inventory_2_outlined,
-        label: 'Каталог товаров',
-        selected: selectedIndex == 1,
-        onTap: () => onSelect(1),
-      ),
-      _NavigationItem(
-        icon: Icons.business_outlined,
-        label: 'Компания',
-        selected: selectedIndex == 2,
-        trailing: AnimatedRotation(
-          turns: companyExpanded ? 0 : -0.25,
-          duration: const Duration(milliseconds: 160),
-          child: const Icon(Icons.expand_more, size: 18),
-        ),
-        onTap: onToggleCompany,
-      ),
-      if (companyExpanded)
-        for (final section in CompanySection.values)
-          _NavigationItem(
-            icon: section.icon,
-            label: section.label,
-            selected: selectedIndex == 2 && companySection == section,
-            indent: 24,
-            compact: true,
-            onTap: () => onSelectCompanySection(section),
-          ),
-      if (companyExpanded && lifecycle != null)
+      if (iconsOnly)
         Padding(
-          padding: const EdgeInsets.fromLTRB(48, 7, 18, 7),
+          padding: const EdgeInsets.fromLTRB(0, 19, 0, 8),
+          child: Column(
+            children: [
+              const Tooltip(message: 'Склад Комфорта', child: _BrandMark()),
+              if (onToggleSidebar != null) ...[
+                const SizedBox(height: 8),
+                _sidebarToggle(),
+              ],
+            ],
+          ),
+        )
+      else
+        Padding(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            12,
+            onToggleSidebar == null ? 16 : 6,
+            10,
+          ),
+          child: Row(
+            children: [
+              const _BrandMark(),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'Склад Комфорта',
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                ),
+              ),
+              if (onToggleSidebar != null) _sidebarToggle(),
+            ],
+          ),
+        ),
+      const Divider(height: 1),
+      if (iconsOnly)
+        const SizedBox(height: 12)
+      else
+        const Padding(
+          padding: EdgeInsets.fromLTRB(20, 20, 20, 8),
           child: Text(
-            lifecycle!.isFrozen
-                ? 'Организация заморожена'
-                : 'Активна до ${_shortDate(lifecycle!.activeUntil)}',
+            'РАБОЧЕЕ ПРОСТРАНСТВО',
             style: TextStyle(
-              color: lifecycle!.isFrozen
-                  ? const Color(0xFFFF809D)
-                  : const Color(0xFF7891B4),
+              color: Color(0xFF6F86A7),
               fontSize: 10,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.1,
             ),
           ),
         ),
-      _NavigationItem(
-        icon: Icons.devices_outlined,
-        label: 'Активные устройства',
-        selected: selectedIndex == 3,
-        onTap: () => onSelect(3),
-      ),
-      const Spacer(),
-      const Padding(
-        padding: EdgeInsets.all(16),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: Color(0xFF121E2C),
-            borderRadius: BorderRadius.all(Radius.circular(12)),
-            border: Border.fromBorderSide(BorderSide(color: Color(0xFF26364C))),
-          ),
-          child: Padding(
-            padding: EdgeInsets.all(12),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.cloud_done_outlined,
-                  size: 18,
-                  color: Color(0xFF50C878),
+      // Пункты прокручиваются, если не помещаются по высоте (невысокое окно,
+      // раскрытые разделы компании, перенос подписей во время анимации).
+      Expanded(
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _NavigationItem(
+                iconsOnly: iconsOnly,
+                icon: Icons.view_kanban_outlined,
+                label: 'Канбаны',
+                selected: selectedIndex == 0,
+                onTap: () => onSelect(0),
+              ),
+              _NavigationItem(
+                iconsOnly: iconsOnly,
+                icon: Icons.inventory_2_outlined,
+                label: 'Каталог товаров',
+                selected: selectedIndex == 1,
+                onTap: () => onSelect(1),
+              ),
+              _NavigationItem(
+                iconsOnly: iconsOnly,
+                icon: Icons.business_outlined,
+                label: 'Компания',
+                selected: selectedIndex == 2,
+                trailing: AnimatedRotation(
+                  turns: companyExpanded ? 0 : -0.25,
+                  duration: const Duration(milliseconds: 160),
+                  child: const Icon(Icons.expand_more, size: 18),
                 ),
-                SizedBox(width: 8),
-                Expanded(
+                onTap: onToggleCompany,
+              ),
+              if (companyExpanded)
+                for (final section in CompanySection.values)
+                  _NavigationItem(
+                    iconsOnly: iconsOnly,
+                    icon: section.icon,
+                    label: section.label,
+                    selected: selectedIndex == 2 && companySection == section,
+                    indent: 24,
+                    compact: true,
+                    onTap: () => onSelectCompanySection(section),
+                  ),
+              if (companyExpanded && lifecycle != null && !iconsOnly)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(48, 7, 18, 7),
                   child: Text(
-                    'Соединение защищено',
-                    style: TextStyle(fontSize: 11, color: Color(0xFF92A7C4)),
+                    lifecycle!.isFrozen
+                        ? 'Организация заморожена'
+                        : 'Активна до ${_shortDate(lifecycle!.activeUntil)}',
+                    style: TextStyle(
+                      color: lifecycle!.isFrozen
+                          ? const Color(0xFFFF809D)
+                          : const Color(0xFF7891B4),
+                      fontSize: 10,
+                    ),
                   ),
                 ),
-              ],
-            ),
+              _NavigationItem(
+                iconsOnly: iconsOnly,
+                icon: Icons.devices_outlined,
+                label: 'Активные устройства',
+                selected: selectedIndex == 3,
+                onTap: () => onSelect(3),
+              ),
+            ],
           ),
         ),
       ),
+      if (iconsOnly)
+        const Padding(
+          padding: EdgeInsets.only(bottom: 18),
+          child: Tooltip(
+            message: 'Соединение защищено',
+            child: Icon(
+              Icons.cloud_done_outlined,
+              size: 20,
+              color: Color(0xFF50C878),
+            ),
+          ),
+        )
+      else
+        const Padding(
+          padding: EdgeInsets.all(16),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: Color(0xFF121E2C),
+              borderRadius: BorderRadius.all(Radius.circular(12)),
+              border: Border.fromBorderSide(
+                BorderSide(color: Color(0xFF26364C)),
+              ),
+            ),
+            child: Padding(
+              padding: EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.cloud_done_outlined,
+                    size: 18,
+                    color: Color(0xFF50C878),
+                  ),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Соединение защищено',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF92A7C4)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
     ],
   );
 }
@@ -366,6 +480,7 @@ final class _NavigationItem extends StatelessWidget {
     this.trailing,
     this.indent = 0,
     this.compact = false,
+    this.iconsOnly = false,
   });
   final IconData icon;
   final String label;
@@ -374,26 +489,60 @@ final class _NavigationItem extends StatelessWidget {
   final Widget? trailing;
   final double indent;
   final bool compact;
+
+  /// Свёрнутая панель: только иконка, название — во всплывающей подсказке.
+  final bool iconsOnly;
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: EdgeInsets.fromLTRB(
-      12 + indent,
-      compact ? 1 : 3,
-      12,
-      compact ? 1 : 3,
-    ),
-    child: ListTile(
-      dense: true,
-      visualDensity: compact ? const VisualDensity(vertical: -2) : null,
-      selected: selected,
-      selectedTileColor: const Color(0xFF17345A),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      leading: Icon(icon, size: 20),
-      title: Text(label, style: const TextStyle(fontSize: 13)),
-      trailing: trailing,
-      onTap: onTap,
-    ),
-  );
+  Widget build(BuildContext context) => iconsOnly
+      ? Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: compact ? 1 : 3,
+          ),
+          child: Tooltip(
+            message: label,
+            waitDuration: const Duration(milliseconds: 300),
+            child: Material(
+              color: selected ? const Color(0xFF17345A) : Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: onTap,
+                child: SizedBox(
+                  height: compact ? 36 : 44,
+                  child: Icon(
+                    icon,
+                    size: compact ? 18 : 20,
+                    color: selected
+                        ? Theme.of(context).colorScheme.primary
+                        : null,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        )
+      : Padding(
+          padding: EdgeInsets.fromLTRB(
+            12 + indent,
+            compact ? 1 : 3,
+            12,
+            compact ? 1 : 3,
+          ),
+          child: ListTile(
+            dense: true,
+            visualDensity: compact ? const VisualDensity(vertical: -2) : null,
+            selected: selected,
+            selectedTileColor: const Color(0xFF17345A),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+            leading: Icon(icon, size: 20),
+            title: Text(label, style: const TextStyle(fontSize: 13)),
+            trailing: trailing,
+            onTap: onTap,
+          ),
+        );
 }
 
 String _shortDate(DateTime value) =>

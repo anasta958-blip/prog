@@ -432,7 +432,10 @@ final class _PositionTable extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  '$categoryName · ${section.name}',
+                  section.name.trim().toLowerCase() ==
+                          categoryName.trim().toLowerCase()
+                      ? categoryName
+                      : '$categoryName · ${section.name}',
                   style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
               ),

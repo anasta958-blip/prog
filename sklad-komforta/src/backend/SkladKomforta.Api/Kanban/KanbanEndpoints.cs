@@ -37,6 +37,7 @@ internal static class KanbanEndpoints
                 Guid? authorUserId,
                 bool? includeOwn,
                 bool? archived,
+                string? search,
                 IKanbanService service,
                 CancellationToken token) =>
                 Results.Ok(ApiResponse.Success(await service.GetCardsAsync(
@@ -48,7 +49,8 @@ internal static class KanbanEndpoints
                         pageSize ?? 20,
                         authorUserId,
                         includeOwn ?? true,
-                        archived ?? false),
+                        archived ?? false,
+                        search),
                     token))))
             .RequireTenantPermission("kanban.view");
         kanbans.MapGet("/{boardId:guid}/cards/{cardId:guid}", async (

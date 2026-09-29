@@ -58,10 +58,6 @@ final class QuoteController extends ChangeNotifier {
   /// сбрасывает значение, как только выполнит запрос.
   String? focusRequestPositionId;
 
-  /// Строки, созданные вводом в таблице в этом сеансе. Их поля группы,
-  /// наименования, маркировки и количества остаются полями ввода с автопоиском
-  /// и после связывания с каталогом. На сервер не сохраняется.
-  final Set<String> _entryPositionIds = <String>{};
   String? error;
   String? _successMessage;
   Timer? _successMessageTimer;
@@ -349,10 +345,37 @@ final class QuoteController extends ChangeNotifier {
     _changed();
   }
 
-  /// Строка вводится полями с автопоиском, а не обычными полями позиции:
-  /// новая строка ввода либо позиция, ещё не связанная с каталогом.
-  bool isEntryPosition(QuotePositionDraft position) =>
-      position.catalogItemId == null || _entryPositionIds.contains(position.id);
+  /// Разделы категории каталога, на основе которой создана [category].
+  List<CatalogSection> catalogSections(QuoteCategoryDraft category) =>
+      catalog?.categories
+          .where((item) => item.id == category.catalogCategoryId)
+          .firstOrNull
+          ?.sections ??
+      const [];
+
+  /// Позиции можно добавлять прямо в категорию, пока в ней нет разделов
+  /// каталога: либо у категории каталога нет разделов, либо в предложение
+  /// ещё не добавлен ни один раздел.
+  bool canAddDirectPosition(QuoteCategoryDraft category) =>
+      category.sections.every((section) => section.catalogSectionId == null);
+
+  /// Раздел для позиций «прямо в категории»: без ссылки на раздел каталога и
+  /// с именем категории, поэтому в печати и по ссылке выводится только
+  /// название категории. Создаётся при первой позиции.
+  QuoteSectionDraft ensureDirectSection(QuoteCategoryDraft category) {
+    final existing = category.sections
+        .where((section) => section.catalogSectionId == null)
+        .firstOrNull;
+    if (existing != null) return existing;
+    final section = QuoteSectionDraft(
+      id: newQuoteId(),
+      name: category.name,
+      positions: [],
+    );
+    category.sections.insert(0, section);
+    _changed();
+    return section;
+  }
 
   /// Добавляет в раздел пустую строку ввода и просит редактор перевести
   /// фокус в её первое поле.
@@ -366,7 +389,6 @@ final class QuoteController extends ChangeNotifier {
       basePrice: 0,
       values: <String, dynamic>{},
     );
-    _entryPositionIds.add(position.id);
     section.positions.add(position);
     focusRequestPositionId = position.id;
     _changed();
@@ -512,14 +534,12 @@ final class QuoteController extends ChangeNotifier {
       for (final variant in type.variants) {
         for (final category in variant.categories) {
           for (final section in category.sections) {
-            section.positions.removeWhere((position) {
-              final blank =
+            section.positions.removeWhere(
+              (position) =>
                   position.catalogItemId == null &&
                   position.name.trim().isEmpty &&
-                  position.marking.trim().isEmpty;
-              if (blank) _entryPositionIds.remove(position.id);
-              return blank;
-            });
+                  position.marking.trim().isEmpty,
+            );
           }
         }
       }

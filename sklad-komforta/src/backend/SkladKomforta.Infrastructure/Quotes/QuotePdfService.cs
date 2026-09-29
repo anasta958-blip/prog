@@ -316,7 +316,12 @@ internal static class QuotePdfDocumentRenderer
 
     private static void AddPositionsTable(Section section, string categoryName, QuoteSectionDetails quoteSection)
     {
-        var heading = AddText(section, $"{categoryName} · {quoteSection.Name}", size: 9.5, bold: true);
+        // Позиции, добавленные прямо в категорию, лежат в разделе с её именем:
+        // повторять название дважды не нужно.
+        var title = string.Equals(quoteSection.Name.Trim(), categoryName.Trim(), StringComparison.OrdinalIgnoreCase)
+            ? categoryName
+            : $"{categoryName} · {quoteSection.Name}";
+        var heading = AddText(section, title, size: 9.5, bold: true);
         heading.Format.LeftIndent = Unit.FromMillimeter(VariantInsetMm);
         // Сумма раздела прижата к правому краю таблицы позиций; табуляция
         // отсчитывается от левого поля страницы, а таблица сдвинута на отступ.

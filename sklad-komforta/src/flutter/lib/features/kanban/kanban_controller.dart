@@ -25,6 +25,11 @@ final class KanbanController extends ChangeNotifier {
   KanbanBoard? board;
   String? selectedAuthorUserId;
   bool includeOwnCards = true;
+
+  /// Поиск по названию или номеру карточки; применяется на сервере ко всем
+  /// столбцам и архиву, поэтому работает и при большом числе карточек.
+  String cardSearch = '';
+  int _searchGeneration = 0;
   final Map<String, KanbanCardPage> _columnPages = {};
   final Set<String> _loadingColumns = {};
   final Map<String, KanbanCardPage> _archivePages = {};
@@ -49,6 +54,7 @@ final class KanbanController extends ChangeNotifier {
         pageSize: pageSize,
         authorUserId: selectedAuthorUserId,
         includeOwn: includeOwnCards,
+        search: cardSearch.isEmpty ? null : cardSearch,
         archived: true,
       ),
     );
@@ -62,6 +68,7 @@ final class KanbanController extends ChangeNotifier {
           pageSize: pageSize,
           authorUserId: selectedAuthorUserId,
           includeOwn: includeOwnCards,
+          search: cardSearch.isEmpty ? null : cardSearch,
           archived: true,
         ),
       );
@@ -183,6 +190,32 @@ final class KanbanController extends ChangeNotifier {
     }
   }
 
+  /// Применяет поиск и заново загружает первые страницы столбцов. Если за время
+  /// загрузки запрос поменялся, результат устаревшего поиска не показывается.
+  Future<void> setCardSearch(String value) async {
+    final normalized = value.trim();
+    if (normalized == cardSearch) return;
+    cardSearch = normalized;
+    final generation = ++_searchGeneration;
+    loading = true;
+    error = null;
+    notifyListeners();
+    try {
+      await _loadAllColumns();
+    } on ApiException catch (exception) {
+      if (generation == _searchGeneration) error = exception.message;
+    } on Object {
+      if (generation == _searchGeneration) {
+        error = 'Не удалось выполнить поиск карточек.';
+      }
+    } finally {
+      if (generation == _searchGeneration) {
+        loading = false;
+        notifyListeners();
+      }
+    }
+  }
+
   /// Меняет только фильтр авторов и заново загружает первые страницы столбцов.
   Future<void> selectAuthorFilter(String value) async {
     if (loading || value == authorFilterKey) return;
@@ -253,6 +286,7 @@ final class KanbanController extends ChangeNotifier {
           pageSize: pageSize,
           authorUserId: selectedAuthorUserId,
           includeOwn: includeOwnCards,
+          search: cardSearch.isEmpty ? null : cardSearch,
         ),
       );
     } on ApiException catch (exception) {
@@ -410,6 +444,7 @@ final class KanbanController extends ChangeNotifier {
             pageSize: pageSize,
             authorUserId: selectedAuthorUserId,
             includeOwn: includeOwnCards,
+            search: cardSearch.isEmpty ? null : cardSearch,
           ),
         ),
     ]);
@@ -435,6 +470,7 @@ final class KanbanController extends ChangeNotifier {
         pageSize: pageSize,
         authorUserId: selectedAuthorUserId,
         includeOwn: includeOwnCards,
+        search: cardSearch.isEmpty ? null : cardSearch,
       ),
     );
     if (result.items.isEmpty && targetPage > 1) {
@@ -448,6 +484,7 @@ final class KanbanController extends ChangeNotifier {
           pageSize: pageSize,
           authorUserId: selectedAuthorUserId,
           includeOwn: includeOwnCards,
+          search: cardSearch.isEmpty ? null : cardSearch,
         ),
       );
     }

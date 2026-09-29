@@ -1703,6 +1703,11 @@ final class _CategoryBlock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final fields = _positionFields(board, controller, category);
+    final hasCatalogSections = controller.catalogSections(category).isNotEmpty;
+    // Пока в категории нет разделов каталога, позиции добавляются прямо в неё.
+    final canAddDirect = controller.canAddDirectPosition(category);
+    void addDirectPosition() =>
+        onAddPosition(controller.ensureDirectSection(category));
     return DecoratedBox(
       decoration: BoxDecoration(
         color: _surface,
@@ -1734,11 +1739,21 @@ final class _CategoryBlock extends StatelessWidget {
                           style: const TextStyle(fontWeight: FontWeight.w800),
                         ),
                       ),
-                      IconButton(
-                        tooltip: 'Добавить раздел',
-                        onPressed: onAddSection,
-                        icon: const Icon(Icons.create_new_folder_outlined),
-                      ),
+                      if (hasCatalogSections)
+                        IconButton(
+                          tooltip: 'Добавить раздел',
+                          onPressed: onAddSection,
+                          icon: const Icon(Icons.create_new_folder_outlined),
+                        ),
+                      if (canAddDirect)
+                        IconButton(
+                          key: Key(
+                            'quote-category-add-position-${category.id}',
+                          ),
+                          tooltip: 'Добавить позицию',
+                          onPressed: addDirectPosition,
+                          icon: const Icon(Icons.add_circle_outline),
+                        ),
                       const SizedBox(width: 8),
                       _MoneyLabel('Закупка', category.purchaseTotal),
                       const SizedBox(width: 16),
@@ -1770,10 +1785,22 @@ final class _CategoryBlock extends StatelessWidget {
             if (category.sections.isEmpty)
               Padding(
                 padding: const EdgeInsets.all(16),
-                child: OutlinedButton.icon(
-                  onPressed: onAddSection,
-                  icon: const Icon(Icons.add),
-                  label: const Text('Добавить раздел'),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    if (hasCatalogSections)
+                      OutlinedButton.icon(
+                        onPressed: onAddSection,
+                        icon: const Icon(Icons.create_new_folder_outlined),
+                        label: const Text('Добавить раздел'),
+                      ),
+                    OutlinedButton.icon(
+                      onPressed: addDirectPosition,
+                      icon: const Icon(Icons.add),
+                      label: const Text('Добавить позицию'),
+                    ),
+                  ],
                 ),
               )
             else
@@ -1957,6 +1984,9 @@ final class _SectionBlockState extends State<_SectionBlock> {
             controller: controller,
             fields: fields,
             section: section,
+            title: _isDirectSection(widget.category, section)
+                ? 'Позиции категории'
+                : section.name,
             expanded: expanded,
             onToggle: onToggle,
             onAddPosition: onAddPosition,
@@ -2093,11 +2123,18 @@ final class _SectionBlockState extends State<_SectionBlock> {
 
 /// Адаптивная шапка раздела. Заголовки колонок намеренно находятся ниже,
 /// внутри раскрытого раздела, а не над всей категорией.
+/// Раздел для позиций, добавленных прямо в категорию (см.
+/// [QuoteController.ensureDirectSection]).
+bool _isDirectSection(QuoteCategoryDraft category, QuoteSectionDraft section) =>
+    section.catalogSectionId == null &&
+    section.name.trim().toLowerCase() == category.name.trim().toLowerCase();
+
 final class _SectionHeader extends StatelessWidget {
   const _SectionHeader({
     required this.controller,
     required this.fields,
     required this.section,
+    required this.title,
     required this.expanded,
     required this.onToggle,
     required this.onAddPosition,
@@ -2106,6 +2143,7 @@ final class _SectionHeader extends StatelessWidget {
   final QuoteController controller;
   final List<KanbanField> fields;
   final QuoteSectionDraft section;
+  final String title;
   final bool expanded;
   final VoidCallback onToggle;
   final VoidCallback onAddPosition;
@@ -2142,7 +2180,7 @@ final class _SectionHeader extends StatelessWidget {
           const SizedBox(width: 7),
           Flexible(
             child: Text(
-              section.name,
+              this.title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontWeight: FontWeight.w700),
@@ -2653,8 +2691,10 @@ final class _PositionFieldCell extends StatelessWidget {
     if (position.hiddenFieldCodes.contains(field.code)) {
       return SizedBox(width: width);
     }
-    if (const {'group', 'name', 'marking'}.contains(field.code) &&
-        controller.isEntryPosition(position)) {
+    // Группа, наименование и маркировка всегда вводятся с автопоиском по
+    // каталогу — и в новых строках, и в сохранённых позициях после повторного
+    // открытия редактора.
+    if (const {'group', 'name', 'marking'}.contains(field.code)) {
       return _entryCell(field.code);
     }
     switch (field.code) {

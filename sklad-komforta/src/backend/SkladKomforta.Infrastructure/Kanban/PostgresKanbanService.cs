@@ -1,8 +1,10 @@
 using System.Data.Common;
 using System.Text.Json;
 using SkladKomforta.Application.Abstractions.Persistence;
+using SkladKomforta.Application.Abstractions.Tenancy;
 using SkladKomforta.Application.Identity;
 using SkladKomforta.Application.Kanban;
+using SkladKomforta.Application.Quotes;
 
 namespace SkladKomforta.Infrastructure.Kanban;
 
@@ -12,9 +14,35 @@ namespace SkladKomforta.Infrastructure.Kanban;
 /// сервису не принадлежат.
 /// </summary>
 internal sealed class PostgresKanbanService(
-    IDatabaseConnectionFactory connectionFactory) : IKanbanService
+    IDatabaseConnectionFactory connectionFactory,
+    ITenantContext tenantContext) : IKanbanService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    /// <summary>Роли пользователя в текущей организации через запятую.</summary>
+    private static string RoleOf(string userColumn) => $"""
+        (SELECT string_agg(role.name, ', ' ORDER BY role.name)
+           FROM public.organization_members AS member
+           JOIN member_roles AS member_role ON member_role.membership_id = member.id
+           JOIN roles AS role ON role.id = member_role.role_id
+          WHERE member.user_id = {userColumn})
+        """;
+
+    /// <summary>Общий набор колонок карточки для <see cref="ReadCard"/>.</summary>
+    private static readonly string CardColumns = $"""
+        card.id, card.card_number, card.workflow_id, card.column_id,
+        card.category_id, card.section_id, card.title, card.values::text,
+        card.created_by, creator.display_name, card.created_at,
+        card.updated_by, updater.display_name, card.updated_at, card.is_archived,
+        card.moved_by, mover.display_name, card.moved_at,
+        {RoleOf("card.created_by")}, {RoleOf("card.updated_by")}, {RoleOf("card.moved_by")}
+        """;
+
+    private const string CardJoins = """
+        LEFT JOIN public.users AS creator ON creator.id = card.created_by
+        LEFT JOIN public.users AS updater ON updater.id = card.updated_by
+        LEFT JOIN public.users AS mover ON mover.id = card.moved_by
+        """;
 
     public async Task<IReadOnlyList<KanbanBoardSummary>> GetBoardsAsync(
         CancellationToken cancellationToken)
@@ -121,41 +149,81 @@ internal sealed class PostgresKanbanService(
         var selectedUserIds = ResolveCardAuthorFilter(
             actorUserId, visibleUserIds, query.AuthorUserId, query.IncludeOwn);
         await EnsureColumnAsync(connection, null, boardId, query.ColumnId, cancellationToken);
-        await using var command = connection.CreateCommand();
-        const string visibilityFilter = "AND card.created_by = ANY(@visible_user_ids)";
-        command.CommandText = $"""
-            SELECT card.id, card.card_number, card.workflow_id, card.column_id,
-                   card.category_id, card.section_id, card.title, card.values::text,
-                   card.created_by, creator.display_name, card.created_at,
-                   card.updated_by, updater.display_name, card.updated_at,
-                   card.is_archived, count(*) OVER()
-            FROM kanban_cards AS card
-            LEFT JOIN public.users AS creator ON creator.id = card.created_by
-            LEFT JOIN public.users AS updater ON updater.id = card.updated_by
-            WHERE card.workflow_id = @workflow_id
+        // Один фильтр для страницы и для итога столбца. Поиск — подстрока
+        // названия (без учёта регистра) или номер карточки («72», «#72», «№72»).
+        var search = query.Search?.Trim() ?? string.Empty;
+        var searchNumber = long.TryParse(search.TrimStart('#', '№').Trim(), out var number) ? number : -1;
+        const string filter = """
+            card.workflow_id = @workflow_id
               AND card.column_id = @column_id
               AND card.is_archived = @archived
               AND card.deleted_at IS NULL
-              {visibilityFilter}
+              AND card.created_by = ANY(@visible_user_ids)
+              AND (@search = ''
+                   OR strpos(lower(card.title), lower(@search)) > 0
+                   OR card.card_number = @search_number)
+            """;
+        void AddFilterParameters(DbCommand target)
+        {
+            AddParameter(target, "workflow_id", boardId);
+            AddParameter(target, "column_id", query.ColumnId);
+            AddParameter(target, "archived", query.Archived);
+            AddParameter(target, "visible_user_ids", selectedUserIds);
+            AddParameter(target, "search", search);
+            AddParameter(target, "search_number", searchNumber);
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT {CardColumns}, count(*) OVER()
+            FROM kanban_cards AS card
+            {CardJoins}
+            WHERE {filter}
             ORDER BY card.sort_order, card.id
             LIMIT @limit OFFSET @offset
             """;
-        AddParameter(command, "workflow_id", boardId);
-        AddParameter(command, "column_id", query.ColumnId);
-        AddParameter(command, "archived", query.Archived);
-        AddParameter(command, "visible_user_ids", selectedUserIds);
+        AddFilterParameters(command);
         AddParameter(command, "limit", pageSize);
         AddParameter(command, "offset", (page - 1) * pageSize);
 
         var items = new List<KanbanCardSummary>();
         var total = 0;
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
         {
-            items.Add(ReadCard(reader));
-            total = checked((int)reader.GetInt64(15));
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                items.Add(ReadCard(reader));
+                total = checked((int)reader.GetInt64(21));
+            }
         }
-        return new KanbanCardPage(items, page, pageSize, total);
+
+        // Итог столбца считается по всем подходящим карточкам, а не по странице.
+        var columnQuoteIds = new List<Guid>();
+        await using (var quotes = connection.CreateCommand())
+        {
+            quotes.CommandText = $"""
+                SELECT quote.id
+                  FROM kanban_cards AS card
+                  JOIN quotes AS quote ON quote.card_id = card.id AND quote.deleted_at IS NULL
+                 WHERE {filter}
+                """;
+            AddFilterParameters(quotes);
+            await using var reader = await quotes.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken)) columnQuoteIds.Add(reader.GetGuid(0));
+        }
+        decimal? selectedTotal = null;
+        if (columnQuoteIds.Count > 0)
+        {
+            var chosen = await ReadSelectionsAsync(connection, [.. columnQuoteIds], cancellationToken);
+            selectedTotal = chosen.Values.SelectMany(list => list).Sum(item => item.Total);
+        }
+
+        return new KanbanCardPage(
+            await WithQuoteSummariesAsync(connection, items, cancellationToken),
+            page,
+            pageSize,
+            total,
+            selectedTotal);
     }
 
     public async Task<KanbanCardSummary> GetCardAsync(
@@ -165,8 +233,9 @@ internal sealed class PostgresKanbanService(
         CancellationToken cancellationToken)
     {
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
-        return await ReadVisibleCardAsync(
+        var card = await ReadVisibleCardAsync(
             connection, null, actorUserId, boardId, cardId, cancellationToken);
+        return (await WithQuoteSummariesAsync(connection, [card], cancellationToken))[0];
     }
 
     public async Task<KanbanCardSummary> CreateCardAsync(
@@ -303,9 +372,14 @@ internal sealed class PostgresKanbanService(
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
+            // Перенос между колонками — «Статус изменил»; порядок внутри колонки
+            // и правки содержимого его не затрагивают. updated_* остаётся за
+            // последним изменением содержимого.
             command.CommandText = """
                 UPDATE kanban_cards
-                SET column_id = @column_id, updated_by = @actor, updated_at = now()
+                SET column_id = @column_id,
+                    moved_by = CASE WHEN column_id <> @column_id THEN @actor ELSE moved_by END,
+                    moved_at = CASE WHEN column_id <> @column_id THEN now() ELSE moved_at END
                 WHERE id = @id AND workflow_id = @workflow_id AND deleted_at IS NULL
                 """;
             AddParameter(command, "column_id", request.TargetColumnId);
@@ -871,14 +945,10 @@ internal sealed class PostgresKanbanService(
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = """
-            SELECT card.id, card.card_number, card.workflow_id, card.column_id,
-                   card.category_id, card.section_id, card.title, card.values::text,
-                   card.created_by, creator.display_name, card.created_at,
-                   card.updated_by, updater.display_name, card.updated_at, card.is_archived
+        command.CommandText = $"""
+            SELECT {CardColumns}
             FROM kanban_cards AS card
-            LEFT JOIN public.users AS creator ON creator.id = card.created_by
-            LEFT JOIN public.users AS updater ON updater.id = card.updated_by
+            {CardJoins}
             WHERE card.id = @id AND card.workflow_id = @workflow_id
               AND card.deleted_at IS NULL
             """;
@@ -1045,7 +1115,150 @@ internal sealed class PostgresKanbanService(
         reader.IsDBNull(11) ? null : reader.GetGuid(11),
         reader.IsDBNull(12) ? null : reader.GetString(12),
         new DateTimeOffset(reader.GetFieldValue<DateTime>(13)),
-        reader.GetBoolean(14));
+        reader.GetBoolean(14),
+        reader.IsDBNull(15) ? null : reader.GetGuid(15),
+        reader.IsDBNull(16) ? null : reader.GetString(16),
+        reader.IsDBNull(17) ? null : new DateTimeOffset(reader.GetFieldValue<DateTime>(17)),
+        reader.IsDBNull(18) ? null : reader.GetString(18),
+        reader.IsDBNull(19) ? null : reader.GetString(19),
+        reader.IsDBNull(20) ? null : reader.GetString(20));
+
+    /// <summary>
+    /// Выбранные варианты (режим «вариант») и все варианты выбранного типа
+    /// (режим «тип целиком») с итогом для клиента с НДС, по предложениям.
+    /// </summary>
+    private static async Task<Dictionary<Guid, List<(int TypeOrder, string TypeName, string? VariantName, decimal Total)>>> ReadSelectionsAsync(
+        DbConnection connection,
+        Guid[] quoteIds,
+        CancellationToken token)
+    {
+        var selections = new Dictionary<Guid, List<(int TypeOrder, string TypeName, string? VariantName, decimal Total)>>();
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                WITH chosen AS (
+                    SELECT type.quote_id, type.id AS type_id, type.name AS type_name,
+                           type.sort_order AS type_order, variant.id AS variant_id,
+                           variant.name AS variant_name, variant.vat_rate, false AS whole_type
+                      FROM quote_proposal_type_selections AS selection
+                      JOIN quote_proposal_types AS type ON type.id = selection.proposal_type_id
+                      JOIN quote_variants AS variant ON variant.id = selection.variant_id
+                      JOIN quotes AS quote ON quote.id = type.quote_id
+                     WHERE type.quote_id = ANY(@quote_ids) AND quote.selection_mode = 'variant'
+                    UNION ALL
+                    SELECT type.quote_id, type.id, type.name, type.sort_order, variant.id,
+                           variant.name, variant.vat_rate, true
+                      FROM quote_client_type_selections AS selection
+                      JOIN quote_proposal_types AS type ON type.id = selection.proposal_type_id
+                      JOIN quote_variants AS variant ON variant.proposal_type_id = type.id
+                      JOIN quotes AS quote ON quote.id = type.quote_id
+                     WHERE type.quote_id = ANY(@quote_ids) AND quote.selection_mode = 'proposal_type'
+                )
+                SELECT chosen.quote_id, chosen.type_order, chosen.type_name, chosen.variant_name,
+                       chosen.whole_type, chosen.vat_rate,
+                       COALESCE(sum(position.line_total) FILTER (WHERE NOT position.exclude_from_totals), 0)
+                  FROM chosen
+                  LEFT JOIN quote_variant_categories AS category ON category.variant_id = chosen.variant_id
+                  LEFT JOIN quote_variant_sections AS section ON section.variant_category_id = category.id
+                  LEFT JOIN quote_positions AS position ON position.variant_section_id = section.id
+                 GROUP BY chosen.quote_id, chosen.type_id, chosen.type_order, chosen.type_name,
+                          chosen.variant_id, chosen.variant_name, chosen.whole_type, chosen.vat_rate
+                """;
+            AddParameter(command, "quote_ids", quoteIds);
+            await using var reader = await command.ExecuteReaderAsync(token);
+            while (await reader.ReadAsync(token))
+            {
+                var subtotal = reader.GetDecimal(6);
+                decimal? vatRate = reader.IsDBNull(5) ? null : reader.GetDecimal(5);
+                var total = subtotal + QuoteVatCalculator.Calculate(subtotal, vatRate);
+                var wholeType = reader.GetBoolean(4);
+                if (!selections.TryGetValue(reader.GetGuid(0), out var list))
+                    selections[reader.GetGuid(0)] = list = [];
+                list.Add((reader.GetInt32(1), reader.GetString(2), wholeType ? null : reader.GetString(3), total));
+            }
+        }
+        return selections;
+    }
+
+    /// <summary>
+    /// Дополняет карточки КП/ПКП сводкой предложения. Три запроса на страницу:
+    /// шапки предложений, выбранные варианты с суммами и просмотры ссылок.
+    /// </summary>
+    private async Task<IReadOnlyList<KanbanCardSummary>> WithQuoteSummariesAsync(
+        DbConnection connection,
+        List<KanbanCardSummary> cards,
+        CancellationToken token)
+    {
+        if (cards.Count == 0) return cards;
+        var cardIds = cards.Select(card => card.Id).ToArray();
+        var headers = new Dictionary<Guid, (Guid QuoteId, string Kind, string? Client, string? Executor, string Mode)>();
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                SELECT quote.card_id, quote.id, quote.quote_kind, client.name,
+                       COALESCE(NULLIF(btrim(company.legal_name), ''), company.name),
+                       quote.selection_mode
+                  FROM quotes AS quote
+                  LEFT JOIN clients AS client ON client.id = quote.client_id
+                  LEFT JOIN companies AS company ON company.id = quote.executor_company_id
+                 WHERE quote.card_id = ANY(@card_ids) AND quote.deleted_at IS NULL
+                """;
+            AddParameter(command, "card_ids", cardIds);
+            await using var reader = await command.ExecuteReaderAsync(token);
+            while (await reader.ReadAsync(token))
+            {
+                headers[reader.GetGuid(0)] = (
+                    reader.GetGuid(1), reader.GetString(2),
+                    reader.IsDBNull(3) ? null : reader.GetString(3),
+                    reader.IsDBNull(4) ? null : reader.GetString(4),
+                    reader.GetString(5));
+            }
+        }
+        if (headers.Count == 0) return cards;
+        var quoteIds = headers.Values.Select(header => header.QuoteId).ToArray();
+
+        var selections = await ReadSelectionsAsync(connection, quoteIds, token);
+
+        var views = new Dictionary<Guid, (int Count, DateTimeOffset? LastAt)>();
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                SELECT quote_id, COALESCE(sum(access_count), 0)::integer, max(last_accessed_at)
+                  FROM public.quote_client_access_links
+                 WHERE organization_id = @organization_id AND quote_id = ANY(@quote_ids)
+                 GROUP BY quote_id
+                """;
+            AddParameter(command, "organization_id", tenantContext.OrganizationId);
+            AddParameter(command, "quote_ids", quoteIds);
+            await using var reader = await command.ExecuteReaderAsync(token);
+            while (await reader.ReadAsync(token))
+            {
+                views[reader.GetGuid(0)] = (
+                    reader.GetInt32(1),
+                    reader.IsDBNull(2) ? null : new DateTimeOffset(reader.GetFieldValue<DateTime>(2)));
+            }
+        }
+
+        return cards.Select(card =>
+        {
+            if (!headers.TryGetValue(card.Id, out var header)) return card;
+            var chosen = selections.GetValueOrDefault(header.QuoteId) ?? [];
+            // Тип целиком суммирует свои варианты в одну строку.
+            var summary = chosen
+                .GroupBy(item => (item.TypeOrder, item.TypeName, item.VariantName))
+                .OrderBy(group => group.Key.TypeOrder)
+                .Select(group => new KanbanQuoteSelection(
+                    group.Key.TypeName, group.Key.VariantName, group.Sum(item => item.Total)))
+                .ToArray();
+            var view = views.GetValueOrDefault(header.QuoteId);
+            return card with
+            {
+                Quote = new KanbanQuoteSummary(
+                    header.Kind, header.Client, header.Executor, header.Mode,
+                    summary, view.Count, view.LastAt),
+            };
+        }).ToArray();
+    }
 
     private static async Task WriteAuditAsync(
         DbConnection connection,

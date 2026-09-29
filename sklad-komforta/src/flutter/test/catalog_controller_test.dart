@@ -163,6 +163,73 @@ void main() {
     auth.dispose();
   });
 
+  testWidgets(
+    'товар без раздела сохраняется, ошибка цены открывает вкладку «Цены»',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(900, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      Future<void> pump(CatalogCategory category, VoidCallback onSave) =>
+          tester.pumpWidget(
+            MaterialApp(
+              home: Scaffold(
+                body: CatalogEditor(
+                  key: UniqueKey(),
+                  draft: CatalogItemDraft(categoryId: category.id, name: ''),
+                  configuration: CatalogConfiguration(
+                    categories: [category],
+                    dictionaries: const [],
+                    dependencies: const [],
+                  ),
+                  saving: false,
+                  error: null,
+                  isNew: true,
+                  images: const [],
+                  imagesLoading: false,
+                  relationsLoading: false,
+                  relations: const [],
+                  onClose: () {},
+                  onSave: () async {
+                    onSave();
+                    return true;
+                  },
+                ),
+              ),
+            ),
+          );
+      CatalogCategory withPrice({required bool required}) => CatalogCategory(
+        id: _category.id,
+        name: 'Материалы',
+        sortOrder: 0,
+        fields: [
+          ..._category.fields.take(2),
+          CatalogField(
+            code: 'base_price',
+            label: 'Цена',
+            fieldType: 'money',
+            isVisible: true,
+            isRequired: required,
+            sortOrder: 2,
+          ),
+        ],
+        sections: const [],
+      );
+
+      var saved = 0;
+      await pump(withPrice(required: false), () => saved++);
+      await tester.enterText(find.byType(TextFormField).first, 'Герметик');
+      await tester.tap(find.byKey(const Key('catalog-save')));
+      await tester.pumpAndSettle();
+      expect(saved, 1);
+
+      await pump(withPrice(required: true), () => saved++);
+      await tester.enterText(find.byType(TextFormField).first, 'Герметик');
+      await tester.tap(find.byKey(const Key('catalog-save')));
+      await tester.pumpAndSettle();
+      expect(saved, 1);
+      expect(find.text('Заполните поле.'), findsOneWidget);
+    },
+  );
+
   testWidgets('в массовом редакторе только связи и частичная привязка', (
     tester,
   ) async {

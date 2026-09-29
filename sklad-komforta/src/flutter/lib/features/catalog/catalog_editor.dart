@@ -77,7 +77,11 @@ final class CatalogEditor extends StatefulWidget {
 }
 
 class _CatalogEditorState extends State<CatalogEditor> {
-  final formKey = GlobalKey<FormState>();
+  // Вкладки «Основное» и «Цены» проверяются отдельно: все вкладки построены
+  // в IndexedStack, и ошибка на скрытой вкладке иначе молча блокирует
+  // сохранение.
+  final mainFormKey = GlobalKey<FormState>();
+  final priceFormKey = GlobalKey<FormState>();
   int selectedTab = 0;
 
   @override
@@ -153,18 +157,15 @@ class _CatalogEditorState extends State<CatalogEditor> {
         Expanded(
           child: widget.isBulk
               ? _scroll([_relationsEditor()])
-              : Form(
-                  key: formKey,
-                  child: IndexedStack(
-                    index: selectedTab,
-                    children: [
-                      _scroll(_mainFields()),
-                      _scroll(_priceFields()),
+              : IndexedStack(
+                  index: selectedTab,
+                  children: [
+                    Form(key: mainFormKey, child: _scroll(_mainFields())),
+                    Form(key: priceFormKey, child: _scroll(_priceFields())),
                       _scroll([const _StockPlaceholder()]),
                       _scroll([_imagesEditor()]),
-                      _scroll([_relationsEditor()]),
-                    ],
-                  ),
+                    _scroll([_relationsEditor()]),
+                  ],
                 ),
         ),
         if (widget.error != null ||
@@ -208,7 +209,7 @@ class _CatalogEditorState extends State<CatalogEditor> {
                   onPressed: widget.saving
                       ? null
                       : () async {
-                          if (formKey.currentState?.validate() != true) return;
+                          if (!_validate()) return;
                           await widget.onSave();
                         },
                   child: widget.saving
@@ -626,6 +627,18 @@ class _CatalogEditorState extends State<CatalogEditor> {
       return;
     }
     await widget.onUploadImage!(file.name, contentType, bytes);
+  }
+
+  /// Проверяет вкладки по очереди и открывает первую, где есть ошибка.
+  bool _validate() {
+    final forms = [mainFormKey, priceFormKey];
+    for (var index = 0; index < forms.length; index++) {
+      if (forms[index].currentState?.validate() == false) {
+        setState(() => selectedTab = index);
+        return false;
+      }
+    }
+    return true;
   }
 
   bool get _groupVisible => _fieldVisible('group');
@@ -1115,14 +1128,21 @@ final class _DynamicField extends StatelessWidget {
         enabled: enabled,
         minimum: field.fieldType == 'money' ? 0 : null,
         decoration: InputDecoration(labelText: _label),
-        onChanged: (text) =>
-            onChanged(num.tryParse(text.replaceAll(',', '.')) ?? text),
+        // Очищенное поле отправляется как null, а не пустая строка: сервер
+        // отклоняет строку в числовом поле.
+        onChanged: (text) => onChanged(
+          text.trim().isEmpty
+              ? null
+              : num.tryParse(text.replaceAll(',', '.')) ?? text,
+        ),
         validator: (text) {
           if (field.isRequired && (text ?? '').trim().isEmpty) {
             return 'Заполните поле.';
           }
+          final normalized = (text ?? '').trim();
           if (field.code == 'base_price' &&
-              (num.tryParse((text ?? '').replaceAll(',', '.')) ?? 0) <= 0) {
+              normalized.isNotEmpty &&
+              (num.tryParse(normalized.replaceAll(',', '.')) ?? 0) <= 0) {
             return 'Цена должна быть больше нуля.';
           }
           return null;

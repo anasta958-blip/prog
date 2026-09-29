@@ -53,6 +53,52 @@ void main() {
     },
   );
 
+  test('позиции добавляются прямо в категорию без разделов', () {
+    final auth = AuthController(
+      config,
+      api: _NoopAuthGateway(),
+      tokens: _MemoryTokenRepository(),
+    );
+    final controller = QuoteController(config, auth);
+    final type = QuoteProposalTypeDraft.create();
+    expect(type.selectedVariantId, isNull);
+    final category = QuoteCategoryDraft(
+      id: 'category',
+      name: 'Расходники',
+      sections: [],
+    );
+    type.variants.single.categories.add(category);
+    controller.draft = QuoteDraft(
+      kind: QuoteKind.quote,
+      title: 'КП',
+      clientId: 'client',
+      executorCompanyId: 'executor',
+      selectionMode: 'variant',
+      proposalTypes: [type],
+    );
+
+    expect(controller.canAddDirectPosition(category), isTrue);
+    final direct = controller.ensureDirectSection(category);
+    expect(direct.catalogSectionId, isNull);
+    expect(direct.name, 'Расходники');
+    expect(controller.ensureDirectSection(category), same(direct));
+    controller.addEntryPosition(direct);
+    expect(category.sections.single.positions, hasLength(1));
+    expect(controller.canAddDirectPosition(category), isTrue);
+
+    category.sections.add(
+      QuoteSectionDraft(
+        id: 'section',
+        catalogSectionId: 'catalog-section',
+        name: 'Раздел',
+        positions: [],
+      ),
+    );
+    expect(controller.canAddDirectPosition(category), isFalse);
+    controller.dispose();
+    auth.dispose();
+  });
+
   test(
     'удаление типов и вариантов исправляет выбор и защищает последние вкладки',
     () {
@@ -802,7 +848,6 @@ void main() {
 
       final row = controller.addEntryPosition(section);
       expect(controller.focusRequestPositionId, row.id);
-      expect(controller.isEntryPosition(row), isTrue);
       expect(
         controller.catalogGroups(category, section).map((group) => group.name),
         ['Вентиляторы'],
@@ -832,7 +877,6 @@ void main() {
       expect(row.unit, 'шт');
       expect(row.basePrice, 1200);
       expect(row.quantity, 3);
-      expect(controller.isEntryPosition(row), isTrue);
 
       row.marking = 'другая';
       expect(
@@ -894,13 +938,25 @@ void main() {
       dictionaries: [],
       dependencies: [],
     );
+    // Сохранённая позиция, уже связанная с каталогом (как после повторного
+    // открытия редактора).
+    final saved = QuotePositionDraft(
+      id: 'saved',
+      catalogItemId: _equipmentItem.id,
+      name: 'Вентилятор',
+      marking: 'V-1',
+      unit: 'шт',
+      quantity: 1,
+      basePrice: 1200,
+      values: <String, dynamic>{},
+    );
     final sections = [
       for (final source in [_equipmentSection, emptySection])
         QuoteSectionDraft(
           id: source.id,
           catalogSectionId: source.id,
           name: source.name,
-          positions: [],
+          positions: [if (source == _equipmentSection) saved],
         ),
     ];
     final category = QuoteCategoryDraft(
@@ -972,6 +1028,11 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('ГРУППА'), findsOneWidget);
+    expect(find.byKey(const ValueKey('quote-entry-saved-name')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('quote-entry-saved-marking')),
+      findsOneWidget,
+    );
     await tester.tap(find.byTooltip('Добавить позицию').last);
     await tester.pumpAndSettle();
     final row = sections.last.positions.single;
@@ -981,7 +1042,7 @@ void main() {
       'quote-entry-${row.id}-name',
     );
     expect(row.values.containsKey('group'), isFalse);
-    expect(sections.first.positions, isEmpty);
+    expect(sections.first.positions, [saved]);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
     controller.dispose();

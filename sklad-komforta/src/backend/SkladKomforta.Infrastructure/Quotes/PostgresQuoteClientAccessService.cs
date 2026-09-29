@@ -218,7 +218,7 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
 
         await using (var connection = await _dataSource.OpenConnectionAsync(cancellationToken))
         await using (var command = new NpgsqlCommand(
-                         "UPDATE public.quote_client_access_links SET last_accessed_at = now() WHERE id = @id",
+                         "UPDATE public.quote_client_access_links SET last_accessed_at = now(), access_count = access_count + 1 WHERE id = @id",
                          connection))
         {
             command.Parameters.AddWithValue("id", link.Id);

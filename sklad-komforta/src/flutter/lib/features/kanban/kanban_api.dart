@@ -21,6 +21,9 @@ abstract interface class KanbanGateway {
     String? authorUserId,
     bool includeOwn = true,
     bool archived = false,
+
+    /// Подстрока названия или номер карточки.
+    String? search,
   });
   Future<KanbanCard> createCard(
     String accessToken,
@@ -98,6 +101,7 @@ final class KanbanApi implements KanbanGateway {
     String? authorUserId,
     bool includeOwn = true,
     bool archived = false,
+    String? search,
   }) async => KanbanCardPage.fromJson(
     await _send(
           'GET',
@@ -110,6 +114,7 @@ final class KanbanApi implements KanbanGateway {
             'pageSize': '$pageSize',
             'authorUserId': ?authorUserId,
             if (authorUserId != null) 'includeOwn': '$includeOwn',
+            'search': ?search,
           },
         )
         as Map<String, dynamic>,

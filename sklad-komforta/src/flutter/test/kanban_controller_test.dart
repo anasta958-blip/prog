@@ -27,6 +27,141 @@ void main() {
     environment: 'test',
   );
 
+  testWidgets('карточка КП показывает стороны, выбор, просмотры и историю', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final auth = _authorizedController(config);
+    final gateway = _MemoryKanbanGateway()
+      ..specialization = WorkflowSpecialization.quote;
+    gateway.cards['quote-first'] = [
+      KanbanCard.fromJson({
+        'id': 'quote-card',
+        'number': 72,
+        'workflowId': 'board-quotes',
+        'columnId': 'quote-first',
+        'categoryId': null,
+        'title': 'Шелепихинская набережная, д.38к5',
+        'values': <String, dynamic>{},
+        'createdBy': 'user-1',
+        'createdByName': 'Иван Бочаров',
+        'createdByRole': 'Менеджер',
+        'createdAt': '2026-06-22T09:41:00Z',
+        'updatedBy': 'user-1',
+        'updatedByName': 'Иван Бочаров',
+        'updatedByRole': 'Менеджер',
+        'updatedAt': '2026-06-22T16:41:00Z',
+        'movedBy': 'user-2',
+        'movedByName': 'Скорняков Павел',
+        'movedByRole': 'РОП',
+        'movedAt': '2026-06-29T11:27:00Z',
+        'quote': {
+          'quoteKind': 'quote',
+          'clientName': 'Скорняков Павел',
+          'executorName': 'ООО Комфорт',
+          'selectionMode': 'variant',
+          'selections': [
+            {
+              'proposalTypeName': 'Фанкойлы',
+              'variantName': 'Фанкойлы',
+              'total': 904250,
+            },
+          ],
+          'linkViews': 12,
+          'lastViewedAt': '2026-06-25T10:00:00Z',
+        },
+      }),
+    ];
+    gateway.cards['quote-first']!.add(
+      KanbanCard.fromJson({
+        'id': 'quote-empty',
+        'number': 73,
+        'workflowId': 'board-quotes',
+        'columnId': 'quote-first',
+        'title': 'Новый объект',
+        'values': <String, dynamic>{},
+        'createdAt': '2026-06-23T09:41:00Z',
+        'updatedAt': '2026-06-23T09:41:00Z',
+        'quote': {
+          'quoteKind': 'prequote',
+          'selectionMode': 'variant',
+          'selections': <Object>[],
+          'linkViews': 0,
+        },
+      }),
+    );
+    gateway.selectedTotal = 904250;
+    final controller = KanbanController(config, auth, gateway: gateway);
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: KanbanPage(
+            controller: controller,
+            config: config,
+            authController: auth,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Шелепихинская набережная, д.38к5'), findsOneWidget);
+    expect(find.text('Не выбрано'), findsOneWidget);
+    expect(find.text('Ссылку ещё не открывали'), findsOneWidget);
+    expect(
+      tester
+          .widget<Text>(
+            find.byKey(const Key('kanban-column-total-quote-first')),
+          )
+          .data,
+      startsWith('Выбрано на 904'),
+    );
+    expect(find.text('КП №72'), findsOneWidget);
+    expect(find.textContaining('ООО Комфорт'), findsOneWidget);
+    expect(find.textContaining('Скорняков Павел'), findsWidgets);
+    expect(find.textContaining('Иван Бочаров · Менеджер'), findsWidgets);
+    expect(find.text('Фанкойлы: Фанкойлы'), findsOneWidget);
+    expect(find.textContaining('904'), findsWidgets);
+    expect(
+      tester
+          .widget<Text>(find.byKey(const Key('kanban-quote-views-quote-card')))
+          .data,
+      startsWith('Просмотров ссылки: 12'),
+    );
+    expect(
+      tester
+          .widget<Text>(find.byKey(const Key('kanban-quote-moved-quote-card')))
+          .data,
+      startsWith('Статус изменил: Скорняков Павел · РОП'),
+    );
+    expect(
+      tester
+          .widget<Text>(
+            find.byKey(const Key('kanban-quote-updated-quote-card')),
+          )
+          .data,
+      startsWith('Изменил: Иван Бочаров · Менеджер'),
+    );
+
+    // Поиск уходит на сервер после паузы ввода и работает по номеру.
+    await tester.enterText(find.byKey(const Key('kanban-card-search')), '73');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+    expect(gateway.lastSearch, '73');
+    expect(find.text('Новый объект'), findsOneWidget);
+    expect(find.text('Шелепихинская набережная, д.38к5'), findsNothing);
+    await tester.tap(find.byTooltip('Очистить поиск'));
+    await tester.pumpAndSettle();
+    expect(gateway.lastSearch, isNull);
+    expect(find.text('Шелепихинская набережная, д.38к5'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    controller.dispose();
+    auth.dispose();
+  });
+
   for (final create in [false, true]) {
     testWidgets(
       'quote editor hides toolbar and pins source board (create=$create)',
@@ -388,7 +523,13 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final scrollable = find.byType(Scrollable);
+    // Горизонтальная прокрутка доски (у поля поиска своя, внутренняя).
+    final scrollable = find
+        .descendant(
+          of: find.byType(SingleChildScrollView),
+          matching: find.byType(Scrollable),
+        )
+        .first;
     final position = tester.state<ScrollableState>(scrollable).position;
     expect(position.pixels, 0);
 
@@ -467,6 +608,8 @@ final class _MemoryKanbanGateway implements KanbanGateway {
   final Map<String, int> cardRequests = {};
   final Map<String, List<KanbanCard>> cards = {};
   String? lastAuthorUserId;
+  String? lastSearch;
+  double? selectedTotal;
   bool? lastIncludeOwn;
 
   static const boards = [
@@ -574,12 +717,21 @@ final class _MemoryKanbanGateway implements KanbanGateway {
     String? authorUserId,
     bool includeOwn = true,
     bool archived = false,
+    String? search,
   }) async {
     lastAuthorUserId = authorUserId;
+    lastSearch = search;
     lastIncludeOwn = includeOwn;
     if (!archived) cardRequests[columnId] = (cardRequests[columnId] ?? 0) + 1;
+    final needle = search?.toLowerCase();
     final source = (cards[columnId] ?? const <KanbanCard>[])
         .where((card) => card.isArchived == archived)
+        .where(
+          (card) =>
+              needle == null ||
+              card.title.toLowerCase().contains(needle) ||
+              '${card.number}' == needle,
+        )
         .toList();
     final start = (page - 1) * pageSize;
     return KanbanCardPage(
@@ -589,6 +741,7 @@ final class _MemoryKanbanGateway implements KanbanGateway {
       page: page,
       pageSize: pageSize,
       total: source.length,
+      selectedTotal: archived ? null : selectedTotal,
     );
   }
 

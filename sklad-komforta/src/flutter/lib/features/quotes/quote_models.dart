@@ -118,12 +118,12 @@ final class QuoteProposalTypeDraft {
     String name = 'Основное предложение',
     double? initialVatRate,
   }) {
-    final variant = QuoteVariantDraft.create(vatRate: initialVatRate);
+    // Выбор варианта не проставляется автоматически: до решения клиента или
+    // менеджера карточка в канбане показывает «Не выбрано».
     return QuoteProposalTypeDraft(
       id: newQuoteId(),
       name: name,
-      variants: [variant],
-      selectedVariantId: variant.id,
+      variants: [QuoteVariantDraft.create(vatRate: initialVatRate)],
     );
   }
 
