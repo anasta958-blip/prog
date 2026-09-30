@@ -110,6 +110,12 @@ final class _OrganizationOnboardingPageState
   final Set<String> _collapsedCategoryIds = <String>{};
   final Set<String> _collapsedFieldCategoryIds = <String>{};
   final Set<String> _collapsedWorkflowFieldCodes = <String>{};
+
+  /// Состояние стрелки категорий в «Поля в канбанах», ключ
+  /// `канбан:категория`. Пока пользователь не нажимал стрелку, выбранная
+  /// категория развёрнута, а невыбранная свёрнута; установка и снятие выбора
+  /// фиксируют текущее состояние и сами его не меняют.
+  final Map<String, bool> _workflowCategoryExpanded = <String, bool>{};
   final Set<CategoryDependencyDraft> _collapsedDependencies =
       <CategoryDependencyDraft>{};
   final Set<OnboardingRoleDraft> _collapsedRoles = <OnboardingRoleDraft>{};
@@ -158,12 +164,47 @@ final class _OrganizationOnboardingPageState
         widget.settingsDraft != null &&
         !identical(oldWidget.settingsDraft, widget.settingsDraft) &&
         !widget.settingsBusy) {
-      draft = _copyDraft(widget.settingsDraft!);
-      _approvedCategoryDataDeletions.clear();
-      _ensureFixedCatalogFields();
-      _savedDraftJson = jsonEncode(draft.toJson());
-      _collapseConfiguredBlocks();
+      _acceptServerDraft(widget.settingsDraft!);
     }
+  }
+
+  /// Серверная версия настроек, пришедшая, пока в форме были несохранённые
+  /// правки. «Выйти без сохранения» возвращает форму к ней, а не к устаревшей.
+  String? _pendingServerDraftJson;
+
+  /// Принимает новую серверную версию настроек (после сохранения или изменения
+  /// другим пользователем в реальном времени). Несохранённые правки формы не
+  /// затираются: пользователь получает предупреждение и сам решает, сохранить
+  /// свою версию или выйти без сохранения.
+  void _acceptServerDraft(OrganizationOnboardingDraft source) {
+    final current = draft;
+    final hadUnsavedChanges = _hasUnsavedChanges;
+    draft = _copyDraft(source);
+    _ensureFixedCatalogFields();
+    final incomingJson = jsonEncode(draft.toJson());
+    if (incomingJson == _savedDraftJson) {
+      // Ничего нового, например эхо собственного сохранения.
+      draft = current;
+      return;
+    }
+    if (hadUnsavedChanges) {
+      draft = current;
+      _pendingServerDraftJson = incomingJson;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _showMessage(
+            'Настройки изменил другой пользователь. Ваши несохранённые правки '
+            'остались в форме: сохранение заменит его изменения, а выход без '
+            'сохранения покажет актуальную версию.',
+          );
+        }
+      });
+      return;
+    }
+    _pendingServerDraftJson = null;
+    _approvedCategoryDataDeletions.clear();
+    _savedDraftJson = incomingJson;
+    _collapseConfiguredBlocks();
   }
 
   @override
@@ -179,6 +220,10 @@ final class _OrganizationOnboardingPageState
 
   void _discardUnsavedChanges() {
     widget.onCategoryDeletionApprovalsDiscarded?.call();
+    if (_pendingServerDraftJson case final pending?) {
+      _savedDraftJson = pending;
+      _pendingServerDraftJson = null;
+    }
     draft = OrganizationOnboardingDraft.fromJson(
       jsonDecode(_savedDraftJson) as Map<String, dynamic>,
     );
@@ -321,6 +366,7 @@ final class _OrganizationOnboardingPageState
       draft = submitted;
       _approvedCategoryDataDeletions.clear();
       _savedDraftJson = jsonEncode(draft.toJson());
+      _pendingServerDraftJson = null;
       _collapseConfiguredBlocks();
     });
     _showMessage('Настройки организации сохранены.');
@@ -448,22 +494,7 @@ final class _OrganizationOnboardingPageState
                     child: Center(
                       child: ConstrainedBox(
                         constraints: const BoxConstraints(maxWidth: 1540),
-                        child: wide
-                            ? Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Expanded(flex: 7, child: _editor()),
-                                  const SizedBox(width: 18),
-                                  SizedBox(width: 400, child: _preview()),
-                                ],
-                              )
-                            : Column(
-                                children: [
-                                  _editor(),
-                                  const SizedBox(height: 16),
-                                  _preview(),
-                                ],
-                              ),
+                        child: _editor(),
                       ),
                     ),
                   ),
@@ -1452,6 +1483,9 @@ final class _OrganizationOnboardingPageState
     final selectedFields = selection?.fieldCodes
         .where((code) => availableFields.any((field) => field.code == code))
         .toList();
+    final collapseKey = '${workflow.code}:${category.clientId}';
+    final expanded =
+        _workflowCategoryExpanded[collapseKey] ?? selection != null;
     return DecoratedBox(
       decoration: BoxDecoration(
         color: const Color(0xFF0D1724),
@@ -1463,35 +1497,66 @@ final class _OrganizationOnboardingPageState
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              dense: true,
-              controlAffinity: ListTileControlAffinity.leading,
-              title: Text(
-                category.name,
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-              subtitle: const Text('Использовать категорию в этом канбане'),
-              value: selection != null,
-              onChanged: (enabled) => setState(() {
-                if (enabled ?? false) {
-                  workflow.categories.add(
-                    WorkflowCategoryDraft(
-                      categoryClientId: category.clientId,
-                      fieldCodes: [
-                        for (final field in category.fields)
-                          if (field.isVisible) field.fieldCode,
-                      ],
+            Row(
+              children: [
+                // Нажатие на строку ставит и снимает выбор, но не сворачивает
+                // её: видимость полей меняется только стрелкой справа.
+                Expanded(
+                  child: CheckboxListTile(
+                    key: Key('workflow-category-select-$collapseKey'),
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    title: Text(
+                      category.name,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
-                  );
-                } else {
-                  workflow.categories.removeWhere(
-                    (item) => item.categoryClientId == category.clientId,
-                  );
-                }
-              }),
+                    subtitle: const Text(
+                      'Использовать категорию в этом канбане',
+                    ),
+                    value: selection != null,
+                    onChanged: (enabled) => setState(() {
+                      _workflowCategoryExpanded[collapseKey] = expanded;
+                      if (enabled ?? false) {
+                        workflow.categories.add(
+                          WorkflowCategoryDraft(
+                            categoryClientId: category.clientId,
+                            fieldCodes: [
+                              for (final field in category.fields)
+                                if (field.isVisible) field.fieldCode,
+                            ],
+                          ),
+                        );
+                      } else {
+                        workflow.categories.removeWhere(
+                          (item) => item.categoryClientId == category.clientId,
+                        );
+                      }
+                    }),
+                  ),
+                ),
+                CollapseToggle(
+                  key: Key('workflow-category-toggle-$collapseKey'),
+                  expanded: expanded,
+                  expandTooltip: 'Развернуть поля категории в канбане',
+                  collapseTooltip: 'Свернуть поля категории в канбане',
+                  onPressed: () => setState(
+                    () => _workflowCategoryExpanded[collapseKey] = !expanded,
+                  ),
+                ),
+              ],
             ),
-            if (selection != null) ...[
+            if (selection == null && expanded) ...[
+              const Divider(height: 18),
+              const Padding(
+                padding: EdgeInsets.only(left: 18),
+                child: Text(
+                  'Категория не используется в этом канбане. Отметьте её, чтобы выбрать поля карточки.',
+                  style: TextStyle(color: Color(0xFF8EA5C4), fontSize: 12),
+                ),
+              ),
+            ],
+            if (selection != null && expanded) ...[
               const Divider(height: 18),
               Padding(
                 padding: const EdgeInsets.only(left: 18),
@@ -2895,68 +2960,6 @@ final class _OrganizationOnboardingPageState
     ],
   );
 
-  Widget _preview() => _Panel(
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Предварительный просмотр',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 18),
-        Center(
-          child: Column(
-            children: [
-              const _RoundIcon(Icons.business_outlined, size: 78),
-              const SizedBox(height: 14),
-              Text(
-                draft.company.organizationName.trim().isEmpty
-                    ? 'Название организации'
-                    : draft.company.organizationName.trim(),
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 10),
-              const _StatusChip(),
-            ],
-          ),
-        ),
-        const SizedBox(height: 20),
-        const Divider(),
-        const SizedBox(height: 8),
-        _PreviewRow(
-          Icons.business_center_outlined,
-          'Тип компании',
-          draft.company.companyType,
-        ),
-        _PreviewRow(
-          Icons.description_outlined,
-          'Юридическое название',
-          draft.company.legalName,
-          stacked: true,
-        ),
-        _PreviewRow(Icons.badge_outlined, 'ИНН', draft.company.inn),
-        _PreviewRow(Icons.credit_card_outlined, 'КПП', draft.company.kpp),
-        _PreviewRow(Icons.article_outlined, 'ОГРН', draft.company.ogrn),
-        _PreviewRow(Icons.location_on_outlined, 'Адрес', draft.company.address),
-        _PreviewRow(Icons.phone_outlined, 'Телефон', draft.company.phone),
-        _PreviewRow(Icons.email_outlined, 'Email', draft.company.email),
-        if (step > 0) ...[
-          const SizedBox(height: 14),
-          const Divider(),
-          const SizedBox(height: 8),
-          _ReviewRow('Канбаны', '${draft.workflows.length}'),
-          _ReviewRow('Категории', '${draft.categories.length}'),
-          _ReviewRow('Зависимости', '${draft.dependencies.length}'),
-          _ReviewRow('Роли', '${draft.roles.length + 1}'),
-        ],
-      ],
-    ),
-  );
-
   Widget _textField(
     String label,
     String value,
@@ -3427,9 +3430,9 @@ final class _SubPanel extends StatelessWidget {
 }
 
 final class _RoundIcon extends StatelessWidget {
-  const _RoundIcon(this.icon, {this.size = 50});
+  const _RoundIcon(this.icon);
   final IconData icon;
-  final double size;
+  static const double size = 50;
   @override
   Widget build(BuildContext context) => Container(
     width: size,
@@ -3449,64 +3452,6 @@ final class _BrandCube extends StatelessWidget {
   Widget build(BuildContext context) => const SizedBox.square(
     dimension: 32,
     child: Icon(Icons.view_in_ar_outlined, color: Color(0xFF4D8DFF), size: 32),
-  );
-}
-
-final class _StatusChip extends StatelessWidget {
-  const _StatusChip();
-  @override
-  Widget build(BuildContext context) => const Chip(
-    avatar: Icon(Icons.circle, size: 9, color: Color(0xFF67A0FF)),
-    label: Text('Организация ещё не активирована'),
-  );
-}
-
-final class _PreviewRow extends StatelessWidget {
-  const _PreviewRow(this.icon, this.label, this.value, {this.stacked = false});
-  final IconData icon;
-  final String label;
-  final String? value;
-  final bool stacked;
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 7),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 20, color: const Color(0xFF8FA4C2)),
-        const SizedBox(width: 12),
-        Expanded(
-          child: stacked
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      label,
-                      style: const TextStyle(color: Color(0xFF8FA4C2)),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(value?.trim().isNotEmpty == true ? value! : '—'),
-                  ],
-                )
-              : Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        label,
-                        style: const TextStyle(color: Color(0xFF8FA4C2)),
-                      ),
-                    ),
-                    Expanded(
-                      child: Text(
-                        value?.trim().isNotEmpty == true ? value! : '—',
-                      ),
-                    ),
-                  ],
-                ),
-        ),
-      ],
-    ),
   );
 }
 

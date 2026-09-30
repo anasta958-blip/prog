@@ -73,6 +73,66 @@ public sealed class DatabaseRegressionTests
         Assert.Equal(auditBeforeRoleSave, (await Send(staff, HttpMethod.Get, "/company/audit")).AsArray().Count);
         await Send(staff, HttpMethod.Get, "/settings/access/members");
 
+        var employeeRole = await Send(staff, HttpMethod.Post, "/settings/access/roles", new
+        {
+            name = "Проверка пароля сотрудника", permissionCodes = (string[])["catalog.view"],
+            subordinateRoleIds = Array.Empty<string>(), cardVisibilityMode = "own",
+        });
+        var employee = await Send(staff, HttpMethod.Post, "/company/employees", new
+        {
+            login = "password-test-employee", displayName = "Проверка пароля", temporaryPassword = "Employee-start-123!",
+            roleId = Text(employeeRole, "id"), supervisorMembershipId = (string?)null,
+        });
+        var employeePath = $"/company/employees/{Text(employee, "membershipId")}";
+        using var employeeClient = factory.CreateClient();
+        var employeeLogin = await Send(employeeClient, HttpMethod.Post, "/auth/login", new
+        {
+            login = "password-test-employee", password = "Employee-start-123!", deviceType = 2,
+        });
+        var employeeChanged = await Send(employeeClient, HttpMethod.Post, "/auth/initial-password", new
+        {
+            challengeToken = Text(employeeLogin, "challengeToken"), newPassword = "Employee-before-123!",
+        });
+        var employeeChallenge = Text(employeeChanged, "challengeToken");
+        var employeeTotp = await Send(employeeClient, HttpMethod.Post, "/auth/totp/setup", new { challengeToken = employeeChallenge });
+        var employeeAuthenticated = await Send(employeeClient, HttpMethod.Post, "/auth/totp/confirm", new
+        {
+            challengeToken = employeeChallenge, code = Totp(Text(employeeTotp, "secret")),
+        });
+        employeeClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", Text(employeeAuthenticated["tokens"]!, "accessToken"));
+        var employeeOnboarding = await Send(employeeClient, HttpMethod.Get, "/onboarding/status");
+        Assert.True(employeeOnboarding["isCompleted"]!.GetValue<bool>());
+        Assert.Null(employeeOnboarding["draft"]);
+        await Send(employeeClient, HttpMethod.Get, "/onboarding/", expected: HttpStatusCode.Forbidden);
+        await Send(employeeClient, HttpMethod.Post, employeePath + "/password", new { newPassword = "Employee-denied-123!" }, HttpStatusCode.Forbidden);
+        await Send(staff, HttpMethod.Post, employeePath + "/password", new { newPassword = "short" }, HttpStatusCode.BadRequest);
+        await Send(staff, HttpMethod.Post, $"/company/employees/{Guid.NewGuid()}/password", new { newPassword = "Employee-after-456!" }, HttpStatusCode.NotFound);
+        var pendingLogin = await Send(employeeClient, HttpMethod.Post, "/auth/login", new
+        {
+            login = "password-test-employee", password = "Employee-before-123!", deviceType = 2,
+        });
+        await Send(staff, HttpMethod.Post, employeePath + "/password", new { newPassword = "Employee-after-456!" });
+        await Send(employeeClient, HttpMethod.Get, "/catalog/configuration", expected: HttpStatusCode.Forbidden);
+        employeeClient.DefaultRequestHeaders.Authorization = null;
+        await Send(employeeClient, HttpMethod.Post, "/auth/totp/verify", new
+        {
+            challengeToken = Text(pendingLogin, "challengeToken"), code = Totp(Text(employeeTotp, "secret")),
+        }, HttpStatusCode.Unauthorized);
+        await Send(employeeClient, HttpMethod.Post, "/auth/login", new
+        {
+            login = "password-test-employee", password = "Employee-before-123!", deviceType = 2,
+        }, HttpStatusCode.Unauthorized);
+        var resetLogin = await Send(employeeClient, HttpMethod.Post, "/auth/login", new
+        {
+            login = "password-test-employee", password = "Employee-after-456!", deviceType = 2,
+        });
+        Assert.Equal(3, resetLogin["step"]!.GetValue<int>());
+        var resetAudit = (await Send(staff, HttpMethod.Get, "/company/audit")).AsArray()
+            .Single(value => Text(value!, "action") == "password_changed")!;
+        Assert.DoesNotContain("Employee-after-456!", resetAudit.ToJsonString());
+        Assert.DoesNotContain("password_hash", resetAudit.ToJsonString());
+        await Send(staff, HttpMethod.Delete, employeePath);
+
         var roundtrip = await Send(staff, HttpMethod.Put, "/company/configuration", new { draft, deleteCategoryData = Array.Empty<string>() });
         Assert.Single(roundtrip["rules"]!.AsArray());
         Assert.Single(roundtrip["moneyPipelines"]!.AsArray());
@@ -109,6 +169,9 @@ public sealed class DatabaseRegressionTests
         Assert.Equal(1, (await Send(staff, HttpMethod.Get, "/catalog/items"))["total"]!.GetValue<int>());
         await CheckBulkRelations(staff, configuration, productId, productRequest, unitId);
 
+        // Пространство «Компания» тоже рассылает сигналы с указанием раздела.
+        var companyTicket = Text(await Send(staff, HttpMethod.Post, "/company/realtime-ticket"), "ticket");
+        await using var companyEvents = await RealtimeListener.ConnectAsync(factory, companyTicket);
         var company = await Send(staff, HttpMethod.Post, "/company/legal-entities", new
         {
             name = "Исполнитель", companyType = "ООО", legalName = "ООО Исполнитель",
@@ -122,6 +185,9 @@ public sealed class DatabaseRegressionTests
             name = "Иванов Иван", companyName = "Иванов Иван", companyType = "person", phone = "+79997654321",
             passportSeries = "1234", passportNumber = "123456", passportIssuedBy = "Тестовый отдел",
         });
+        var legalEntityChange = await companyEvents.WaitAsync(message => (string?)message["section"] == "legal_entities");
+        Assert.Equal("company", (string?)legalEntityChange["topic"]);
+        await companyEvents.WaitAsync(message => (string?)message["section"] == "clients");
 
         var boards = await Send(staff, HttpMethod.Get, "/kanbans/");
         var boardId = Text(boards[0]!, "id");
@@ -130,6 +196,22 @@ public sealed class DatabaseRegressionTests
         var targetColumnId = Text(board["columns"]![1]!, "id");
         Assert.Equal(2, board["columns"]![0]!["creationActions"]!.AsArray().Count);
         Assert.NotEmpty(board["categories"]![0]!["fields"]!.AsArray());
+
+        // Уведомления в реальном времени: одноразовый билет, сигнал без данных.
+        var catalogTicket = Text(await Send(staff, HttpMethod.Post, "/catalog/realtime-ticket"), "ticket");
+        await using var catalogEvents = await RealtimeListener.ConnectAsync(factory, catalogTicket);
+        await RealtimeListener.ExpectRejectedAsync(factory, catalogTicket);
+        await Send(staff, HttpMethod.Put, $"/catalog/items/{productId}", productRequest);
+        var catalogChange = await catalogEvents.WaitAsync(message => (string?)message["kind"] == "changed");
+        Assert.Equal("catalog", (string?)catalogChange["topic"]);
+        Assert.Equal(productId, (string?)catalogChange["entityId"]);
+        var kanbanTicket = Text(await Send(staff, HttpMethod.Post, "/kanbans/realtime-ticket"), "ticket");
+        await using var kanbanEvents = await RealtimeListener.ConnectAsync(factory, kanbanTicket);
+        bool KanbanChange(JsonNode message, string cardId) =>
+            (string?)message["topic"] == "kanban" &&
+            (string?)message["kind"] == "changed" &&
+            (string?)message["boardId"] == boardId &&
+            (string?)message["entityId"] == cardId;
 
         foreach (var kind in new[] { "quote", "prequote" })
         {
@@ -146,6 +228,7 @@ public sealed class DatabaseRegressionTests
             await Send(staff, HttpMethod.Put, quotePath, proposal);
             var moved = await Send(staff, HttpMethod.Post, path + "/move", new { targetColumnId, targetIndex = 0 });
             Assert.Equal(targetColumnId, Text(moved, "columnId"));
+            await kanbanEvents.WaitAsync(message => KanbanChange(message, cardId));
             // Перенос записывается отдельно («Статус изменил») и не считается правкой.
             Assert.NotNull(moved["movedByName"]);
             Assert.True(moved["updatedAt"]!.GetValue<DateTimeOffset>() < moved["movedAt"]!.GetValue<DateTimeOffset>());
@@ -207,6 +290,8 @@ public sealed class DatabaseRegressionTests
             {
                 accessToken = Text(link, "accessToken"), password = Text(link, "password"),
             });
+            // Просмотр ссылки клиентом сразу виден сотрудникам.
+            await kanbanEvents.WaitAsync(message => KanbanChange(message, cardId));
             guest.DefaultRequestHeaders.Add("X-Quote-Client-Session", Text(clientLogin, "sessionToken"));
             var clientQuote = await Send(guest, HttpMethod.Get, "/client/quotes/current");
             Assert.Equal("ООО Исполнитель", Text(clientQuote, "executorName"));
@@ -225,6 +310,7 @@ public sealed class DatabaseRegressionTests
                 variants = typeMode ? [] : new[] { new { proposalTypeId = typeId, variantId } },
             });
             Assert.NotNull(selected["selectionSubmittedAt"]);
+            await kanbanEvents.WaitAsync(message => KanbanChange(message, cardId));
             var auditBeforeResubmission = (await Send(staff, HttpMethod.Get, "/company/audit")).AsArray().Count;
             await Send(guest, HttpMethod.Put, "/client/quotes/current/selection", new
             {

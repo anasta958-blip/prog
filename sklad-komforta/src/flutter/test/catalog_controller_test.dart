@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_editor.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
+import 'package:sklad_komforta_app/core/network/realtime_client.dart';
 import 'package:sklad_komforta_app/core/security/token_store.dart';
 import 'package:sklad_komforta_app/features/auth/auth_api.dart';
 import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
@@ -313,6 +314,37 @@ void main() {
     auth.dispose();
   });
 
+  test('изменения каталога другими пользователями подгружаются сами', () async {
+    final catalogApi = _MemoryCatalogGateway();
+    final auth = _authorizedController(config);
+    final realtime = _FakeRealtime();
+    final controller = CatalogController(
+      config,
+      auth,
+      api: catalogApi,
+      realtime: realtime,
+      realtimeDebounce: Duration.zero,
+    );
+    await controller.initialize();
+    expect(realtime.started, isTrue);
+    Future<void> settle() =>
+        Future<void>.delayed(const Duration(milliseconds: 20));
+
+    catalogApi.items.add(_item(id: 'colleague-item'));
+    realtime.emit(RealtimeEvent.changed);
+    await settle();
+    expect(controller.items, hasLength(2));
+    expect(catalogApi.configurationRequests, 1);
+
+    realtime.emit(RealtimeEvent.configuration);
+    await settle();
+    expect(catalogApi.configurationRequests, 2);
+
+    controller.dispose();
+    await realtime.close();
+    auth.dispose();
+  });
+
   test('поиск откладывается и отправляется с первой страницы', () async {
     final catalogApi = _MemoryCatalogGateway();
     final auth = _authorizedController(config);
@@ -547,6 +579,24 @@ CatalogItem _item({
   createdAt: DateTime.utc(2026, 8, 1),
   updatedAt: DateTime.utc(2026, 8, 2),
 );
+
+/// Источник сигналов, которым управляет тест.
+final class _FakeRealtime implements RealtimeSource {
+  final _controller = StreamController<RealtimeEvent>.broadcast();
+  bool started = false;
+
+  @override
+  Stream<RealtimeEvent> get events => _controller.stream;
+
+  @override
+  void start() => started = true;
+
+  @override
+  Future<void> close() => _controller.close();
+
+  void emit(String kind) =>
+      _controller.add(RealtimeEvent(topic: 'catalog', kind: kind));
+}
 
 final class _MemoryCatalogGateway
     implements

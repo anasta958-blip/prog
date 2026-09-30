@@ -1,6 +1,9 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using SkladKomforta.Api.Authorization;
+using SkladKomforta.Api.Realtime;
+using SkladKomforta.Application.Abstractions.Realtime;
+using SkladKomforta.Application.Abstractions.Tenancy;
 using SkladKomforta.Application.Company;
 using SkladKomforta.Application.Contracts;
 using SkladKomforta.Application.Identity;
@@ -14,6 +17,14 @@ internal static class CompanyEndpoints
     public static IEndpointRouteBuilder MapCompanyEndpoints(this IEndpointRouteBuilder endpoints)
     {
         var company = endpoints.MapGroup("/api/v1/company").RequireAuthorization();
+        // Одноразовый билет для подключения к потоку уведомлений об изменениях.
+        company.MapPost("/realtime-ticket", (
+                HttpContext context,
+                ITenantContext tenantContext,
+                IRealtimeTicketStore tickets,
+                CancellationToken token) =>
+                RealtimeEndpoints.IssueTicketAsync(context, RealtimeTopics.Company, tenantContext, tickets, token))
+            .RequireTenantPermission("company.view");
         company.MapGet("/profile", async (ICompanyService service, CancellationToken token) =>
                 Results.Ok(ApiResponse.Success(await service.GetAsync(token))))
             .RequireTenantPermission("company.view");
@@ -100,6 +111,12 @@ internal static class CompanyEndpoints
             .RequireTenantPermission("company.employees.manage");
         company.MapPut("/employees/{membershipId:guid}", async (HttpContext context, Guid membershipId, UpdateEmployeeRequest request, ICompanyWorkspaceService service, CancellationToken token) =>
                 Results.Ok(ApiResponse.Success(await service.UpdateEmployeeAsync(UserId(context.User), membershipId, request, token))))
+            .RequireTenantPermission("company.employees.manage");
+        company.MapPost("/employees/{membershipId:guid}/password", async (HttpContext context, Guid membershipId, ChangeEmployeePasswordRequest request, ICompanyWorkspaceService service, CancellationToken token) =>
+            {
+                await service.ChangeEmployeePasswordAsync(UserId(context.User), membershipId, request, token);
+                return Results.Ok(ApiResponse.Success(new { changed = true }));
+            })
             .RequireTenantPermission("company.employees.manage");
         company.MapDelete("/employees/{membershipId:guid}", async (HttpContext context, Guid membershipId, ICompanyWorkspaceService service, CancellationToken token) =>
             {

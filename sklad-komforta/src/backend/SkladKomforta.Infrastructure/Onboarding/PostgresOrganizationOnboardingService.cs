@@ -26,6 +26,12 @@ internal sealed class PostgresOrganizationOnboardingService(
         return await ReadStateAsync(connection, cancellationToken);
     }
 
+    public async Task<bool> GetCompletionAsync(CancellationToken cancellationToken)
+    {
+        await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
+        return await IsCompletedAsync(connection, cancellationToken);
+    }
+
     /// <inheritdoc />
     public async Task<OrganizationOnboardingState> SaveAsync(
         Guid userId,

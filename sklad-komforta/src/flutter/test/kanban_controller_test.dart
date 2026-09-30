@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' show PointerDeviceKind;
 import 'dart:convert';
 
@@ -10,6 +11,7 @@ import 'package:sklad_komforta_app/features/quotes/quote_client_access_api.dart'
 import 'package:sklad_komforta_app/features/quotes/quote_editor_page.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
+import 'package:sklad_komforta_app/core/network/realtime_client.dart';
 import 'package:sklad_komforta_app/core/security/token_store.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
 import 'package:sklad_komforta_app/features/auth/auth_api.dart';
@@ -570,6 +572,77 @@ void main() {
     auth.dispose();
   });
 
+  test(
+    'изменения других пользователей появляются без ручного обновления',
+    () async {
+      final auth = _authorizedController(config);
+      final gateway = _MemoryKanbanGateway();
+      final realtime = _FakeRealtime();
+      final controller = KanbanController(
+        config,
+        auth,
+        gateway: gateway,
+        realtime: realtime,
+        realtimeDebounce: Duration.zero,
+      );
+      await controller.initialize();
+      expect(realtime.started, isTrue);
+      Future<void> settle() =>
+          Future<void>.delayed(const Duration(milliseconds: 20));
+
+      // Другой пользователь создал карточку прямо на сервере.
+      await gateway.createCard(
+        'token',
+        'board-quotes',
+        KanbanCardDraft(
+          columnId: 'quote-first',
+          categoryId: 'equipment',
+          title: 'Карточка коллеги',
+        ),
+      );
+      var notifications = 0;
+      controller.addListener(() => notifications++);
+
+      // Сигнал другого канбана не перечитывает открытый.
+      realtime.emit(RealtimeEvent.changed, boardId: 'board-orders');
+      await settle();
+      expect(controller.pageFor('quote-first')!.items, isEmpty);
+      expect(notifications, 0);
+
+      realtime.emit(RealtimeEvent.changed, boardId: 'board-quotes');
+      await settle();
+      expect(
+        controller.pageFor('quote-first')!.items.single.title,
+        'Карточка коллеги',
+      );
+      expect(notifications, 1);
+
+      // После обрыва связи данные перечитываются, даже без канбана в сигнале.
+      await gateway.createCard(
+        'token',
+        'board-quotes',
+        KanbanCardDraft(
+          columnId: 'quote-second',
+          categoryId: 'equipment',
+          title: 'Пока не было связи',
+        ),
+      );
+      realtime.emit(RealtimeEvent.resync);
+      await settle();
+      expect(controller.pageFor('quote-second')!.items, hasLength(1));
+
+      // Изменение настроек перечитывает список и структуру канбанов.
+      final listRequests = gateway.listRequests;
+      realtime.emit(RealtimeEvent.configuration);
+      await settle();
+      expect(gateway.listRequests, listRequests + 1);
+
+      controller.dispose();
+      await realtime.close();
+      auth.dispose();
+    },
+  );
+
   test('перенос обновляет только исходный и целевой столбцы', () async {
     final auth = _authorizedController(config);
     final gateway = _MemoryKanbanGateway();
@@ -597,6 +670,31 @@ void main() {
     controller.dispose();
     auth.dispose();
   });
+}
+
+/// Источник сигналов, которым управляет тест.
+final class _FakeRealtime implements RealtimeSource {
+  final _controller = StreamController<RealtimeEvent>.broadcast();
+  bool started = false;
+
+  @override
+  Stream<RealtimeEvent> get events => _controller.stream;
+
+  @override
+  void start() => started = true;
+
+  @override
+  Future<void> close() => _controller.close();
+
+  void emit(String kind, {String? boardId, String? entityId}) =>
+      _controller.add(
+        RealtimeEvent(
+          topic: 'kanban',
+          kind: kind,
+          boardId: boardId,
+          entityId: entityId,
+        ),
+      );
 }
 
 final class _MemoryKanbanGateway implements KanbanGateway {

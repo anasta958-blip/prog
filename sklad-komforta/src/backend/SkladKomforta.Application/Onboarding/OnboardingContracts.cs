@@ -172,6 +172,9 @@ public sealed record OrganizationOnboardingState(
 /// <summary>Сохраняет черновик и атомарно активирует проверенную конфигурацию.</summary>
 public interface IOrganizationOnboardingService
 {
+    /// <summary>Проверяет завершение настройки без раскрытия её содержимого сотруднику.</summary>
+    Task<bool> GetCompletionAsync(CancellationToken cancellationToken);
+
     /// <summary>Возвращает последний черновик текущей организации.</summary>
     Task<OrganizationOnboardingState> GetAsync(Guid userId, CancellationToken cancellationToken);
 

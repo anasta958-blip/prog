@@ -23,6 +23,7 @@
 - Каждая организация — схема `tenant_<uuid без дефисов>`, имя создаётся только через `TenantSchemaName.Create`. В tenant-таблицах нет `organization_id`.
 - Значения из HTTP-запроса **никогда** не подставляются в SQL как идентификаторы; данные — только параметрами Npgsql.
 - Каждый новый endpoint обязан иметь `RequireAuthorization()` и `RequireTenantPermission(...)`; новое право добавляется миграцией и в `TenantPermissionMetadata`.
+  Исключения: клиентская ссылка КП (`/api/v1/client/quotes/*`, своя сессия) и WebSocket `/api/v1/realtime` (одноразовый билет из `POST .../realtime-ticket` с правом модуля; см. `docs/iteration-06/realtime-updates.md`).
 - Файлы в MinIO выдаются только через короткоживущие pre-signed URL после серверной проверки прав.
 
 ## Миграции

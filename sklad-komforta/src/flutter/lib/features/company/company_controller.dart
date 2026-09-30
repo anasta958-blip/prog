@@ -1,22 +1,41 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/core/network/api_exception.dart';
+import 'package:sklad_komforta_app/core/network/realtime_client.dart';
 import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
 import 'package:sklad_komforta_app/features/company/company_api.dart';
 import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
 
 /// Состояние рабочего пространства компании и безопасное обновление токена.
 final class CompanyController extends ChangeNotifier {
+  /// Без [api] контроллер работает с сервером и сам подписывается на
+  /// уведомления об изменениях пространства; в тестах источник передаётся
+  /// через [realtime].
   CompanyController(
     AppConfig config,
     this._auth, {
     CompanyGateway? api,
     CompanyWorkspaceGateway? workspaceApi,
     CompanyRegistryGateway? registryApi,
+    RealtimeSource? realtime,
+    this.realtimeDebounce = const Duration(milliseconds: 300),
   }) : _api = api ?? CompanyApi(config),
        _workspaceApi = workspaceApi,
        _registryApi = registryApi,
-       _ownsApi = api == null {
+       _ownsApi = api == null,
+       _realtime =
+           realtime ??
+           (api == null
+               ? RealtimeClient(
+                   config: config,
+                   topic: 'company',
+                   ticketPath: '/company/realtime-ticket',
+                   authorized: _auth.executeAuthorized,
+                 )
+               : null),
+       _ownsRealtime = realtime == null && api == null {
     if (_workspaceApi == null && _api is CompanyWorkspaceGateway) {
       _workspaceApi = _api as CompanyWorkspaceGateway;
     }
@@ -30,6 +49,15 @@ final class CompanyController extends ChangeNotifier {
   CompanyWorkspaceGateway? _workspaceApi;
   CompanyRegistryGateway? _registryApi;
   final bool _ownsApi;
+
+  /// Пауза, за которую серия сигналов сливается в одно перечитывание.
+  final Duration realtimeDebounce;
+  final RealtimeSource? _realtime;
+  final bool _ownsRealtime;
+  StreamSubscription<RealtimeEvent>? _realtimeSubscription;
+  Timer? _realtimeTimer;
+  bool _realtimeConfigurationChanged = false;
+  bool _disposed = false;
 
   /// Авторизационный контекст нужен общему редактору onboarding-настроек.
   AuthController get authController => _auth;
@@ -68,6 +96,7 @@ final class CompanyController extends ChangeNotifier {
   }
 
   Future<void> initialize() async {
+    _listenRealtime();
     if (loading) return;
     loading = true;
     error = null;
@@ -85,6 +114,45 @@ final class CompanyController extends ChangeNotifier {
     } finally {
       loading = false;
       notifyListeners();
+    }
+  }
+
+  /// Подписывается на изменения пространства, сделанные другими
+  /// пользователями или в другой вкладке.
+  void _listenRealtime() {
+    final source = _realtime;
+    if (source == null || _realtimeSubscription != null) return;
+    _realtimeSubscription = source.events.listen((event) {
+      if (event.section == 'configuration' ||
+          event.section == 'profile' ||
+          event.kind == RealtimeEvent.resync) {
+        _realtimeConfigurationChanged = true;
+      }
+      _realtimeTimer?.cancel();
+      _realtimeTimer = Timer(realtimeDebounce, _applyRealtimeChanges);
+    });
+    source.start();
+  }
+
+  /// Тихо перечитывает списки пространства (юрлица, клиенты, сотрудники, роли,
+  /// аудит), а при изменении настроек или профиля — и конфигурацию. Открытые
+  /// формы работают со своими копиями: экран настроек не затирает
+  /// несохранённые правки, а предупреждает о чужом изменении.
+  Future<void> _applyRealtimeChanges() async {
+    if (_disposed) return;
+    if (loading || saving) {
+      _realtimeTimer = Timer(realtimeDebounce, _applyRealtimeChanges);
+      return;
+    }
+    try {
+      if (_realtimeConfigurationChanged && configuration != null) {
+        _realtimeConfigurationChanged = false;
+        configuration = await _auth.executeAuthorized(_api.getConfiguration);
+        profile = configuration!.company;
+      }
+      if (!_disposed) await reloadWorkspace();
+    } on Object {
+      // Сеть недоступна: данные обновятся после переподключения (resync).
     }
   }
 
@@ -199,6 +267,17 @@ final class CompanyController extends ChangeNotifier {
     );
     employees = await _auth.executeAuthorized(_workspaceApi!.getEmployees);
   });
+
+  Future<bool> changeEmployeePassword(String membershipId, String password) =>
+      _mutate(() async {
+        await _auth.executeAuthorized(
+          (token) => _workspaceApi!.changeEmployeePassword(
+            token,
+            membershipId,
+            password,
+          ),
+        );
+      });
 
   Future<bool> saveRole(CompanyRoleModel value, {bool create = false}) =>
       _mutate(() async {
@@ -357,6 +436,10 @@ final class CompanyController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
+    _realtimeTimer?.cancel();
+    unawaited(_realtimeSubscription?.cancel());
+    if (_ownsRealtime) unawaited(_realtime?.close());
     if (_ownsApi) _api.close();
     super.dispose();
   }

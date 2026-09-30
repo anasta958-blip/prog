@@ -530,9 +530,15 @@ final class _RecoveryCodes extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           FilledButton(
-            onPressed: controller.continueAfterRecoveryCodes,
-            child: const Text('Я сохранил коды'),
+            onPressed: controller.busy
+                ? null
+                : controller.continueAfterRecoveryCodes,
+            child: Text(controller.busy ? 'Открываем…' : 'Я сохранил коды'),
           ),
+          if (controller.error != null) ...[
+            const SizedBox(height: 12),
+            _ErrorBanner(controller.error!),
+          ],
         ],
       ),
     ),

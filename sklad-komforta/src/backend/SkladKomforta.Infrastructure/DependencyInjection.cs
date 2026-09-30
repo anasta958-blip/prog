@@ -91,6 +91,8 @@ public static class DependencyInjection
         services.AddScoped<ITenantContext, TenantContext>();
         services.AddScoped<IDatabaseConnectionFactory, PostgresConnectionFactory>();
         services.AddSingleton<IApplicationCache, RedisApplicationCache>();
+        services.AddSingleton<SkladKomforta.Application.Abstractions.Realtime.IRealtimeNotifier, Realtime.RedisRealtimeNotifier>();
+        services.AddSingleton<SkladKomforta.Application.Abstractions.Realtime.IRealtimeTicketStore, Realtime.RedisRealtimeTicketStore>();
         services.AddSingleton<IObjectStorage, S3ObjectStorage>();
         services.AddHealthChecks()
             .AddCheck<PostgresHealthCheck>("postgres", tags: ["ready"])

@@ -82,6 +82,17 @@ internal sealed partial class PostgresIdentityService
             throw Failure(401, "challenge_invalid", "Срок действия входа истёк. Войдите повторно.");
         }
 
+        // A password reset also invalidates a login waiting for its second factor.
+        await using var connection = await _dataSource.OpenConnectionAsync();
+        await using var command = new NpgsqlCommand(
+            "SELECT password_hash FROM public.users WHERE id = @id AND is_active AND deleted_at IS NULL", connection);
+        command.Parameters.AddWithValue("id", challenge.UserId);
+        var hash = await command.ExecuteScalarAsync() as string;
+        if (hash is null || challenge.PasswordVersion != Convert.ToHexString(IdentitySecurity.HashToken(hash)))
+        {
+            await _redis.KeyDeleteAsync(key);
+            throw Failure(401, "challenge_invalid", "Данные входа изменились. Войдите повторно.");
+        }
         return (key, challenge);
     }
 

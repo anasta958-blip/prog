@@ -75,7 +75,8 @@ internal sealed partial class PostgresIdentityService : IIdentityService
             NormalizeOptional(request.DeviceName, 120),
             client.IpAddress,
             client.UserAgent,
-            null);
+            null,
+            Convert.ToHexString(IdentitySecurity.HashToken(user.PasswordHash)));
         var token = await StoreChallengeAsync(challenge);
         await WriteSecurityAuditAsync(user.Id, null, "password_verified", client, cancellationToken);
         return new AuthenticationResult(step, token, null, false);
@@ -106,7 +107,11 @@ internal sealed partial class PostgresIdentityService : IIdentityService
         }
 
         await _redis.KeyDeleteAsync(key);
-        var next = challenge with { Step = AuthenticationStep.SetupTotp };
+        var next = challenge with
+        {
+            Step = AuthenticationStep.SetupTotp,
+            PasswordVersion = Convert.ToHexString(IdentitySecurity.HashToken(hash)),
+        };
         var nextToken = await StoreChallengeAsync(next);
         return new AuthenticationResult(AuthenticationStep.SetupTotp, nextToken, null, false);
     }
@@ -281,5 +286,6 @@ internal sealed partial class PostgresIdentityService : IIdentityService
         string? DeviceName,
         string? IpAddress,
         string? UserAgent,
-        string? ProtectedTotpSecret);
+        string? ProtectedTotpSecret,
+        string? PasswordVersion = null);
 }

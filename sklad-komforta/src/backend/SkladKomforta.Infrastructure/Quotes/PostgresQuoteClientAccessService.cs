@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Options;
 using Npgsql;
 using StackExchange.Redis;
+using SkladKomforta.Application.Abstractions.Realtime;
 using SkladKomforta.Application.Abstractions.Tenancy;
 using SkladKomforta.Application.Identity;
 using SkladKomforta.Application.Quotes;
@@ -34,6 +35,7 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
     private readonly IDatabase _redis;
     private readonly ITenantContext _tenantContext;
     private readonly IQuoteService _quoteService;
+    private readonly IRealtimeNotifier _realtime;
     private readonly PasswordHasher<string> _passwordHasher = new();
     private readonly byte[] _secretKey;
 
@@ -42,8 +44,10 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
         IConnectionMultiplexer redis,
         ITenantContext tenantContext,
         IQuoteService quoteService,
+        IRealtimeNotifier realtime,
         IOptions<SecurityOptions> securityOptions)
     {
+        _realtime = realtime;
         _dataSource = dataSource;
         _redis = redis.GetDatabase();
         _tenantContext = tenantContext;
@@ -224,6 +228,8 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
             command.Parameters.AddWithValue("id", link.Id);
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
+        // Счётчик просмотров виден на карточке канбана.
+        await PublishQuoteChangedAsync(link.OrganizationId, link.SchemaName, link.QuoteId, cancellationToken);
 
         return new QuoteClientLoginResult(
             sessionToken,
@@ -340,7 +346,42 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
             ("quote_id", session.QuoteId),
             ("diff", selectionDiff));
         await transaction.CommitAsync(cancellationToken);
+        await PublishQuoteChangedAsync(session.OrganizationId, schema, session.QuoteId, cancellationToken);
         return await ReadClientViewAsync(schema, session.QuoteId, cancellationToken);
+    }
+
+    /// <summary>
+    /// Сообщает сотрудникам организации, что изменилась карточка предложения:
+    /// клиент открыл ссылку или отправил выбор. Действия клиента идут без JWT
+    /// сотрудника, поэтому общий middleware уведомлений их не видит.
+    /// </summary>
+    private async Task PublishQuoteChangedAsync(
+        Guid organizationId,
+        TenantSchemaName schema,
+        Guid quoteId,
+        CancellationToken cancellationToken)
+    {
+        Guid? boardId = null;
+        Guid? cardId = null;
+        await using (var connection = await OpenTenantConnectionAsync(schema, cancellationToken))
+        await using (var command = new NpgsqlCommand("""
+            SELECT card.workflow_id, card.id
+              FROM quotes AS quote
+              JOIN kanban_cards AS card ON card.id = quote.card_id
+             WHERE quote.id = @quote_id
+            """, connection))
+        {
+            command.Parameters.AddWithValue("quote_id", quoteId);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                boardId = reader.GetGuid(0);
+                cardId = reader.GetGuid(1);
+            }
+        }
+        await _realtime.PublishAsync(
+            new RealtimeChange(organizationId, RealtimeTopics.Kanban, RealtimeChange.Changed, boardId, cardId),
+            cancellationToken);
     }
 
     private async Task<ClientLink?> FindLinkByTokenAsync(string token, CancellationToken cancellationToken)

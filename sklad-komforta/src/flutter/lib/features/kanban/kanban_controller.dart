@@ -1,24 +1,53 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/core/network/api_exception.dart';
+import 'package:sklad_komforta_app/core/network/realtime_client.dart';
 import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_api.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_models.dart';
 
 /// Состояние выбора и загрузки рабочего канбана без бизнес-данных карточек.
 final class KanbanController extends ChangeNotifier {
+  /// Без [gateway] контроллер работает с сервером и сам подписывается на
+  /// уведомления об изменениях. В тестах источник уведомлений передаётся явно
+  /// через [realtime] или не используется вовсе.
   KanbanController(
     AppConfig config,
     this._auth, {
     KanbanGateway? gateway,
+    RealtimeSource? realtime,
     this.pageSize = 20,
+    this.realtimeDebounce = const Duration(milliseconds: 300),
   }) : _gateway = gateway ?? KanbanApi(config),
-       _ownsGateway = gateway == null;
+       _ownsGateway = gateway == null,
+       _realtime =
+           realtime ??
+           (gateway == null
+               ? RealtimeClient(
+                   config: config,
+                   topic: 'kanban',
+                   ticketPath: '/kanbans/realtime-ticket',
+                   authorized: _auth.executeAuthorized,
+                 )
+               : null),
+       _ownsRealtime = realtime == null && gateway == null;
 
   final AuthController _auth;
   final KanbanGateway _gateway;
   final bool _ownsGateway;
   final int pageSize;
+
+  /// Пауза, за которую серия сигналов (например, перенос нескольких карточек)
+  /// сливается в одно перечитывание.
+  final Duration realtimeDebounce;
+  final RealtimeSource? _realtime;
+  final bool _ownsRealtime;
+  StreamSubscription<RealtimeEvent>? _realtimeSubscription;
+  Timer? _realtimeTimer;
+  bool _realtimeConfigurationChanged = false;
+  bool _disposed = false;
 
   List<KanbanBoardSummary> boards = const [];
   List<KanbanCardAuthor> cardAuthors = const [];
@@ -148,8 +177,61 @@ final class KanbanController extends ChangeNotifier {
   }
 
   Future<void> initialize() async {
+    _listenRealtime();
     if (loading || boards.isNotEmpty) return;
     await reload();
+  }
+
+  /// Подписывается на изменения, сделанные другими пользователями, клиентом по
+  /// ссылке КП или в другой вкладке.
+  void _listenRealtime() {
+    final source = _realtime;
+    if (source == null || _realtimeSubscription != null) return;
+    _realtimeSubscription = source.events.listen(_onRealtimeEvent);
+    source.start();
+  }
+
+  void _onRealtimeEvent(RealtimeEvent event) {
+    final selectedBoard = board;
+    if (event.kind == RealtimeEvent.configuration) {
+      _realtimeConfigurationChanged = true;
+    } else if (event.kind == RealtimeEvent.changed &&
+        event.boardId != null &&
+        event.boardId != selectedBoard?.id) {
+      return;
+    }
+    _realtimeTimer?.cancel();
+    _realtimeTimer = Timer(realtimeDebounce, _applyRealtimeChanges);
+  }
+
+  /// Тихо перечитывает открытые страницы столбцов и архивов, сохраняя номера
+  /// страниц, фильтры и поиск. Пока идёт собственная загрузка или сохранение,
+  /// перечитывание откладывается: оно само обновит затронутые столбцы.
+  Future<void> _applyRealtimeChanges() async {
+    if (_disposed) return;
+    if (loading || saving) {
+      _realtimeTimer = Timer(realtimeDebounce, _applyRealtimeChanges);
+      return;
+    }
+    if (_realtimeConfigurationChanged) {
+      _realtimeConfigurationChanged = false;
+      await reload();
+      return;
+    }
+    final selectedBoard = board;
+    if (selectedBoard == null) return;
+    try {
+      await Future.wait([
+        for (final column in selectedBoard.columns)
+          _reloadColumnSilently(column.id),
+        for (final entry in _archivePages.entries.toList())
+          _readArchive(entry.key, page: entry.value.page),
+      ]);
+    } on Object {
+      // Сеть недоступна: данные обновятся после переподключения (resync).
+      return;
+    }
+    if (!_disposed && board?.id == selectedBoard.id) notifyListeners();
   }
 
   Future<void> reload() async {
@@ -496,6 +578,10 @@ final class KanbanController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
+    _realtimeTimer?.cancel();
+    unawaited(_realtimeSubscription?.cancel());
+    if (_ownsRealtime) unawaited(_realtime?.close());
     if (_ownsGateway) _gateway.close();
     super.dispose();
   }

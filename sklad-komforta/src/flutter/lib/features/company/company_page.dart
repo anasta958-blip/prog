@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'employee_password_dialog.dart';
 import 'package:sklad_komforta_app/core/widgets/collapse_toggle.dart';
 import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
 import 'package:flutter/services.dart';
@@ -97,6 +98,7 @@ final class _OrganizationSettingsSectionState
   Widget build(BuildContext context) => Column(
     children: [
       _SectionHeader(
+        compact: true,
         title: 'Настройки организации',
         subtitle:
             'Юридические лица и рабочая конфигурация текущей организации.',
@@ -561,49 +563,83 @@ final class _SectionHeader extends StatelessWidget {
     required this.title,
     required this.subtitle,
     this.trailing,
+    this.compact = true,
   });
   final String title;
   final String subtitle;
   final Widget? trailing;
+  final bool compact;
   @override
   Widget build(BuildContext context) => MobileCollapsibleNavigation(
     title: 'Управление разделом',
     summary: title,
-    child: Container(
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 18),
-      decoration: const BoxDecoration(
-        color: Color(0xFF101823),
-        border: Border(bottom: BorderSide(color: Color(0xFF253348))),
-      ),
-      child: Wrap(
-        alignment: WrapAlignment.spaceBetween,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        runSpacing: 12,
-        spacing: 20,
-        children: [
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 650),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 23,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  style: const TextStyle(color: Color(0xFF8FA4C2)),
-                ),
-              ],
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final singleLine =
+            compact &&
+            constraints.maxWidth >= 1100 &&
+            MediaQuery.textScalerOf(context).scale(14) <= 14;
+        final heading = Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              maxLines: singleLine ? 1 : null,
+              overflow: singleLine ? TextOverflow.ellipsis : null,
+              style: TextStyle(
+                fontSize: 23,
+                fontWeight: FontWeight.w800,
+                height: compact ? 1.2 : null,
+              ),
             ),
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              maxLines: singleLine ? 1 : null,
+              overflow: singleLine ? TextOverflow.ellipsis : null,
+              style: TextStyle(
+                color: const Color(0xFF8FA4C2),
+                fontSize: compact ? 13 : null,
+                height: compact ? 1.2 : null,
+              ),
+            ),
+          ],
+        );
+        return Container(
+          key: const Key('company-section-header'),
+          height: singleLine ? 71 : null,
+          alignment: compact ? Alignment.center : null,
+          padding: compact
+              ? const EdgeInsets.symmetric(horizontal: 24, vertical: 6)
+              : const EdgeInsets.fromLTRB(24, 20, 24, 18),
+          decoration: const BoxDecoration(
+            color: Color(0xFF101823),
+            border: Border(bottom: BorderSide(color: Color(0xFF253348))),
           ),
-          ?trailing,
-        ],
-      ),
+          child: singleLine
+              ? Row(
+                  children: [
+                    Expanded(child: heading),
+                    const SizedBox(width: 20),
+                    ?trailing,
+                  ],
+                )
+              : Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  runSpacing: 12,
+                  spacing: 20,
+                  children: [
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 650),
+                      child: heading,
+                    ),
+                    ?trailing,
+                  ],
+                ),
+        );
+      },
     ),
   );
 }
@@ -1800,6 +1836,23 @@ final class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
                 ),
                 const SizedBox(height: 12),
                 _formField('Telegram', telegram, (value) => telegram = value),
+                if (!widget.source.isDirector) ...[
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: submitting
+                        ? null
+                        : () => showDialog<void>(
+                            context: context,
+                            barrierDismissible: false,
+                            builder: (_) => EmployeePasswordDialog(
+                              employee: widget.source,
+                              controller: widget.controller,
+                            ),
+                          ),
+                    icon: const Icon(Icons.password_outlined),
+                    label: const Text('Сменить пароль'),
+                  ),
+                ],
                 const SizedBox(height: 6),
                 SwitchListTile.adaptive(
                   contentPadding: EdgeInsets.zero,

@@ -213,6 +213,16 @@ final class AuthController extends ChangeNotifier {
   /// Загружает серверный прогресс и открывает рабочее приложение после активации.
   Future<void> loadOnboarding() async {
     if (accessToken == null) return;
+    final status =
+        await _withValidAccessToken(
+              (token) => _api.get('/onboarding/status', token),
+            )
+            as Map<String, dynamic>;
+    if (status['isCompleted'] == true) {
+      await loadSessions();
+      stage = AuthStage.ready;
+      return;
+    }
     final data =
         await _withValidAccessToken((token) => _api.get('/onboarding/', token))
             as Map<String, dynamic>;

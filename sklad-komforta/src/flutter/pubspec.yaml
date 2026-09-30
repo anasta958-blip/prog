@@ -16,6 +16,7 @@ dependencies:
   http: ^1.6.0
   intl: any
   qr_flutter: ^4.1.0
+  web_socket_channel: ^3.0.3
 
 dev_dependencies:
   flutter_test:

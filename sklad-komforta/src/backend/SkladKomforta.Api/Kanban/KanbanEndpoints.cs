@@ -1,6 +1,9 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using SkladKomforta.Api.Authorization;
+using SkladKomforta.Api.Realtime;
+using SkladKomforta.Application.Abstractions.Realtime;
+using SkladKomforta.Application.Abstractions.Tenancy;
 using SkladKomforta.Application.Contracts;
 using SkladKomforta.Application.Kanban;
 
@@ -12,6 +15,14 @@ internal static class KanbanEndpoints
     public static IEndpointRouteBuilder MapKanbanEndpoints(this IEndpointRouteBuilder endpoints)
     {
         var kanbans = endpoints.MapGroup("/api/v1/kanbans").RequireAuthorization();
+        // Одноразовый билет для подключения к потоку уведомлений об изменениях.
+        kanbans.MapPost("/realtime-ticket", (
+                HttpContext context,
+                ITenantContext tenantContext,
+                IRealtimeTicketStore tickets,
+                CancellationToken token) =>
+                RealtimeEndpoints.IssueTicketAsync(context, RealtimeTopics.Kanban, tenantContext, tickets, token))
+            .RequireTenantPermission("kanban.view");
         kanbans.MapGet("/", async (IKanbanService service, CancellationToken token) =>
                 Results.Ok(ApiResponse.Success(await service.GetBoardsAsync(token))))
             .RequireTenantPermission("kanban.view");

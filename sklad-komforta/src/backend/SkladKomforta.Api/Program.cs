@@ -11,6 +11,7 @@ using SkladKomforta.Api.Company;
 using SkladKomforta.Api.Kanban;
 using SkladKomforta.Api.Onboarding;
 using SkladKomforta.Api.Quotes;
+using SkladKomforta.Api.Realtime;
 using SkladKomforta.Application.Contracts;
 using SkladKomforta.Application.Identity;
 using SkladKomforta.Infrastructure;
@@ -22,6 +23,7 @@ builder.Services.AddProblemDetails();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddIdentityInfrastructure(builder.Configuration);
 builder.Services.AddSingleton<IAccessTokenIssuer, JwtAccessTokenIssuer>();
+builder.Services.AddSingleton<RealtimeHub>();
 
 var trustForwardedHeaders = builder.Configuration.GetValue<bool>("ReverseProxy:TrustForwardedHeaders");
 if (trustForwardedHeaders)
@@ -105,9 +107,11 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
 }));
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseCors("FlutterClients");
+app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
 app.UseAuthentication();
 app.UseMiddleware<TenantResolutionMiddleware>();
 app.UseMiddleware<TenantPermissionMiddleware>();
+app.UseMiddleware<RealtimeChangeMiddleware>();
 app.UseAuthorization();
 
 app.MapGet("/api/v1", () => ApiResponse.Success<object>(new
@@ -122,6 +126,7 @@ app.MapCatalogEndpoints();
 app.MapKanbanEndpoints();
 app.MapQuoteEndpoints();
 app.MapCompanyEndpoints();
+app.MapRealtimeEndpoints();
 app.MapHealthChecks("/health/live", new HealthCheckOptions
 {
     Predicate = _ => false,

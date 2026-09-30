@@ -1,6 +1,9 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using SkladKomforta.Api.Authorization;
+using SkladKomforta.Api.Realtime;
+using SkladKomforta.Application.Abstractions.Realtime;
+using SkladKomforta.Application.Abstractions.Tenancy;
 using SkladKomforta.Application.Catalog;
 using SkladKomforta.Application.Contracts;
 using SkladKomforta.Application.Identity;
@@ -14,6 +17,14 @@ internal static class CatalogEndpoints
     public static IEndpointRouteBuilder MapCatalogEndpoints(this IEndpointRouteBuilder endpoints)
     {
         var catalog = endpoints.MapGroup("/api/v1/catalog").RequireAuthorization();
+        // Одноразовый билет для подключения к потоку уведомлений об изменениях.
+        catalog.MapPost("/realtime-ticket", (
+                HttpContext context,
+                ITenantContext tenantContext,
+                IRealtimeTicketStore tickets,
+                CancellationToken token) =>
+                RealtimeEndpoints.IssueTicketAsync(context, RealtimeTopics.Catalog, tenantContext, tickets, token))
+            .RequireTenantPermission("catalog.view");
         catalog.MapGet("/configuration", async (ICatalogService service, CancellationToken token) =>
                 Results.Ok(ApiResponse.Success(await service.GetConfigurationAsync(token))))
             .RequireTenantPermission("catalog.view");

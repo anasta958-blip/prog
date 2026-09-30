@@ -180,6 +180,9 @@ public sealed record CreateEmployeeRequest(
     string? Phone,
     string? Telegram);
 
+/// <summary>Новый пароль сотрудника; не включается в ответы и аудит.</summary>
+public sealed record ChangeEmployeePasswordRequest(string NewPassword);
+
 /// <summary>Изменяет профиль, роль, руководителя и доступность сотрудника.</summary>
 public sealed record UpdateEmployeeRequest(
     string DisplayName,
@@ -223,4 +226,5 @@ public interface ICompanyWorkspaceService
     Task<EmployeeSummary> CreateEmployeeAsync(Guid actorUserId, CreateEmployeeRequest request, CancellationToken cancellationToken);
     Task<EmployeeSummary> UpdateEmployeeAsync(Guid actorUserId, Guid membershipId, UpdateEmployeeRequest request, CancellationToken cancellationToken);
     Task DeleteEmployeeAsync(Guid actorUserId, Guid membershipId, CancellationToken cancellationToken);
+    Task ChangeEmployeePasswordAsync(Guid actorUserId, Guid membershipId, ChangeEmployeePasswordRequest request, CancellationToken cancellationToken);
 }

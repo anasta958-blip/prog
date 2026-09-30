@@ -58,6 +58,11 @@ abstract interface class CompanyWorkspaceGateway {
     UpdateEmployeeModel value,
   );
   Future<void> deleteEmployee(String accessToken, String membershipId);
+  Future<void> changeEmployeePassword(
+    String accessToken,
+    String membershipId,
+    String password,
+  );
   Future<CompanyRoleModel> saveRole(
     String accessToken,
     CompanyRoleModel value, {
@@ -284,6 +289,20 @@ final class CompanyApi
         )
         as Map<String, dynamic>,
   );
+
+  @override
+  Future<void> changeEmployeePassword(
+    String token,
+    String membershipId,
+    String password,
+  ) async {
+    await _workspace(
+      'POST',
+      '/company/employees/$membershipId/password',
+      token,
+      body: {'newPassword': password},
+    );
+  }
 
   @override
   Future<void> deleteEmployee(String token, String membershipId) async {

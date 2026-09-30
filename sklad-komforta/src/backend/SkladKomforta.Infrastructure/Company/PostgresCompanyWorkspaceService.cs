@@ -299,6 +299,43 @@ internal sealed class PostgresCompanyWorkspaceService(
     }
 
     /// <inheritdoc />
+    public async Task ChangeEmployeePasswordAsync(Guid actorUserId, Guid membershipId, ChangeEmployeePasswordRequest request, CancellationToken cancellationToken)
+    {
+        var validation = PasswordPolicy.Validate(request.NewPassword);
+        if (!validation.IsValid) throw new IdentityException(400, validation.ErrorCode!, validation.ErrorMessage!);
+        await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
+        var employee = (await ReadEmployeesAsync(connection, membershipId, cancellationToken)).SingleOrDefault()
+            ?? throw NotFound("employee_not_found", "Сотрудник не найден.");
+        if (employee.IsDirector)
+            throw new IdentityException(403, "director_protected", "Пароль директора нельзя менять через управление сотрудниками.");
+        if (employee.UserId == actorUserId)
+            throw new IdentityException(403, "self_password_reset", "Для смены своего пароля обратитесь к другому администратору.");
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using (var user = connection.CreateCommand())
+        {
+            user.Transaction = transaction;
+            user.CommandText = """
+                UPDATE public.users AS users SET password_hash = @hash, updated_at = now()
+                FROM public.organization_members AS member
+                WHERE member.id = @membership_id AND member.organization_id = @organization_id
+                  AND users.id = member.user_id AND member.deleted_at IS NULL AND users.deleted_at IS NULL
+                """;
+            Add(user, "hash", _passwordHasher.HashPassword(employee.UserId.ToString("N"), request.NewPassword));
+            Add(user, "membership_id", membershipId); Add(user, "organization_id", tenantContext.OrganizationId);
+            if (await user.ExecuteNonQueryAsync(cancellationToken) != 1) throw NotFound("employee_not_found", "Сотрудник не найден.");
+        }
+        await using (var sessions = connection.CreateCommand())
+        {
+            sessions.Transaction = transaction;
+            sessions.CommandText = "UPDATE public.refresh_sessions SET revoked_at = now() WHERE user_id = @user_id AND revoked_at IS NULL";
+            Add(sessions, "user_id", employee.UserId);
+            await sessions.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await WriteAuditAsync(connection, transaction, actorUserId, "employee", membershipId, "password_changed",
+            null, new { employee.DisplayName }, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
     public async Task DeleteEmployeeAsync(Guid actorUserId, Guid membershipId, CancellationToken cancellationToken)
     {
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);

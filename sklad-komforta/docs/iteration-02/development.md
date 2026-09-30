@@ -36,7 +36,7 @@ dotnet run --project src/backend/SkladKomforta.Api
 ```powershell
 cd src/flutter
 flutter run -d windows --dart-define=API_BASE_URL=http://localhost:8080/api/v1 --dart-define=PUBLIC_APP_BASE_URL=http://localhost:3000
-flutter run -d chrome --web-port=3000 --dart-define=API_BASE_URL=http://localhost:8080/api/v1 --dart-define=PUBLIC_APP_BASE_URL=http://localhost:3000
+flutter run -d edge --web-port=3000 --dart-define=API_BASE_URL=http://localhost:8080/api/v1 --dart-define=PUBLIC_APP_BASE_URL=http://localhost:3000
 flutter run -d macos --dart-define=API_BASE_URL=http://localhost:8080/api/v1 --dart-define=PUBLIC_APP_BASE_URL=http://localhost:3000
 flutter run -d 24095PCADG
 ```

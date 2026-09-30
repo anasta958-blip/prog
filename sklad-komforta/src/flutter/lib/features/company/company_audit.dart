@@ -434,6 +434,7 @@ class _CompanyAuditCardState extends State<CompanyAuditCard> {
       'moved' => 'Перемещение',
       'archived' => 'Перемещение в архив',
       'restored' => 'Возврат из архива',
+      'password_changed' => 'Смена пароля',
       'relations_replaced' => 'Изменение связей',
       'image_added' => 'Добавление изображения',
       'image_deleted' => 'Удаление изображения',

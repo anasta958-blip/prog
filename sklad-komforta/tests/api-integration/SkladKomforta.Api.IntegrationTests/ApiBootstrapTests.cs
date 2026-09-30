@@ -54,6 +54,25 @@ public sealed class ApiBootstrapTests : IClassFixture<ApiFactory>
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
+    [Theory]
+    [InlineData("/api/v1/kanbans/realtime-ticket")]
+    [InlineData("/api/v1/catalog/realtime-ticket")]
+    [InlineData("/api/v1/company/realtime-ticket")]
+    public async Task RealtimeTicketRequiresAccessToken(string path)
+    {
+        var response = await _client.PostAsync(path, content: null);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task RealtimeStreamAcceptsOnlyWebSocket()
+    {
+        var response = await _client.GetAsync("/api/v1/realtime?ticket=anything");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
     [Fact]
     public async Task RoleSettingsEndpointRequiresAccessToken()
     {

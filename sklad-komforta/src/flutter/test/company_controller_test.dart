@@ -1,13 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/core/network/api_exception.dart';
+import 'package:sklad_komforta_app/core/network/realtime_client.dart';
 import 'package:sklad_komforta_app/core/security/token_store.dart';
 import 'package:sklad_komforta_app/features/auth/auth_api.dart';
 import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
 import 'package:sklad_komforta_app/features/company/company_api.dart';
 import 'package:sklad_komforta_app/features/company/company_controller.dart';
 import 'package:sklad_komforta_app/features/company/company_page.dart';
+import 'package:sklad_komforta_app/features/company/employee_password_dialog.dart';
 import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
 
 void main() {
@@ -15,6 +19,69 @@ void main() {
     apiBaseUrl: 'https://api.example.test/api/v1',
     environment: 'test',
   );
+
+  testWidgets('смена пароля проверяет подтверждение и отправляет запрос', (
+    tester,
+  ) async {
+    final gateway = _PartialWorkspaceGateway();
+    final auth = AuthController(
+      config,
+      api: _NoopAuthGateway(),
+      tokens: _MemoryTokenRepository(),
+    )..accessToken = 'access-token';
+    final controller = CompanyController(
+      config,
+      auth,
+      api: _MemoryCompanyGateway(),
+      workspaceApi: gateway,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => showDialog<void>(
+                context: context,
+                builder: (_) => EmployeePasswordDialog(
+                  employee: _PartialWorkspaceGateway.subordinate,
+                  controller: controller,
+                ),
+              ),
+              child: const Text('Открыть'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Открыть'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byType(TextFormField).at(0),
+      'New-password-123!',
+    );
+    await tester.enterText(
+      find.byType(TextFormField).at(1),
+      'Different-password',
+    );
+    await tester.tap(find.text('Сменить пароль'));
+    await tester.pumpAndSettle();
+    expect(find.text('Пароли не совпадают.'), findsOneWidget);
+    expect(gateway.newPassword, isNull);
+    await tester.enterText(
+      find.byType(TextFormField).at(1),
+      'New-password-123!',
+    );
+    await tester.tap(find.text('Сменить пароль'));
+    await tester.pumpAndSettle();
+    expect(gateway.passwordMembershipId, 'employee-membership');
+    expect(gateway.newPassword, 'New-password-123!');
+    expect(find.byType(EmployeePasswordDialog), findsNothing);
+    expect(find.text('Пароль сотрудника изменён.'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pumpAndSettle();
+    controller.dispose();
+    auth.dispose();
+  });
 
   test(
     'профиль компании загружается и сохраняется через общий токен',
@@ -94,9 +161,21 @@ void main() {
       final controller = CompanyController(config, auth, api: gateway);
       await controller.initialize();
 
+      tester.view.physicalSize = const Size(1700, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
       await tester.pumpWidget(
         MaterialApp(home: CompanyPage(controller: controller)),
       );
+
+      expect(
+        tester.getSize(find.byKey(const Key('company-section-header'))).height,
+        71,
+      );
+      expect(tester.takeException(), isNull);
+      tester.view.physicalSize = const Size(800, 900);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
 
       expect(find.text('Настройки организации'), findsOneWidget);
       expect(find.text('Клиенты'), findsNothing);
@@ -114,6 +193,51 @@ void main() {
       auth.dispose();
     },
   );
+
+  for (final section in CompanySection.values) {
+    testWidgets('компактная шапка компании: ${section.name}', (tester) async {
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final auth = AuthController(
+        config,
+        api: _NoopAuthGateway(),
+        tokens: _MemoryTokenRepository(),
+      )..accessToken = 'access-token';
+      final controller = CompanyController(
+        config,
+        auth,
+        api: _MemoryCompanyGateway(),
+      );
+      await controller.initialize();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CompanyPage(controller: controller, section: section),
+          ),
+        ),
+      );
+      expect(
+        tester.getSize(find.byKey(const Key('company-section-header'))).height,
+        71,
+      );
+      expect(
+        find.text(
+          section == CompanySection.employees
+              ? 'Дерево иерархии сотрудников'
+              : section.label,
+        ),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+      tester.view.physicalSize = const Size(800, 900);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+      auth.dispose();
+    });
+  }
 
   testWidgets(
     'непустая категория удаляется только после явного подтверждения',
@@ -201,6 +325,52 @@ void main() {
       auth.dispose();
     },
   );
+
+  test('изменения пространства компании подгружаются сами', () async {
+    final gateway = _MemoryCompanyGateway();
+    final workspace = _PartialWorkspaceGateway();
+    final realtime = _FakeRealtime();
+    final auth = AuthController(
+      config,
+      api: _NoopAuthGateway(),
+      tokens: _MemoryTokenRepository(),
+    )..accessToken = 'access-token';
+    final controller = CompanyController(
+      config,
+      auth,
+      api: gateway,
+      workspaceApi: workspace,
+      realtime: realtime,
+      realtimeDebounce: Duration.zero,
+    );
+    await controller.initialize();
+    expect(realtime.started, isTrue);
+    Future<void> settle() =>
+        Future<void>.delayed(const Duration(milliseconds: 20));
+    final employeeRequests = workspace.employeeRequests;
+    final configurationRequests = gateway.configurationRequests;
+
+    // Другой пользователь добавил сотрудника: списки перечитываются, а
+    // конфигурация — нет.
+    realtime.emit('employees');
+    await settle();
+    expect(workspace.employeeRequests, employeeRequests + 1);
+    expect(gateway.configurationRequests, configurationRequests);
+
+    // Изменение настроек перечитывает и конфигурацию с профилем.
+    gateway.configurationValue = OrganizationOnboardingDraft.initial()
+      ..company.email = 'office@example.test';
+    final previous = controller.configuration;
+    realtime.emit('configuration');
+    await settle();
+    expect(gateway.configurationRequests, configurationRequests + 1);
+    expect(identical(controller.configuration, previous), isFalse);
+    expect(controller.profile?.email, 'office@example.test');
+
+    controller.dispose();
+    await realtime.close();
+    auth.dispose();
+  });
 
   test(
     'запрет одного раздела не блокирует остальные данные компании',
@@ -447,7 +617,27 @@ final class _MemoryRegistryGateway implements CompanyRegistryGateway {
   }
 }
 
+/// Источник сигналов, которым управляет тест.
+final class _FakeRealtime implements RealtimeSource {
+  final _controller = StreamController<RealtimeEvent>.broadcast();
+  bool started = false;
+
+  @override
+  Stream<RealtimeEvent> get events => _controller.stream;
+
+  @override
+  void start() => started = true;
+
+  @override
+  Future<void> close() => _controller.close();
+
+  void emit(String section) => _controller.add(
+    RealtimeEvent(topic: 'company', kind: 'changed', section: section),
+  );
+}
+
 final class _MemoryCompanyGateway implements CompanyGateway {
+  int configurationRequests = 0;
   CompanyProfileDraft? saved;
   OrganizationOnboardingDraft? savedConfiguration;
   List<String> deletedCategoryData = const [];
@@ -469,6 +659,7 @@ final class _MemoryCompanyGateway implements CompanyGateway {
   Future<OrganizationOnboardingDraft> getConfiguration(
     String accessToken,
   ) async {
+    configurationRequests++;
     final draft = configurationValue ?? OrganizationOnboardingDraft.initial();
     draft.company.organizationName = 'Склад Комфорта';
     draft.company.companyType = 'ООО';
@@ -512,6 +703,20 @@ final class _MemoryCompanyGateway implements CompanyGateway {
 }
 
 final class _PartialWorkspaceGateway implements CompanyWorkspaceGateway {
+  int employeeRequests = 0;
+  String? passwordMembershipId;
+  String? newPassword;
+
+  @override
+  Future<void> changeEmployeePassword(
+    String accessToken,
+    String membershipId,
+    String password,
+  ) async {
+    passwordMembershipId = membershipId;
+    newPassword = password;
+  }
+
   static final director = EmployeeModel(
     membershipId: 'director-membership',
     userId: 'director-user',
@@ -560,10 +765,10 @@ final class _PartialWorkspaceGateway implements CompanyWorkspaceGateway {
       throw const ApiException('forbidden', 'Нет прав.', 403);
 
   @override
-  Future<List<EmployeeModel>> getEmployees(String accessToken) async => [
-    director,
-    subordinate,
-  ];
+  Future<List<EmployeeModel>> getEmployees(String accessToken) async {
+    employeeRequests++;
+    return [director, subordinate];
+  }
 
   @override
   Future<List<CompanyRoleModel>> getRoles(String accessToken) async => const [

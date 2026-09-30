@@ -237,7 +237,7 @@ void main() {
 
     expect(find.text('Создание организации'), findsOneWidget);
     expect(find.text('1. Компания'), findsWidgets);
-    expect(find.text('Предварительный просмотр'), findsOneWidget);
+    expect(find.text('Предварительный просмотр'), findsNothing);
     expect(find.text('Сохранить и продолжить'), findsOneWidget);
     expect(find.text('5. Правила и расчёты'), findsWidgets);
     expect(find.text('6. Зависимости'), findsOneWidget);
@@ -714,12 +714,13 @@ void main() {
     await tester.ensureVisible(
       find.text('Использовать категорию в этом канбане'),
     );
-    await tester.tap(
-      find.ancestor(
-        of: find.text('Использовать категорию в этом канбане'),
-        matching: find.byType(CheckboxListTile),
-      ),
-    );
+    // Нажатие на строку категории ставит выбор, но не разворачивает её:
+    // невыбранная категория была свёрнута и такой остаётся.
+    const hint = 'Использовать категорию в этом канбане';
+    const fieldsTitle = 'Поля на карточке';
+    const expandLabel = 'Развернуть поля категории в канбане';
+    const collapseLabel = 'Свернуть поля категории в канбане';
+    await tester.tap(find.text(hint));
     await tester.pumpAndSettle();
 
     expect(workflow.categories.single.categoryClientId, 'equipment');
@@ -731,7 +732,33 @@ void main() {
       'base_price',
       customField.fieldCode,
     ]);
+    expect(find.text(fieldsTitle), findsNothing);
+
+    // Разворачивается только стрелкой.
+    await tester.tap(find.bySemanticsLabel(expandLabel));
+    await tester.pumpAndSettle();
+    expect(find.text(fieldsTitle), findsOneWidget);
     expect(find.text('Расчётное поле'), findsNothing);
+
+    // Снятие выбора не сворачивает блок: он остаётся раскрытым с подсказкой.
+    await tester.tap(find.text(hint));
+    await tester.pumpAndSettle();
+    expect(workflow.categories, isEmpty);
+    expect(find.bySemanticsLabel(collapseLabel), findsOneWidget);
+    expect(
+      find.textContaining('Категория не используется в этом канбане'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text(hint));
+    await tester.pumpAndSettle();
+    expect(workflow.categories, hasLength(1));
+    expect(find.text(fieldsTitle), findsOneWidget);
+
+    // Стрелка сворачивает поля без снятия выбора.
+    await tester.tap(find.bySemanticsLabel(collapseLabel));
+    await tester.pumpAndSettle();
+    expect(find.text(fieldsTitle), findsNothing);
+    expect(workflow.categories, hasLength(1));
 
     final categoryFieldsToggle = find.bySemanticsLabel(
       'Свернуть поля категории',

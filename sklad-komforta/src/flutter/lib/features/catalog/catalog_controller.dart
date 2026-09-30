@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
+import 'package:sklad_komforta_app/core/network/realtime_client.dart';
 import 'package:sklad_komforta_app/features/auth/auth_api.dart';
 import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_api.dart';
@@ -8,18 +9,43 @@ import 'package:sklad_komforta_app/features/catalog/catalog_models.dart';
 
 /// Состояние фильтров, пагинации и CRUD каталога без зависимости от UI.
 final class CatalogController extends ChangeNotifier {
+  /// Без [api] контроллер работает с сервером и сам подписывается на
+  /// уведомления об изменениях каталога; в тестах источник передаётся явно
+  /// через [realtime].
   CatalogController(
     AppConfig config,
     this._auth, {
     CatalogGateway? api,
+    RealtimeSource? realtime,
     this.pageSize = 12,
+    this.realtimeDebounce = const Duration(milliseconds: 300),
   }) : _api = api ?? CatalogApi(config),
-       _ownsApi = api == null;
+       _ownsApi = api == null,
+       _realtime =
+           realtime ??
+           (api == null
+               ? RealtimeClient(
+                   config: config,
+                   topic: 'catalog',
+                   ticketPath: '/catalog/realtime-ticket',
+                   authorized: _auth.executeAuthorized,
+                 )
+               : null),
+       _ownsRealtime = realtime == null && api == null;
 
   final AuthController _auth;
   final CatalogGateway _api;
   final bool _ownsApi;
   final int pageSize;
+
+  /// Пауза, за которую серия сигналов (импорт, массовая операция) сливается
+  /// в одно перечитывание страницы.
+  final Duration realtimeDebounce;
+  final RealtimeSource? _realtime;
+  final bool _ownsRealtime;
+  StreamSubscription<RealtimeEvent>? _realtimeSubscription;
+  Timer? _realtimeTimer;
+  bool _realtimeConfigurationChanged = false;
   Timer? _searchTimer;
   int _imageLoadGeneration = 0;
   int _relationLoadGeneration = 0;
@@ -129,6 +155,7 @@ final class CatalogController extends ChangeNotifier {
 
   /// Загружает структуру и первую страницу параллельно после входа.
   Future<void> initialize() async {
+    _listenRealtime();
     if (loading || configuration != null) return;
     loading = true;
     error = null;
@@ -233,6 +260,45 @@ final class CatalogController extends ChangeNotifier {
       loading = false;
       notifyListeners();
     }
+  }
+
+  /// Подписывается на изменения каталога, сделанные другими пользователями
+  /// или в другой вкладке.
+  void _listenRealtime() {
+    final source = _realtime;
+    if (source == null || _realtimeSubscription != null) return;
+    _realtimeSubscription = source.events.listen((event) {
+      if (event.kind == RealtimeEvent.configuration) {
+        _realtimeConfigurationChanged = true;
+      }
+      _realtimeTimer?.cancel();
+      _realtimeTimer = Timer(realtimeDebounce, _applyRealtimeChanges);
+    });
+    source.start();
+  }
+
+  /// Тихо перечитывает текущую страницу с теми же фильтрами. Открытый
+  /// редактор товара не трогается: он работает со своей копией данных.
+  Future<void> _applyRealtimeChanges() async {
+    if (_disposed) return;
+    if (loading || saving || transferBusy) {
+      _realtimeTimer = Timer(realtimeDebounce, _applyRealtimeChanges);
+      return;
+    }
+    try {
+      if (_realtimeConfigurationChanged) {
+        _realtimeConfigurationChanged = false;
+        configuration = await _authorized(
+          (token) => _api.getConfiguration(token),
+        );
+        _normalizeStructuralFilters();
+      }
+      await _loadPage();
+    } on Object {
+      // Сеть недоступна: страница обновится после переподключения (resync).
+      return;
+    }
+    if (!_disposed) notifyListeners();
   }
 
   void _normalizeStructuralFilters() {
@@ -739,6 +805,9 @@ final class CatalogController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _realtimeTimer?.cancel();
+    unawaited(_realtimeSubscription?.cancel());
+    if (_ownsRealtime) unawaited(_realtime?.close());
     ++_relationLoadGeneration;
     _searchTimer?.cancel();
     if (_ownsApi) _api.close();

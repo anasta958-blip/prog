@@ -14,6 +14,8 @@ internal static class OnboardingEndpoints
     {
         var group = endpoints.MapGroup("/api/v1/onboarding").RequireAuthorization();
         group.MapGet("/", GetAsync);
+        group.MapGet("/status", async (IOrganizationOnboardingService service, CancellationToken token) =>
+            Results.Ok(ApiResponse.Success(new { isCompleted = await service.GetCompletionAsync(token) })));
         group.MapPost("/draft", SaveAsync);
         group.MapPost("/activate", ActivateAsync);
         return endpoints;
