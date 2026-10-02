@@ -35,11 +35,14 @@ internal sealed class RealtimeChangeMiddleware(RequestDelegate next)
 
         if (path.StartsWithSegments("/api/v1/kanbans"))
         {
+            // Перемещение может перенести связанную карточку в другой канбан
+            // (КП ↔ комплектация), поэтому сигнал адресован всем канбанам.
+            var isMove = path.Value?.EndsWith("/move", StringComparison.Ordinal) == true;
             yield return new RealtimeChange(
                 organizationId,
                 RealtimeTopics.Kanban,
                 RealtimeChange.Changed,
-                RouteGuid(context, "boardId"),
+                isMove ? null : RouteGuid(context, "boardId"),
                 RouteGuid(context, "cardId"));
         }
         else if (path.StartsWithSegments("/api/v1/catalog"))

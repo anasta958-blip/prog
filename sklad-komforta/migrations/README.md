@@ -88,3 +88,13 @@ nullable: у ранее созданных ссылок копий нет. Фа�
 `public/0007_quote_client_access_views.sql` добавляет ссылке клиента счётчик
 входов `access_count`; ранее открывавшимся ссылкам ставится 1. Для существующей
 базы применяется вручную через `psql`.
+
+`tenant/0037_orders.sql` добавляет комплектацию: права `orders.invoices.manage`,
+`orders.manager.change`, `quotes.manager.change`; справочники канбана
+комплектации `workflow_order_options` (типы объекта, статусы отгрузки);
+столбец начала дозаказа `workflow_columns.reorder_from`; столбцы-триггеры
+переноса `workflow_column_transfers`; таблицы `orders`, `order_categories`,
+`order_sections`, `order_positions` (с `is_reorder`, `source_key`,
+`source_quantity`) и `order_invoices`. Дубликат раздела в категории запрещён
+уникальным индексом. Для существующей организации применяется вручную с
+записью версии в `public.tenant_migrations`.

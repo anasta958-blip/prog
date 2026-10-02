@@ -2,6 +2,8 @@ using System.Data.Common;
 using System.Text.Json;
 using Npgsql;
 using SkladKomforta.Application.Abstractions.Persistence;
+using SkladKomforta.Application.Abstractions.Tenancy;
+using SkladKomforta.Application.Authorization;
 using SkladKomforta.Application.Identity;
 using SkladKomforta.Application.Kanban;
 using SkladKomforta.Application.Onboarding;
@@ -16,9 +18,15 @@ namespace SkladKomforta.Infrastructure.Quotes;
 /// </summary>
 internal sealed class PostgresQuoteService(
     IDatabaseConnectionFactory connectionFactory,
-    IKanbanService kanbanService) : IQuoteService
+    IKanbanService kanbanService,
+    ITenantContext tenantContext,
+    ITenantPermissionEvaluator permissions) : IQuoteService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private const string ManagerChangePermission = "quotes.manager.change";
+
+    private Task<bool> CanChangeManagerAsync(Guid actorUserId, CancellationToken token) =>
+        permissions.HasPermissionAsync(actorUserId, tenantContext.OrganizationId, ManagerChangePermission, token);
 
     /// <inheritdoc />
     public async Task<QuoteDetails> GetAsync(
@@ -29,8 +37,9 @@ internal sealed class PostgresQuoteService(
     {
         await kanbanService.GetCardAsync(actorUserId, boardId, cardId, cancellationToken);
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
-        return await ReadQuoteAsync(connection, null, boardId, cardId, cancellationToken)
+        var quote = await ReadQuoteAsync(connection, null, boardId, cardId, cancellationToken)
             ?? throw new IdentityException(404, "quote_not_found", "КП или ПКП для этой карточки ещё не создано.");
+        return quote with { CanChangeManager = await CanChangeManagerAsync(actorUserId, cancellationToken) };
     }
 
     /// <inheritdoc />
@@ -41,6 +50,7 @@ internal sealed class PostgresQuoteService(
         CancellationToken cancellationToken)
     {
         QuoteRequestValidator.Validate(request.Quote);
+        var canChangeManager = await CanChangeManagerAsync(actorUserId, cancellationToken);
         try
         {
             await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
@@ -48,21 +58,30 @@ internal sealed class PostgresQuoteService(
             var cardId = await CreateSpecializedCardAsync(
                 connection, transaction, actorUserId, boardId, request.ColumnId,
                 request.Quote, cancellationToken);
-            await EnsureTenantReferencesAsync(connection, transaction, request.Quote, cancellationToken);
+            // Менеджер — создатель карточки, РОП — его руководитель по структуре.
+            var quoteRequest = request.Quote with
+            {
+                ManagerUserId = actorUserId,
+                SalesHeadUserId = await Orders.OrderStore.SupervisorOfAsync(
+                    connection, transaction, tenantContext.OrganizationId, actorUserId, cancellationToken),
+            };
+            await EnsureTenantReferencesAsync(
+                connection, transaction, quoteRequest with { ManagerUserId = null, SalesHeadUserId = null },
+                cancellationToken);
 
             var quoteId = await UpsertHeaderAsync(
                 connection, transaction, actorUserId, boardId, cardId,
-                Guid.NewGuid(), request.Quote, cancellationToken);
+                Guid.NewGuid(), quoteRequest, cancellationToken);
             await ReplaceProposalTreeAsync(
                 connection, transaction, actorUserId, quoteId,
-                request.Quote.ProposalTypes, null, null, cancellationToken);
+                quoteRequest.ProposalTypes, null, null, cancellationToken);
             var created = await ReadQuoteAsync(connection, transaction, boardId, cardId, cancellationToken)
                 ?? throw new InvalidOperationException("Созданное предложение не найдено в текущей транзакции.");
             await WriteAuditAsync(
                 connection, transaction, actorUserId, quoteId,
                 "created", null, created, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
-            return created;
+            return created with { CanChangeManager = canChangeManager };
         }
         catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.ForeignKeyViolation)
         {
@@ -88,6 +107,7 @@ internal sealed class PostgresQuoteService(
     {
         QuoteRequestValidator.Validate(request);
         await kanbanService.GetCardAsync(actorUserId, boardId, cardId, cancellationToken);
+        var canChangeManager = await CanChangeManagerAsync(actorUserId, cancellationToken);
 
         try
         {
@@ -95,9 +115,22 @@ internal sealed class PostgresQuoteService(
             await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
             await EnsureCompatibleCardAsync(
                 connection, transaction, boardId, cardId, request.QuoteKind, cancellationToken);
-            await EnsureTenantReferencesAsync(connection, transaction, request, cancellationToken);
-
             var before = await ReadQuoteAsync(connection, transaction, boardId, cardId, cancellationToken);
+            // Без права менеджер и РОП остаются прежними, что бы ни прислал клиент.
+            if (!canChangeManager)
+                request = before is not null
+                    ? request with { ManagerUserId = before.ManagerUserId, SalesHeadUserId = before.SalesHeadUserId }
+                    : request with
+                    {
+                        ManagerUserId = actorUserId,
+                        SalesHeadUserId = await Orders.OrderStore.SupervisorOfAsync(
+                            connection, transaction, tenantContext.OrganizationId, actorUserId, cancellationToken),
+                    };
+            await EnsureTenantReferencesAsync(
+                connection, transaction,
+                canChangeManager ? request : request with { ManagerUserId = null, SalesHeadUserId = null },
+                cancellationToken);
+
             var quoteId = await UpsertHeaderAsync(
                 connection, transaction, actorUserId, boardId, cardId,
                 before?.Id ?? Guid.NewGuid(), request, cancellationToken);
@@ -120,7 +153,7 @@ internal sealed class PostgresQuoteService(
                 connection, transaction, actorUserId, quoteId,
                 before is null ? "created" : "updated", before, after, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
-            return after;
+            return after with { CanChangeManager = canChangeManager };
         }
         catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.ForeignKeyViolation)
         {

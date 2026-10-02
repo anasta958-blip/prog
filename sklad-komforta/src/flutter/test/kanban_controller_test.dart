@@ -29,6 +29,73 @@ void main() {
     environment: 'test',
   );
 
+  testWidgets('карточка комплектации: сводка, дозаказ и связь с КП', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final auth = _authorizedController(config);
+    final gateway = _MemoryKanbanGateway()
+      ..specialization = WorkflowSpecialization.order;
+    gateway.cards['quote-first'] = [
+      KanbanCard.fromJson({
+        'id': 'order-card',
+        'number': 15,
+        'workflowId': 'board-quotes',
+        'columnId': 'quote-first',
+        'title': 'Лесная, 5',
+        'values': <String, dynamic>{},
+        'createdByName': 'Иван Бочаров',
+        'createdAt': '2026-10-01T09:00:00Z',
+        'updatedAt': '2026-10-01T10:00:00Z',
+        'order': {
+          'clientName': 'Петров Пётр',
+          'managerName': 'Иван Бочаров',
+          'objectType': 'Дом',
+          'positionCount': 4,
+          'reorderCount': 1,
+          'invoiceCount': 2,
+          'sourceQuoteNumber': 7,
+        },
+        'linkedCards': [
+          {
+            'boardId': 'board-sales',
+            'boardName': 'Предложения',
+            'specialization': 'quote',
+            'cardId': 'quote-card',
+            'cardNumber': 7,
+            'columnName': 'Завершено',
+          },
+        ],
+      }),
+    ];
+    final controller = KanbanController(config, auth, gateway: gateway);
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: KanbanPage(
+            controller: controller,
+            config: config,
+            authController: auth,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Комплектация №15 · из КП №7'), findsOneWidget);
+    expect(find.text('Позиций: 4'), findsOneWidget);
+    expect(find.text('Дозаказ: 1'), findsOneWidget);
+    expect(find.text('Счетов: 2'), findsOneWidget);
+    expect(find.text('В КП №7 · Завершено'), findsOneWidget);
+    expect(find.textContaining('Дом'), findsOneWidget);
+
+    controller.dispose();
+    auth.dispose();
+  });
+
   testWidgets('карточка КП показывает стороны, выбор, просмотры и историю', (
     tester,
   ) async {

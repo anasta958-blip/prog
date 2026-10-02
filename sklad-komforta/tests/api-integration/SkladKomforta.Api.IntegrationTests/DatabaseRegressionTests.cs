@@ -13,7 +13,7 @@ using SkladKomforta.Application.Onboarding;
 
 namespace SkladKomforta.Api.IntegrationTests;
 
-public sealed class DatabaseRegressionTests
+public sealed partial class DatabaseRegressionTests
 {
     [DatabaseFact]
     public async Task OrganizationCatalogKanbanAndClientQuoteWorkAgainstRealDatabase()
@@ -210,7 +210,7 @@ public sealed class DatabaseRegressionTests
         bool KanbanChange(JsonNode message, string cardId) =>
             (string?)message["topic"] == "kanban" &&
             (string?)message["kind"] == "changed" &&
-            (string?)message["boardId"] == boardId &&
+            ((string?)message["boardId"] == boardId || message["boardId"] is null) &&
             (string?)message["entityId"] == cardId;
 
         foreach (var kind in new[] { "quote", "prequote" })

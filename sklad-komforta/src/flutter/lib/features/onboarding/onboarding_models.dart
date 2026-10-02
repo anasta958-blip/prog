@@ -10,11 +10,21 @@ final class WorkflowColumnDraft {
     required this.name,
     required this.color,
     List<WorkflowCreationAction>? creationActions,
+    this.transferTo,
+    this.reorderFrom = false,
   }) : creationActions = creationActions ?? <WorkflowCreationAction>[];
   String clientId;
   String name;
   String color;
   List<WorkflowCreationAction> creationActions;
+
+  /// Столбец-триггер: попавшая в него карточка переносится в указанный
+  /// столбец другого канбана (КП → комплектация или обратно).
+  WorkflowTransferDraft? transferTo;
+
+  /// Канбан комплектации: позиции, добавленные в этом столбце и правее,
+  /// считаются дозаказом.
+  bool reorderFrom;
 
   factory WorkflowColumnDraft.fromJson(Map<String, dynamic> json) =>
       WorkflowColumnDraft(
@@ -26,12 +36,70 @@ final class WorkflowColumnDraft {
                 .map((item) => WorkflowCreationAction.tryFromApi('$item'))
                 .whereType<WorkflowCreationAction>()
                 .toList(),
+        transferTo: json['transferTo'] == null
+            ? null
+            : WorkflowTransferDraft.fromJson(
+                json['transferTo'] as Map<String, dynamic>,
+              ),
+        reorderFrom: json['reorderFrom'] as bool? ?? false,
       );
   Map<String, dynamic> toJson() => {
     'clientId': clientId,
     'name': name,
     'color': color,
     'creationActions': creationActions.map((item) => item.apiValue).toList(),
+    'transferTo': transferTo?.toJson(),
+    'reorderFrom': reorderFrom,
+  };
+}
+
+/// Цель переноса из столбца-триггера: код канбана и клиентский id столбца.
+final class WorkflowTransferDraft {
+  WorkflowTransferDraft({
+    required this.workflowCode,
+    required this.columnClientId,
+  });
+  String workflowCode;
+  String columnClientId;
+
+  factory WorkflowTransferDraft.fromJson(Map<String, dynamic> json) =>
+      WorkflowTransferDraft(
+        workflowCode: json['workflowCode'] as String,
+        columnClientId: json['columnClientId'] as String,
+      );
+  Map<String, dynamic> toJson() => {
+    'workflowCode': workflowCode,
+    'columnClientId': columnClientId,
+  };
+}
+
+/// Справочники канбана комплектации.
+final class WorkflowOrderSettingsDraft {
+  WorkflowOrderSettingsDraft({
+    List<String>? objectTypes,
+    List<String>? shipmentStatuses,
+  }) : objectTypes = objectTypes ?? <String>[],
+       shipmentStatuses = shipmentStatuses ?? <String>[];
+
+  /// Типы объекта (квартира, дом и т. п.).
+  List<String> objectTypes;
+
+  /// Значения поля позиций «Статус отгрузки».
+  List<String> shipmentStatuses;
+
+  factory WorkflowOrderSettingsDraft.fromJson(Map<String, dynamic> json) =>
+      WorkflowOrderSettingsDraft(
+        objectTypes: ((json['objectTypes'] as List<dynamic>?) ?? const [])
+            .map((item) => '$item')
+            .toList(),
+        shipmentStatuses:
+            ((json['shipmentStatuses'] as List<dynamic>?) ?? const [])
+                .map((item) => '$item')
+                .toList(),
+      );
+  Map<String, dynamic> toJson() => {
+    'objectTypes': objectTypes,
+    'shipmentStatuses': shipmentStatuses,
   };
 }
 
@@ -63,13 +131,18 @@ final class WorkflowDraft {
     required this.transitions,
     List<WorkflowCategoryDraft>? categories,
     this.specialization = WorkflowSpecialization.standard,
-  }) : categories = categories ?? <WorkflowCategoryDraft>[];
+    WorkflowOrderSettingsDraft? orderSettings,
+  }) : categories = categories ?? <WorkflowCategoryDraft>[],
+       orderSettings = orderSettings ?? WorkflowOrderSettingsDraft();
   String code;
   String name;
   List<WorkflowColumnDraft> columns;
   List<WorkflowTransitionDraft> transitions;
   List<WorkflowCategoryDraft> categories;
   WorkflowSpecialization specialization;
+
+  /// Справочники; используются только канбаном комплектации.
+  WorkflowOrderSettingsDraft orderSettings;
   factory WorkflowDraft.fromJson(Map<String, dynamic> json) => WorkflowDraft(
     code: json['code'] as String,
     name: json['name'] as String,
@@ -93,6 +166,11 @@ final class WorkflowDraft {
     specialization: WorkflowSpecialization.fromApi(
       json['specialization'] as String?,
     ),
+    orderSettings: json['orderSettings'] == null
+        ? null
+        : WorkflowOrderSettingsDraft.fromJson(
+            json['orderSettings'] as Map<String, dynamic>,
+          ),
   );
   Map<String, dynamic> toJson() => {
     'code': code,
@@ -101,6 +179,10 @@ final class WorkflowDraft {
     'transitions': transitions.map((item) => item.toJson()).toList(),
     'categories': categories.map((item) => item.toJson()).toList(),
     'specialization': specialization.apiValue,
+    // Справочники сервер принимает только у канбана комплектации.
+    'orderSettings': specialization == WorkflowSpecialization.order
+        ? orderSettings.toJson()
+        : null,
   };
 }
 

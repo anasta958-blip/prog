@@ -139,12 +139,6 @@ const onboardingFieldDefinitions = <OnboardingFieldDefinition>[
     group: 'Цены и расчёты',
   ),
   OnboardingFieldDefinition(
-    code: 'price_type',
-    label: 'Тип цены',
-    fieldType: 'enum',
-    group: 'Цены и расчёты',
-  ),
-  OnboardingFieldDefinition(
     code: 'markup_value',
     label: 'Наценка',
     fieldType: 'percent',
@@ -189,15 +183,9 @@ const onboardingFieldDefinitions = <OnboardingFieldDefinition>[
     group: 'Служебные',
   ),
   OnboardingFieldDefinition(
-    code: 'invoice_check',
-    label: 'Проверка счёта',
-    fieldType: 'enum',
-    group: 'Комплектация',
-  ),
-  OnboardingFieldDefinition(
     code: 'shipment_status',
     label: 'Статус отгрузки',
-    fieldType: 'enum',
+    fieldType: 'dictionary',
     group: 'Комплектация',
   ),
 ];

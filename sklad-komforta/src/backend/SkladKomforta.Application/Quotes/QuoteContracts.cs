@@ -86,6 +86,9 @@ public sealed record QuoteProposalTypeDetails(
 /// Полная специализированная часть КП/ПКП. Статус и колонка остаются в
 /// универсальной карточке канбана и намеренно не дублируются здесь.
 /// </summary>
+/// <param name="ManagerUserId">Менеджер — создатель карточки; меняется только с правом <c>quotes.manager.change</c>.</param>
+/// <param name="SalesHeadUserId">РОП — руководитель менеджера по структуре сотрудников.</param>
+/// <param name="CanChangeManager">У текущего пользователя есть право менять менеджера и РОП.</param>
 public sealed record QuoteDetails(
     Guid Id,
     Guid WorkflowId,
@@ -102,7 +105,8 @@ public sealed record QuoteDetails(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     Guid? ClientSelectedProposalTypeId = null,
-    DateTimeOffset? ClientSelectionSubmittedAt = null);
+    DateTimeOffset? ClientSelectionSubmittedAt = null,
+    bool CanChangeManager = false);
 
 /// <summary>Данные одной позиции при атомарном сохранении предложения.</summary>
 public sealed record SaveQuotePositionRequest(
@@ -157,6 +161,9 @@ public sealed record SaveQuoteProposalTypeRequest(
 /// <summary>
 /// Полная команда создания или замены КП/ПКП, связанного с карточкой канбана.
 /// Сервер не принимает готовые суммы строк и всегда пересчитывает их сам.
+/// Менеджер и РОП при создании назначаются сервером (создатель и его
+/// руководитель), а при сохранении применяются только с правом
+/// <c>quotes.manager.change</c>.
 /// </summary>
 public sealed record SaveQuoteRequest(
     string QuoteKind,

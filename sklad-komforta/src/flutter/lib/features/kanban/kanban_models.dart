@@ -59,6 +59,8 @@ final class KanbanColumn {
     required this.color,
     required this.sortOrder,
     this.creationActions = const [],
+    this.transferTo,
+    this.reorderFrom = false,
   });
 
   final String id;
@@ -66,6 +68,13 @@ final class KanbanColumn {
   final String color;
   final int sortOrder;
   final List<WorkflowCreationAction> creationActions;
+
+  /// Столбец-триггер: попавшая сюда карточка переносится в другой канбан
+  /// (КП → комплектация или обратно).
+  final KanbanColumnTransfer? transferTo;
+
+  /// Канбан комплектации: с этого столбца (и правее) новые позиции — дозаказ.
+  final bool reorderFrom;
 
   factory KanbanColumn.fromJson(Map<String, dynamic> json) => KanbanColumn(
     id: json['id'] as String,
@@ -76,7 +85,36 @@ final class KanbanColumn {
         .map((item) => WorkflowCreationAction.tryFromApi('$item'))
         .whereType<WorkflowCreationAction>()
         .toList(growable: false),
+    transferTo: json['transferTo'] == null
+        ? null
+        : KanbanColumnTransfer.fromJson(
+            json['transferTo'] as Map<String, dynamic>,
+          ),
+    reorderFrom: json['reorderFrom'] as bool? ?? false,
   );
+}
+
+/// Цель переноса из столбца-триггера.
+final class KanbanColumnTransfer {
+  const KanbanColumnTransfer({
+    required this.boardId,
+    required this.boardName,
+    required this.columnId,
+    required this.columnName,
+  });
+
+  final String boardId;
+  final String boardName;
+  final String columnId;
+  final String columnName;
+
+  factory KanbanColumnTransfer.fromJson(Map<String, dynamic> json) =>
+      KanbanColumnTransfer(
+        boardId: json['boardId'] as String,
+        boardName: json['boardName'] as String,
+        columnId: json['columnId'] as String,
+        columnName: json['columnName'] as String,
+      );
 }
 
 /// Разрешённый переход, который будет использован модулем карточек.
@@ -225,6 +263,8 @@ final class KanbanCard {
     this.updatedByRole,
     this.movedByRole,
     this.quote,
+    this.order,
+    this.linkedCards = const [],
   });
 
   final String id;
@@ -256,6 +296,13 @@ final class KanbanCard {
   /// Сводка предложения; есть только у карточек КП/ПКП.
   final KanbanQuoteSummary? quote;
 
+  /// Сводка комплектации; есть только у карточек канбана комплектации.
+  final KanbanOrderSummary? order;
+
+  /// Карточки того же объекта в других канбанах (КП ↔ комплектация). Сервер
+  /// заполняет их, только пока карточка стоит в столбце-триггере переноса.
+  final List<KanbanLinkedCard> linkedCards;
+
   factory KanbanCard.fromJson(Map<String, dynamic> json) => KanbanCard(
     id: json['id'] as String,
     number: json['number'] as int,
@@ -285,7 +332,83 @@ final class KanbanCard {
     quote: json['quote'] == null
         ? null
         : KanbanQuoteSummary.fromJson(json['quote'] as Map<String, dynamic>),
+    order: json['order'] == null
+        ? null
+        : KanbanOrderSummary.fromJson(json['order'] as Map<String, dynamic>),
+    linkedCards: ((json['linkedCards'] as List<dynamic>?) ?? const [])
+        .map((item) => KanbanLinkedCard.fromJson(item as Map<String, dynamic>))
+        .toList(growable: false),
   );
+}
+
+/// Сводка комплектации на карточке канбана.
+final class KanbanOrderSummary {
+  const KanbanOrderSummary({
+    this.clientName,
+    this.executorName,
+    this.managerName,
+    this.objectType,
+    required this.positionCount,
+    required this.reorderCount,
+    required this.invoiceCount,
+    this.sourceQuoteNumber,
+  });
+
+  final String? clientName;
+  final String? executorName;
+  final String? managerName;
+  final String? objectType;
+  final int positionCount;
+
+  /// Из позиций — дозаказ.
+  final int reorderCount;
+  final int invoiceCount;
+
+  /// Номер карточки исходного КП, если комплектация создана переносом.
+  final int? sourceQuoteNumber;
+
+  factory KanbanOrderSummary.fromJson(Map<String, dynamic> json) =>
+      KanbanOrderSummary(
+        clientName: json['clientName'] as String?,
+        executorName: json['executorName'] as String?,
+        managerName: json['managerName'] as String?,
+        objectType: json['objectType'] as String?,
+        positionCount: json['positionCount'] as int? ?? 0,
+        reorderCount: json['reorderCount'] as int? ?? 0,
+        invoiceCount: json['invoiceCount'] as int? ?? 0,
+        sourceQuoteNumber: json['sourceQuoteNumber'] as int?,
+      );
+}
+
+/// Карточка того же рабочего объекта в другом канбане.
+final class KanbanLinkedCard {
+  const KanbanLinkedCard({
+    required this.boardId,
+    required this.boardName,
+    required this.specialization,
+    required this.cardId,
+    required this.cardNumber,
+    required this.columnName,
+  });
+
+  final String boardId;
+  final String boardName;
+  final WorkflowSpecialization specialization;
+  final String cardId;
+  final int cardNumber;
+  final String columnName;
+
+  factory KanbanLinkedCard.fromJson(Map<String, dynamic> json) =>
+      KanbanLinkedCard(
+        boardId: json['boardId'] as String,
+        boardName: json['boardName'] as String,
+        specialization: WorkflowSpecialization.fromApi(
+          json['specialization'] as String?,
+        ),
+        cardId: json['cardId'] as String,
+        cardNumber: json['cardNumber'] as int,
+        columnName: json['columnName'] as String,
+      );
 }
 
 /// Сводка КП/ПКП на карточке канбана.
@@ -445,6 +568,7 @@ final class KanbanBoard {
     required this.columns,
     required this.transitions,
     required this.categories,
+    this.objectTypes = const [],
   });
 
   final String id;
@@ -454,6 +578,9 @@ final class KanbanBoard {
   final List<KanbanColumn> columns;
   final List<KanbanTransition> transitions;
   final List<KanbanCategory> categories;
+
+  /// Канбан комплектации: справочник «Тип объекта».
+  final List<String> objectTypes;
 
   factory KanbanBoard.fromJson(Map<String, dynamic> json) => KanbanBoard(
     id: json['id'] as String,
@@ -470,6 +597,9 @@ final class KanbanBoard {
         .toList(growable: false),
     categories: (json['categories'] as List<dynamic>)
         .map((item) => KanbanCategory.fromJson(item as Map<String, dynamic>))
+        .toList(growable: false),
+    objectTypes: ((json['objectTypes'] as List<dynamic>?) ?? const [])
+        .map((item) => '$item')
         .toList(growable: false),
   );
 }

@@ -528,11 +528,14 @@ internal sealed class PostgresCompanyService(
         var existing = await ReadKeyedIdsAsync(connection, transaction,
             "SELECT code, id FROM workflows", token);
         var retained = new HashSet<Guid>();
+        var workflowIds = new Dictionary<string, Guid>(StringComparer.Ordinal);
+        var allColumnIds = new Dictionary<string, Dictionary<string, Guid>>(StringComparer.Ordinal);
         for (var index = 0; index < workflows.Count; index++)
         {
             var workflow = workflows[index];
             var id = existing.GetValueOrDefault(workflow.Code, Guid.NewGuid());
             retained.Add(id);
+            workflowIds[workflow.Code.Trim()] = id;
             await ExecuteAsync(connection, transaction, """
                 INSERT INTO workflows (id, code, name, sort_order, specialization)
                 VALUES (@id, @code, @name, @sort, @specialization)
@@ -555,6 +558,7 @@ internal sealed class PostgresCompanyService(
             var oldColumns = oldWorkflow?.Columns ?? [];
             var matched = MatchByPreviousOrder(oldColumns.Select(item => item.ClientId), rows);
             var columnIds = new Dictionary<string, Guid>(StringComparer.Ordinal);
+            allColumnIds[workflow.Code.Trim()] = columnIds;
             var retainedColumns = new HashSet<Guid>();
             for (var columnIndex = 0; columnIndex < workflow.Columns.Count; columnIndex++)
             {
@@ -636,6 +640,8 @@ internal sealed class PostgresCompanyService(
                 """, token, ("workflow_id", id), ("retained", retainedCategoryJson));
         }
         await DeleteMissingAsync(connection, transaction, "workflows", retained, token);
+        await Orders.WorkflowOrderConfiguration.SaveAsync(
+            connection, transaction, workflows, workflowIds, allColumnIds, token);
     }
 
     private static async Task SyncDependenciesAsync(

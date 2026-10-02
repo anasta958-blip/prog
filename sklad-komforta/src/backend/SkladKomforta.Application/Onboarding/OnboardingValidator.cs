@@ -85,6 +85,7 @@ public static class OnboardingValidator
             }
         }
 
+        ValidateTransfers(draft.Workflows);
         ValidateWorkflowCategories(draft.Workflows, draft.Categories);
         ValidateDependencies(draft.Categories, draft.Dependencies ?? []);
         ValidateRules(
@@ -211,6 +212,61 @@ public static class OnboardingValidator
     /// Проверяет привязку категорий к канбанам. Обычное поле должно быть настроено
     /// в карточке категории; расчётное поле доступно независимо от этого списка.
     /// </summary>
+    /// <summary>
+    /// Проверяет перенос между КП и комплектацией, столбец дозаказа и справочники
+    /// канбана комплектации. Перенос возможен только КП/ПКП → комплектация и
+    /// комплектация → КП/ПКП, в существующий столбец другого канбана.
+    /// </summary>
+    private static void ValidateTransfers(IReadOnlyList<WorkflowDraft> workflows)
+    {
+        var byCode = workflows.ToDictionary(item => item.Code.Trim(), StringComparer.Ordinal);
+        foreach (var workflow in workflows)
+        {
+            var isOrder = workflow.Specialization == WorkflowSpecializationCodes.Order;
+            var isQuote = workflow.Specialization is WorkflowSpecializationCodes.Quote
+                or WorkflowSpecializationCodes.QuoteAndPrequote;
+            if (workflow.Columns.Count(column => column.ReorderFrom) > 1)
+                Fail("onboarding_reorder_column_invalid",
+                    $"В канбане «{workflow.Name}» дозаказ может начинаться только с одного столбца.");
+            if (!isOrder && workflow.Columns.Any(column => column.ReorderFrom))
+                Fail("onboarding_reorder_column_invalid",
+                    $"Столбец дозаказа задаётся только в канбане комплектации («{workflow.Name}»).");
+
+            var settings = workflow.OrderSettings;
+            var hasSettings = (settings?.ObjectTypes?.Count ?? 0) + (settings?.ShipmentStatuses?.Count ?? 0) > 0;
+            if (hasSettings && !isOrder)
+                Fail("onboarding_order_settings_invalid",
+                    $"Справочники комплектации задаются только в канбане комплектации («{workflow.Name}»).");
+            foreach (var values in new[] { settings?.ObjectTypes ?? [], settings?.ShipmentStatuses ?? [] })
+            {
+                ValidateUnique(values, $"Значения справочника канбана «{workflow.Name}»");
+                foreach (var value in values) RequireText(value, 1, 160, "Значение справочника");
+            }
+
+            foreach (var column in workflow.Columns.Where(column => column.TransferTo is not null))
+            {
+                var transfer = column.TransferTo!;
+                if (!isOrder && !isQuote)
+                    Fail("onboarding_transfer_invalid",
+                        $"Перенос настраивается только в канбанах КП и комплектации («{workflow.Name}»).");
+                if (!byCode.TryGetValue(transfer.WorkflowCode.Trim(), out var target) ||
+                    ReferenceEquals(target, workflow))
+                    Fail("onboarding_transfer_invalid",
+                        $"Столбец «{column.Name}» переносит карточки в неизвестный канбан.");
+                var targetIsOrder = target.Specialization == WorkflowSpecializationCodes.Order;
+                var targetIsQuote = target.Specialization is WorkflowSpecializationCodes.Quote
+                    or WorkflowSpecializationCodes.QuoteAndPrequote;
+                if ((isQuote && !targetIsOrder) || (isOrder && !targetIsQuote))
+                    Fail("onboarding_transfer_invalid",
+                        $"Из столбца «{column.Name}» можно переносить только " +
+                        (isQuote ? "в канбан комплектации." : "в канбан КП."));
+                if (target.Columns.All(item => item.ClientId != transfer.ColumnClientId))
+                    Fail("onboarding_transfer_invalid",
+                        $"Столбец «{column.Name}» переносит карточки в неизвестный столбец канбана «{target.Name}».");
+            }
+        }
+    }
+
     private static void ValidateWorkflowCategories(
         IReadOnlyList<WorkflowDraft> workflows,
         IReadOnlyList<CatalogCategoryDraft> categories)
@@ -238,7 +294,9 @@ public static class OnboardingValidator
                     var definition = categoryField is null
                         ? OnboardingFieldRegistry.Get(fieldCode)
                         : OnboardingFieldRegistry.DefinitionOf(categoryField);
-                    if (!definition.IsCalculated && categoryField is null)
+                    var orderOnly = workflow.Specialization == WorkflowSpecializationCodes.Order &&
+                                    OnboardingFieldRegistry.OrderOnlyFieldCodes.Contains(fieldCode);
+                    if (!definition.IsCalculated && categoryField is null && !orderOnly)
                         Fail("onboarding_workflow_field_invalid",
                             $"Поле «{definition.Label}» не настроено в категории «{category.Name}».");
                 }

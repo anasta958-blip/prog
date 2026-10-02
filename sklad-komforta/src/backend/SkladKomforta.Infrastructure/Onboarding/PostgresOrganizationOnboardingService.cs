@@ -232,10 +232,13 @@ internal sealed class PostgresOrganizationOnboardingService(
         IReadOnlyDictionary<string, Guid> categoryIds,
         CancellationToken token)
     {
+        var workflowIds = new Dictionary<string, Guid>(StringComparer.Ordinal);
+        var allColumnIds = new Dictionary<string, Dictionary<string, Guid>>(StringComparer.Ordinal);
         for (var workflowIndex = 0; workflowIndex < workflows.Count; workflowIndex++)
         {
             var workflow = workflows[workflowIndex];
             var workflowId = Guid.NewGuid();
+            workflowIds[workflow.Code.Trim()] = workflowId;
             await ExecuteAsync(connection, transaction, """
                 INSERT INTO workflows (id, code, name, sort_order, specialization)
                 VALUES (@id, @code, @name, @sort, @specialization)
@@ -244,6 +247,7 @@ internal sealed class PostgresOrganizationOnboardingService(
                 ("name", workflow.Name.Trim()), ("sort", workflowIndex),
                 ("specialization", Db(workflow.Specialization)));
             var columns = new Dictionary<string, Guid>(StringComparer.Ordinal);
+            allColumnIds[workflow.Code.Trim()] = columns;
             for (var columnIndex = 0; columnIndex < workflow.Columns.Count; columnIndex++)
             {
                 var column = workflow.Columns[columnIndex];
@@ -285,6 +289,8 @@ internal sealed class PostgresOrganizationOnboardingService(
                         ("field_code", category.FieldCodes[fieldIndex]), ("sort", fieldIndex));
             }
         }
+        await Orders.WorkflowOrderConfiguration.SaveAsync(
+            connection, transaction, workflows, workflowIds, allColumnIds, token);
     }
 
     private static async Task<IReadOnlyDictionary<string, Guid>> SaveCatalogAsync(

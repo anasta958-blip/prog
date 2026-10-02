@@ -15,7 +15,8 @@ namespace SkladKomforta.Infrastructure.Kanban;
 /// </summary>
 internal sealed class PostgresKanbanService(
     IDatabaseConnectionFactory connectionFactory,
-    ITenantContext tenantContext) : IKanbanService
+    ITenantContext tenantContext,
+    IEnumerable<IKanbanColumnEntryHandler> columnEntryHandlers) : IKanbanService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -122,7 +123,29 @@ internal sealed class PostgresKanbanService(
             await ReadColumnsAsync(connection, boardId, cancellationToken),
             await ReadTransitionsAsync(connection, boardId, cancellationToken),
             await ReadCategoriesAsync(connection, boardId, cancellationToken),
-            header.Specialization);
+            header.Specialization,
+            await ReadOrderOptionsAsync(connection, boardId, "object_type", cancellationToken));
+    }
+
+    /// <summary>Значения справочника канбана комплектации в заданном порядке.</summary>
+    private static async Task<IReadOnlyList<string>> ReadOrderOptionsAsync(
+        DbConnection connection,
+        Guid boardId,
+        string kind,
+        CancellationToken token)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT value FROM workflow_order_options
+             WHERE workflow_id = @workflow_id AND option_kind = @kind
+             ORDER BY sort_order, value
+            """;
+        AddParameter(command, "workflow_id", boardId);
+        AddParameter(command, "kind", kind);
+        var result = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync(token);
+        while (await reader.ReadAsync(token)) result.Add(reader.GetString(0));
+        return result;
     }
 
     public async Task<KanbanCardPage> GetCardsAsync(
@@ -389,6 +412,14 @@ internal sealed class PostgresKanbanService(
             if (await command.ExecuteNonQueryAsync(cancellationToken) != 1) throw CardNotFound();
         }
 
+        // Столбец-триггер переносит карточку в другой канбан в этой же транзакции:
+        // если перенос невозможен, отменяется и перемещение.
+        if (before.ColumnId != request.TargetColumnId)
+            foreach (var handler in columnEntryHandlers)
+                await handler.OnCardEnteredColumnAsync(
+                    connection, transaction, actorUserId, boardId, cardId,
+                    request.TargetColumnId, cancellationToken);
+
         var moved = await ReadCardAsync(connection, transaction, boardId, cardId, cancellationToken);
         await WriteAuditAsync(connection, transaction, actorUserId, cardId, "moved", before, moved, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -457,6 +488,22 @@ internal sealed class PostgresKanbanService(
             AddParameter(specializedDocument, "workflow_id", boardId);
             await specializedDocument.ExecuteNonQueryAsync(cancellationToken);
         }
+        await using (var order = connection.CreateCommand())
+        {
+            order.Transaction = transaction;
+            order.CommandText = """
+                UPDATE orders
+                SET deleted_by = @actor, deleted_at = now(),
+                    updated_by = @actor, updated_at = now()
+                WHERE card_id = @id
+                  AND workflow_id = @workflow_id
+                  AND deleted_at IS NULL
+                """;
+            AddParameter(order, "actor", actorUserId);
+            AddParameter(order, "id", cardId);
+            AddParameter(order, "workflow_id", boardId);
+            await order.ExecuteNonQueryAsync(cancellationToken);
+        }
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
@@ -500,14 +547,21 @@ internal sealed class PostgresKanbanService(
                    COALESCE(
                        array_agg(action.action_kind ORDER BY action.action_kind)
                            FILTER (WHERE action.action_kind IS NOT NULL),
-                       ARRAY[]::varchar[])
+                       ARRAY[]::varchar[]),
+                   transfer.target_workflow_id, target_workflow.name,
+                   transfer.target_column_id, target_column.name,
+                   workflow_column.reorder_from
             FROM workflow_columns AS workflow_column
             LEFT JOIN workflow_column_creation_actions AS action
                    ON action.column_id = workflow_column.id
                   AND action.workflow_id = workflow_column.workflow_id
+            LEFT JOIN workflow_column_transfers AS transfer ON transfer.column_id = workflow_column.id
+            LEFT JOIN workflows AS target_workflow ON target_workflow.id = transfer.target_workflow_id
+            LEFT JOIN workflow_columns AS target_column ON target_column.id = transfer.target_column_id
             WHERE workflow_column.workflow_id = @workflow_id
             GROUP BY workflow_column.id, workflow_column.name, workflow_column.color,
-                     workflow_column.sort_order
+                     workflow_column.sort_order, transfer.target_workflow_id, target_workflow.name,
+                     transfer.target_column_id, target_column.name, workflow_column.reorder_from
             ORDER BY workflow_column.sort_order, workflow_column.id
             """;
         AddParameter(command, "workflow_id", boardId);
@@ -516,7 +570,11 @@ internal sealed class PostgresKanbanService(
         while (await reader.ReadAsync(token))
             result.Add(new KanbanColumnSummary(
                 reader.GetGuid(0), reader.GetString(1), reader.GetString(2), reader.GetInt32(3),
-                reader.GetFieldValue<string[]>(4)));
+                reader.GetFieldValue<string[]>(4),
+                reader.IsDBNull(5)
+                    ? null
+                    : new KanbanColumnTransfer(reader.GetGuid(5), reader.GetString(6), reader.GetGuid(7), reader.GetString(8)),
+                reader.GetBoolean(9)));
         return result;
     }
 
@@ -585,12 +643,26 @@ internal sealed class PostgresKanbanService(
                      WHERE section.category_id = category.id
                    ), '[]'::jsonb)::text,
                    workflow_field.field_code,
-                   COALESCE(category_field.label, workflow_field.field_code),
-                   COALESCE(category_field.field_type, 'text'),
+                   COALESCE(category_field.label,
+                            CASE workflow_field.field_code WHEN 'shipment_status' THEN 'Статус отгрузки' END,
+                            workflow_field.field_code),
+                   COALESCE(category_field.field_type,
+                            CASE workflow_field.field_code WHEN 'shipment_status' THEN 'dictionary' END,
+                            'text'),
                    COALESCE(category_field.is_required, false),
                    workflow_field.sort_order,
                    category_field.dictionary_code,
                    CASE
+                     WHEN workflow_field.field_code = 'shipment_status' THEN COALESCE((
+                       SELECT jsonb_agg(jsonb_build_object(
+                           'id', order_option.id,
+                           'value', order_option.value,
+                           'sortOrder', order_option.sort_order)
+                           ORDER BY order_option.sort_order, order_option.value)
+                       FROM workflow_order_options AS order_option
+                       WHERE order_option.workflow_id = workflow_category.workflow_id
+                         AND order_option.option_kind = 'shipment_status'
+                     ), '[]'::jsonb)
                      WHEN workflow_field.field_code = 'group' THEN COALESCE((
                        SELECT jsonb_agg(jsonb_build_object(
                            'id', catalog_group.id,
@@ -618,10 +690,13 @@ internal sealed class PostgresKanbanService(
             LEFT JOIN workflow_category_fields AS workflow_field
               ON workflow_field.workflow_id = workflow_category.workflow_id
              AND workflow_field.category_id = workflow_category.category_id
-            JOIN catalog_category_fields AS category_field
+            LEFT JOIN catalog_category_fields AS category_field
               ON category_field.category_id = workflow_category.category_id
              AND category_field.field_code = workflow_field.field_code
             WHERE workflow_category.workflow_id = @workflow_id
+              AND (category_field.field_code IS NOT NULL
+                   OR workflow_field.field_code IS NULL
+                   OR workflow_field.field_code = 'shipment_status')
             ORDER BY workflow_category.sort_order, category.name, category.id,
                      workflow_field.sort_order, workflow_field.field_code
             """;
@@ -765,7 +840,7 @@ internal sealed class PostgresKanbanService(
         if (IsEmpty(value)) return;
         var valid = field.FieldType switch
         {
-            "text" or "enum" or "dictionary" => value.ValueKind == JsonValueKind.String,
+            "text" or "dictionary" => value.ValueKind == JsonValueKind.String,
             "number" or "money" or "percent" or "calculated_money" => value.ValueKind == JsonValueKind.Number,
             "boolean" => value.ValueKind is JsonValueKind.True or JsonValueKind.False,
             "relation" => value.ValueKind == JsonValueKind.Array,
@@ -1190,6 +1265,111 @@ internal sealed class PostgresKanbanService(
         CancellationToken token)
     {
         if (cards.Count == 0) return cards;
+        var withQuotes = await WithQuoteDetailsAsync(connection, cards, token);
+        var withOrders = await WithOrderSummariesAsync(connection, withQuotes, token);
+        return await WithLinkedCardsAsync(connection, withOrders, token);
+    }
+
+    /// <summary>Сводка комплектации: стороны, менеджер, позиции, дозаказ и счета.</summary>
+    private static async Task<List<KanbanCardSummary>> WithOrderSummariesAsync(
+        DbConnection connection,
+        List<KanbanCardSummary> cards,
+        CancellationToken token)
+    {
+        var summaries = new Dictionary<Guid, KanbanOrderSummary>();
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                SELECT orders.card_id, client.name,
+                       COALESCE(NULLIF(btrim(company.legal_name), ''), company.name),
+                       manager.display_name, orders.object_type,
+                       (SELECT count(*)::integer FROM order_positions AS position
+                          JOIN order_sections AS section ON section.id = position.order_section_id
+                          JOIN order_categories AS category ON category.id = section.order_category_id
+                         WHERE category.order_id = orders.id),
+                       (SELECT count(*)::integer FROM order_positions AS position
+                          JOIN order_sections AS section ON section.id = position.order_section_id
+                          JOIN order_categories AS category ON category.id = section.order_category_id
+                         WHERE category.order_id = orders.id AND position.is_reorder),
+                       (SELECT count(*)::integer FROM order_invoices AS invoice
+                         WHERE invoice.order_id = orders.id
+                           AND invoice.ready_at IS NOT NULL AND invoice.deleted_at IS NULL),
+                       source_card.card_number
+                  FROM orders
+                  LEFT JOIN clients AS client ON client.id = orders.client_id
+                  LEFT JOIN companies AS company ON company.id = orders.executor_company_id
+                  LEFT JOIN public.users AS manager ON manager.id = orders.manager_user_id
+                  LEFT JOIN quotes AS source_quote ON source_quote.id = orders.source_quote_id
+                  LEFT JOIN kanban_cards AS source_card ON source_card.id = source_quote.card_id
+                 WHERE orders.card_id = ANY(@card_ids) AND orders.deleted_at IS NULL
+                """;
+            AddParameter(command, "card_ids", cards.Select(card => card.Id).ToArray());
+            await using var reader = await command.ExecuteReaderAsync(token);
+            while (await reader.ReadAsync(token))
+            {
+                summaries[reader.GetGuid(0)] = new KanbanOrderSummary(
+                    reader.IsDBNull(1) ? null : reader.GetString(1),
+                    reader.IsDBNull(2) ? null : reader.GetString(2),
+                    reader.IsDBNull(3) ? null : reader.GetString(3),
+                    reader.IsDBNull(4) ? null : reader.GetString(4),
+                    reader.GetInt32(5), reader.GetInt32(6), reader.GetInt32(7),
+                    reader.IsDBNull(8) ? null : reader.GetInt64(8));
+            }
+        }
+        return summaries.Count == 0
+            ? cards
+            : cards.Select(card => summaries.TryGetValue(card.Id, out var order) ? card with { Order = order } : card).ToList();
+    }
+
+    /// <summary>
+    /// Связанные карточки того же рабочего объекта в других канбанах — только
+    /// для карточек, стоящих в столбце-триггере переноса.
+    /// </summary>
+    private static async Task<IReadOnlyList<KanbanCardSummary>> WithLinkedCardsAsync(
+        DbConnection connection,
+        List<KanbanCardSummary> cards,
+        CancellationToken token)
+    {
+        var links = new Dictionary<Guid, List<KanbanLinkedCard>>();
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                SELECT card.id, other.workflow_id, workflow.name, workflow.specialization,
+                       other.id, other.card_number, other_column.name
+                  FROM kanban_cards AS card
+                  JOIN workflow_column_transfers AS transfer ON transfer.column_id = card.column_id
+                  JOIN kanban_cards AS other
+                    ON other.work_item_id = card.work_item_id
+                   AND other.id <> card.id
+                   AND other.deleted_at IS NULL
+                  JOIN workflows AS workflow ON workflow.id = other.workflow_id
+                  JOIN workflow_columns AS other_column ON other_column.id = other.column_id
+                 WHERE card.id = ANY(@card_ids)
+                 ORDER BY workflow.sort_order, other.card_number
+                """;
+            AddParameter(command, "card_ids", cards.Select(card => card.Id).ToArray());
+            await using var reader = await command.ExecuteReaderAsync(token);
+            while (await reader.ReadAsync(token))
+            {
+                var cardId = reader.GetGuid(0);
+                if (!links.TryGetValue(cardId, out var list)) links[cardId] = list = [];
+                list.Add(new KanbanLinkedCard(
+                    reader.GetGuid(1), reader.GetString(2),
+                    reader.IsDBNull(3) ? null : reader.GetString(3),
+                    reader.GetGuid(4), reader.GetInt64(5), reader.GetString(6)));
+            }
+        }
+        return links.Count == 0
+            ? cards
+            : cards.Select(card => links.TryGetValue(card.Id, out var list) ? card with { LinkedCards = list } : card).ToArray();
+    }
+
+    /// <summary>Сводка КП/ПКП: стороны, выбор с суммой и просмотры ссылки.</summary>
+    private async Task<List<KanbanCardSummary>> WithQuoteDetailsAsync(
+        DbConnection connection,
+        List<KanbanCardSummary> cards,
+        CancellationToken token)
+    {
         var cardIds = cards.Select(card => card.Id).ToArray();
         var headers = new Dictionary<Guid, (Guid QuoteId, string Kind, string? Client, string? Executor, string Mode)>();
         await using (var command = connection.CreateCommand())
@@ -1257,7 +1437,7 @@ internal sealed class PostgresKanbanService(
                     header.Kind, header.Client, header.Executor, header.Mode,
                     summary, view.Count, view.LastAt),
             };
-        }).ToArray();
+        }).ToList();
     }
 
     private static async Task WriteAuditAsync(

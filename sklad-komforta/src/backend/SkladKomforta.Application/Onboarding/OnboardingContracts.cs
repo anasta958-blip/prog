@@ -12,12 +12,25 @@ public sealed record CompanyProfileDraft(
     string? Phone,
     string? Email);
 
+/// <summary>
+/// Цель переноса из столбца-триггера: канбан (по коду) и его столбец (по
+/// клиентскому идентификатору). КП/ПКП переносится в комплектацию и обратно.
+/// </summary>
+public sealed record WorkflowTransferDraft(string WorkflowCode, string ColumnClientId);
+
 /// <summary>Один столбец настраиваемого канбана.</summary>
+/// <param name="TransferTo">Если задан, столбец — триггер переноса в другой канбан.</param>
+/// <param name="ReorderFrom">
+/// Только для канбана комплектации: позиции, добавленные, когда карточка стоит в
+/// этом столбце или правее, считаются дозаказом.
+/// </param>
 public sealed record WorkflowColumnDraft(
     string ClientId,
     string Name,
     string Color,
-    IReadOnlyList<string>? CreationActions = null);
+    IReadOnlyList<string>? CreationActions = null,
+    WorkflowTransferDraft? TransferTo = null,
+    bool ReorderFrom = false);
 
 /// <summary>Разрешённый переход между двумя клиентскими идентификаторами столбцов.</summary>
 public sealed record WorkflowTransitionDraft(string FromClientId, string ToClientId);
@@ -27,6 +40,13 @@ public sealed record WorkflowCategoryDraft(
     string CategoryClientId,
     IReadOnlyList<string> FieldCodes);
 
+/// <summary>Справочники канбана комплектации.</summary>
+/// <param name="ObjectTypes">Типы объекта (квартира, дом и т. п.).</param>
+/// <param name="ShipmentStatuses">Значения поля «Статус отгрузки» позиций.</param>
+public sealed record WorkflowOrderSettingsDraft(
+    IReadOnlyList<string>? ObjectTypes = null,
+    IReadOnlyList<string>? ShipmentStatuses = null);
+
 /// <summary>Канбан вместе с упорядоченными столбцами и разрешёнными переходами.</summary>
 public sealed record WorkflowDraft(
     string Code,
@@ -34,7 +54,8 @@ public sealed record WorkflowDraft(
     IReadOnlyList<WorkflowColumnDraft> Columns,
     IReadOnlyList<WorkflowTransitionDraft> Transitions,
     IReadOnlyList<WorkflowCategoryDraft>? Categories = null,
-    string? Specialization = null);
+    string? Specialization = null,
+    WorkflowOrderSettingsDraft? OrderSettings = null);
 
 /// <summary>Группа товаров внутри раздела каталога.</summary>
 public sealed record CatalogGroupDraft(string Name);

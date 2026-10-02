@@ -946,7 +946,7 @@ internal sealed class PostgresCatalogService(
         if (value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined) return;
         var valid = field.FieldType switch
         {
-            "text" or "dictionary" or "enum" => value.ValueKind == JsonValueKind.String,
+            "text" or "dictionary" => value.ValueKind == JsonValueKind.String,
             "number" or "money" or "percent" => TryDecimal(value, out _),
             "boolean" => value.ValueKind is JsonValueKind.True or JsonValueKind.False,
             "relation" => value.ValueKind == JsonValueKind.Array,

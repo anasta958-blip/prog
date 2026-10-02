@@ -86,8 +86,11 @@ final class _OrganizationOnboardingPageState
     'company.manage': 'Управление компанией',
     'quotes.view': 'Просмотр КП и ПКП',
     'quotes.manage': 'Управление КП и ПКП',
+    'quotes.manager.change': 'Смена менеджера и РОП КП и ПКП',
     'orders.view': 'Просмотр комплектаций',
     'orders.manage': 'Управление комплектациями',
+    'orders.invoices.manage': 'Счета комплектаций',
+    'orders.manager.change': 'Смена менеджера и РОП комплектации',
     'documents.view': 'Просмотр документов',
     'documents.manage': 'Управление документами',
   };
@@ -329,6 +332,7 @@ final class _OrganizationOnboardingPageState
       _showMessage('Проверьте заполнение реквизитов организации.');
       return;
     }
+    _sanitizeWorkflowLinks();
     if (_settingsMode) {
       draft.currentStep = 9;
       final saved = await widget.onSettingsSave!(
@@ -352,6 +356,7 @@ final class _OrganizationOnboardingPageState
   }
 
   Future<void> _saveSettings() async {
+    _sanitizeWorkflowLinks();
     draft.currentStep = 9;
     // Сохраняем именно отправленный снимок. Уведомление родительского
     // контроллера во время await не должно заменить новые правила старой
@@ -679,6 +684,10 @@ final class _OrganizationOnboardingPageState
           }),
           const SizedBox(height: 12),
           _workflowSpecializationSelector(workflow),
+          if (workflow.specialization == WorkflowSpecialization.order) ...[
+            const SizedBox(height: 14),
+            _orderSettingsEditor(workflow),
+          ],
           const SizedBox(height: 16),
           for (final column in List<WorkflowColumnDraft>.of(workflow.columns))
             KeyedSubtree(
@@ -747,7 +756,10 @@ final class _OrganizationOnboardingPageState
                         : WorkflowSpecialization.standard;
                     for (final column in workflow.columns) {
                       column.creationActions.clear();
+                      column.transferTo = null;
+                      column.reorderFrom = false;
                     }
+                    _sanitizeWorkflowLinks();
                   }),
                 ),
             ],
@@ -762,69 +774,52 @@ final class _OrganizationOnboardingPageState
     WorkflowColumnDraft column,
   ) {
     final columnIndex = workflow.columns.indexOf(column);
-    return _OrderedRow(
-      index: columnIndex,
-      length: workflow.columns.length,
-      onMove: (delta) => setState(
-        () => _move(workflow.columns, columnIndex, columnIndex + delta),
+    final special = workflow.specialization != WorkflowSpecialization.standard;
+    final hasTransfer = special && _transferTargets(workflow).isNotEmpty;
+    final name = _textField(
+      'Столбец ${columnIndex + 1}',
+      column.name,
+      (value) => setState(() => column.name = value),
+    );
+    final color = SizedBox(
+      width: 148,
+      child: AppSelectField<String>(
+        key: ValueKey('${column.clientId}-${column.color}'),
+        value: column.color,
+        label: 'Цвет',
+        options: _workflowColors
+            .map(
+              (color) => AppSelectOption(
+                value: color,
+                label: color,
+                color: Color(
+                  int.parse(color.substring(1), radix: 16) | 0xFF000000,
+                ),
+              ),
+            )
+            .toList(),
+        onChanged: (value) {
+          if (value != null) setState(() => column.color = value);
+        },
       ),
-      onDelete: () => setState(() {
-        workflow.columns.remove(column);
-        workflow.transitions.removeWhere(
-          (transition) =>
-              transition.fromClientId == column.clientId ||
-              transition.toClientId == column.clientId,
-        );
-      }),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: _textField(
-                  'Столбец ${columnIndex + 1}',
-                  column.name,
-                  (value) => setState(() => column.name = value),
-                ),
-              ),
-              const SizedBox(width: 8),
-              SizedBox(
-                width: 148,
-                child: AppSelectField<String>(
-                  key: ValueKey('${column.clientId}-${column.color}'),
-                  value: column.color,
-                  label: 'Цвет',
-                  options: _workflowColors
-                      .map(
-                        (color) => AppSelectOption(
-                          value: color,
-                          label: color,
-                          color: Color(
-                            int.parse(color.substring(1), radix: 16) |
-                                0xFF000000,
-                          ),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (value) {
-                    if (value != null) setState(() => column.color = value);
-                  },
-                ),
-              ),
-            ],
-          ),
-          if (workflow.specialization != WorkflowSpecialization.standard) ...[
-            const SizedBox(height: 12),
-            Text(
-              'Кнопки создания в этом столбце',
-              style: Theme.of(context).textTheme.labelMedium,
-            ),
-            const SizedBox(height: 7),
-            Wrap(
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Кнопки создания — над полями столбца, с отступом под стрелки
+        // перемещения, чтобы стрелки стояли напротив полей.
+        if (special) ...[
+          Padding(
+            padding: const EdgeInsets.only(left: 96, right: 48),
+            child: Wrap(
               spacing: 8,
               runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
+                Text(
+                  'Кнопки создания:',
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
                 for (final action in _actionsFor(workflow.specialization))
                   FilterChip(
                     label: Text(action.label),
@@ -836,12 +831,188 @@ final class _OrganizationOnboardingPageState
                       if (selected) column.creationActions.add(action);
                     }),
                   ),
+                if (workflow.specialization == WorkflowSpecialization.order)
+                  FilterChip(
+                    key: ValueKey('reorder-from-${column.clientId}'),
+                    label: const Text('Дозаказ с этого столбца'),
+                    tooltip:
+                        'Позиции, добавленные в этом столбце и правее, считаются дозаказом',
+                    selected: column.reorderFrom,
+                    onSelected: (selected) => setState(() {
+                      for (final item in workflow.columns) {
+                        item.reorderFrom = false;
+                      }
+                      column.reorderFrom = selected;
+                    }),
+                  ),
               ],
             ),
-          ],
+          ),
+          const SizedBox(height: 8),
         ],
-      ),
+        _OrderedRow(
+          index: columnIndex,
+          length: workflow.columns.length,
+          onMove: (delta) => setState(
+            () => _move(workflow.columns, columnIndex, columnIndex + delta),
+          ),
+          onDelete: () => setState(() {
+            workflow.columns.remove(column);
+            workflow.transitions.removeWhere(
+              (transition) =>
+                  transition.fromClientId == column.clientId ||
+                  transition.toClientId == column.clientId,
+            );
+          }),
+          // Название, цвет и перенос — в один ряд; на узком экране перенос
+          // уходит под название.
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final nameRow = Row(
+                children: [
+                  Expanded(child: name),
+                  const SizedBox(width: 8),
+                  color,
+                  if (hasTransfer && constraints.maxWidth >= 720) ...[
+                    const SizedBox(width: 8),
+                    Expanded(child: _transferSelector(workflow, column)),
+                  ],
+                ],
+              );
+              if (!hasTransfer || constraints.maxWidth >= 720) return nameRow;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  nameRow,
+                  const SizedBox(height: 8),
+                  _transferSelector(workflow, column),
+                ],
+              );
+            },
+          ),
+        ),
+      ],
     );
+  }
+
+  /// Канбаны, в которые можно переносить из [workflow]: КП/ПКП → комплектация
+  /// и комплектация → КП/ПКП.
+  List<WorkflowDraft> _transferTargets(WorkflowDraft workflow) {
+    final fromQuote = _isQuoteBoard(workflow.specialization);
+    final fromOrder = workflow.specialization == WorkflowSpecialization.order;
+    return [
+      for (final target in draft.workflows)
+        if (!identical(target, workflow) &&
+            ((fromQuote &&
+                    target.specialization == WorkflowSpecialization.order) ||
+                (fromOrder && _isQuoteBoard(target.specialization))))
+          target,
+    ];
+  }
+
+  static bool _isQuoteBoard(WorkflowSpecialization specialization) =>
+      specialization == WorkflowSpecialization.quote ||
+      specialization == WorkflowSpecialization.quoteAndPrequote;
+
+  /// Выбор столбца-триггера: «не переносить» либо канбан и его столбец.
+  Widget _transferSelector(WorkflowDraft workflow, WorkflowColumnDraft column) {
+    final options = <AppSelectOption<String>>[
+      const AppSelectOption(value: '', label: 'Не переносить'),
+      for (final target in _transferTargets(workflow))
+        for (final targetColumn in target.columns)
+          AppSelectOption(
+            value: '${target.code}|${targetColumn.clientId}',
+            label:
+                '${target.name.trim().isEmpty ? 'Канбан без названия' : target.name} → ${targetColumn.name}',
+          ),
+    ];
+    final current = column.transferTo == null
+        ? ''
+        : '${column.transferTo!.workflowCode}|${column.transferTo!.columnClientId}';
+    final isOrder = workflow.specialization == WorkflowSpecialization.order;
+    return AppSelectField<String>(
+      key: ValueKey('transfer-${column.clientId}'),
+      value: options.any((option) => option.value == current) ? current : '',
+      label: isOrder
+          ? 'Попав в этот столбец, вернуть карточку КП в'
+          : 'Попав в этот столбец, перенести в комплектацию',
+      options: options,
+      onChanged: (value) => setState(() {
+        if (value == null || value.isEmpty) {
+          column.transferTo = null;
+          return;
+        }
+        final separator = value.indexOf('|');
+        column.transferTo = WorkflowTransferDraft(
+          workflowCode: value.substring(0, separator),
+          columnClientId: value.substring(separator + 1),
+        );
+      }),
+    );
+  }
+
+  /// Справочники канбана комплектации: типы объекта и статусы отгрузки.
+  Widget _orderSettingsEditor(WorkflowDraft workflow) {
+    final objectTypes = _OptionListEditor(
+      key: ValueKey('${workflow.code}-object-types'),
+      label: 'Типы объекта',
+      hint: 'Например: Квартира',
+      values: workflow.orderSettings.objectTypes,
+      onChanged: (values) =>
+          setState(() => workflow.orderSettings.objectTypes = values),
+    );
+    final shipmentStatuses = _OptionListEditor(
+      key: ValueKey('${workflow.code}-shipment-statuses'),
+      label: 'Статусы отгрузки',
+      hint: 'Например: На складе',
+      values: workflow.orderSettings.shipmentStatuses,
+      onChanged: (values) =>
+          setState(() => workflow.orderSettings.shipmentStatuses = values),
+    );
+    // Оба справочника в одну строку; на узком экране — друг под другом.
+    return LayoutBuilder(
+      builder: (context, constraints) => constraints.maxWidth < 640
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                objectTypes,
+                const SizedBox(height: 12),
+                shipmentStatuses,
+              ],
+            )
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: objectTypes),
+                const SizedBox(width: 16),
+                Expanded(child: shipmentStatuses),
+              ],
+            ),
+    );
+  }
+
+  /// Удаляет ссылки переноса, ставшие недействительными: канбан или столбец
+  /// удалён, тип канбана сменился. Дозаказ остаётся только у комплектации.
+  void _sanitizeWorkflowLinks() {
+    for (final workflow in draft.workflows) {
+      final targets = _transferTargets(workflow);
+      for (final column in workflow.columns) {
+        final transfer = column.transferTo;
+        if (transfer != null &&
+            !targets.any(
+              (target) =>
+                  target.code == transfer.workflowCode &&
+                  target.columns.any(
+                    (item) => item.clientId == transfer.columnClientId,
+                  ),
+            )) {
+          column.transferTo = null;
+        }
+        if (workflow.specialization != WorkflowSpecialization.order) {
+          column.reorderFrom = false;
+        }
+      }
+    }
   }
 
   List<WorkflowCreationAction> _actionsFor(
@@ -1368,8 +1539,9 @@ final class _OrganizationOnboardingPageState
   /// Возвращает только реальные поля категории. Расчётные результаты задаются
   /// правилами и не являются самостоятельными полями рабочей карточки.
   List<OnboardingFieldDefinition> _workflowAvailableFields(
-    CatalogCategoryDraft category,
-  ) {
+    CatalogCategoryDraft category, [
+    WorkflowDraft? workflow,
+  ]) {
     final result = <OnboardingFieldDefinition>[];
     final added = <String>{};
     for (final field in category.fields) {
@@ -1377,6 +1549,12 @@ final class _OrganizationOnboardingPageState
       if (added.add(definition.code)) {
         result.add(definition);
       }
+    }
+    // «Статус отгрузки» существует только в комплектации: его значения
+    // задаются справочником канбана, а не полем каталога.
+    if (workflow?.specialization == WorkflowSpecialization.order &&
+        added.add('shipment_status')) {
+      result.add(onboardingFieldByCode['shipment_status']!);
     }
     return result;
   }
@@ -1479,7 +1657,7 @@ final class _OrganizationOnboardingPageState
     CatalogCategoryDraft category,
   ) {
     final selection = _workflowCategory(workflow, category.clientId);
-    final availableFields = _workflowAvailableFields(category);
+    final availableFields = _workflowAvailableFields(category, workflow);
     final selectedFields = selection?.fieldCodes
         .where((code) => availableFields.any((field) => field.code == code))
         .toList();
@@ -1793,7 +1971,6 @@ final class _OrganizationOnboardingPageState
     'dictionary' => 'Справочник',
     'boolean' => 'Флажок',
     'relation' => 'Связанные карточки',
-    'enum' => 'Выбор значения',
     'calculated_money' => 'Расчётная сумма',
     _ => type,
   };
@@ -3509,25 +3686,37 @@ final class _OrderedRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: 8),
+    // Кнопки прижаты к первой строке содержимого (поле названия), а не к
+    // середине: у столбцов канбана под названием ещё кнопки и перенос.
     child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        IconButton(
-          onPressed: index > 0 ? () => onMove(-1) : null,
-          icon: const Icon(Icons.arrow_upward),
-          tooltip: 'Выше',
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: IconButton(
+            onPressed: index > 0 ? () => onMove(-1) : null,
+            icon: const Icon(Icons.arrow_upward),
+            tooltip: 'Выше',
+          ),
         ),
-        IconButton(
-          onPressed: index + 1 < length ? () => onMove(1) : null,
-          icon: const Icon(Icons.arrow_downward),
-          tooltip: 'Ниже',
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: IconButton(
+            onPressed: index + 1 < length ? () => onMove(1) : null,
+            icon: const Icon(Icons.arrow_downward),
+            tooltip: 'Ниже',
+          ),
         ),
         Expanded(child: child),
-        IconButton(
-          onPressed: onDelete,
-          icon: Icon(onDelete == null ? Icons.lock_outline : Icons.close),
-          tooltip: onDelete == null
-              ? 'Системное поле нельзя удалить'
-              : 'Удалить',
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: IconButton(
+            onPressed: onDelete,
+            icon: Icon(onDelete == null ? Icons.lock_outline : Icons.close),
+            tooltip: onDelete == null
+                ? 'Системное поле нельзя удалить'
+                : 'Удалить',
+          ),
         ),
       ],
     ),
@@ -3573,6 +3762,89 @@ final class _DraggableOrderedRow extends StatelessWidget {
         ),
       ],
     ),
+  );
+}
+
+/// Редактор короткого списка значений: чипы с удалением и поле добавления
+/// (Enter или кнопка «+»). Повторы без учёта регистра не добавляются.
+final class _OptionListEditor extends StatefulWidget {
+  const _OptionListEditor({
+    required this.label,
+    required this.hint,
+    required this.values,
+    required this.onChanged,
+    super.key,
+  });
+
+  final String label;
+  final String hint;
+  final List<String> values;
+  final ValueChanged<List<String>> onChanged;
+
+  @override
+  State<_OptionListEditor> createState() => _OptionListEditorState();
+}
+
+final class _OptionListEditorState extends State<_OptionListEditor> {
+  final input = TextEditingController();
+
+  @override
+  void dispose() {
+    input.dispose();
+    super.dispose();
+  }
+
+  void _add() {
+    final value = input.text.trim();
+    if (value.isEmpty) return;
+    if (!widget.values.any(
+      (item) => item.toLowerCase() == value.toLowerCase(),
+    )) {
+      widget.onChanged([...widget.values, value]);
+    }
+    input.clear();
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(widget.label, style: Theme.of(context).textTheme.labelLarge),
+      const SizedBox(height: 8),
+      if (widget.values.isNotEmpty) ...[
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final value in widget.values)
+              InputChip(
+                label: Text(value),
+                onDeleted: () => widget.onChanged(
+                  widget.values.where((item) => item != value).toList(),
+                ),
+                deleteButtonTooltipMessage: 'Удалить',
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+      ],
+      Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: input,
+              decoration: InputDecoration(isDense: true, hintText: widget.hint),
+              onSubmitted: (_) => _add(),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Добавить значение',
+            onPressed: _add,
+            icon: const Icon(Icons.add),
+          ),
+        ],
+      ),
+    ],
   );
 }
 

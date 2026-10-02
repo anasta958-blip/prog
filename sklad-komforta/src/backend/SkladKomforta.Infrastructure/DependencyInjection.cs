@@ -139,6 +139,9 @@ public static class DependencyInjection
         services.AddScoped<SkladKomforta.Application.Quotes.IQuoteService, Quotes.PostgresQuoteService>();
         services.AddScoped<SkladKomforta.Application.Quotes.IQuotePdfService, Quotes.QuotePdfService>();
         services.AddScoped<SkladKomforta.Application.Quotes.IQuoteClientAccessService, Quotes.PostgresQuoteClientAccessService>();
+        services.AddScoped<SkladKomforta.Application.Orders.IOrderService, Orders.PostgresOrderService>();
+        services.AddScoped<SkladKomforta.Application.Orders.IOrderPdfService, Orders.OrderPdfService>();
+        services.AddScoped<Kanban.IKanbanColumnEntryHandler, Orders.OrderTransferHandler>();
         services.AddScoped<SkladKomforta.Application.Company.ICompanyService, Company.PostgresCompanyService>();
         services.AddScoped<SkladKomforta.Application.Company.ICompanyWorkspaceService, Company.PostgresCompanyWorkspaceService>();
         services.AddHttpClient<SkladKomforta.Application.Company.ICompanyRegistryLookup, Company.EgrulCompanyRegistryLookup>(client =>

@@ -28,6 +28,7 @@ final class QuoteLocalDraft {
       'clientSelectedProposalTypeId': draft.clientSelectedProposalTypeId,
       'clientSelectionSubmittedAt': draft.clientSelectionSubmittedAt
           ?.toIso8601String(),
+      'canChangeManager': draft.canChangeManager,
     });
     return _enqueue(() => storage.write(key: key, value: snapshot));
   }

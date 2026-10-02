@@ -45,6 +45,7 @@ final class QuoteDraft {
     this.additionalInformation = '',
     this.clientSelectedProposalTypeId,
     this.clientSelectionSubmittedAt,
+    this.canChangeManager = false,
   });
 
   String? id;
@@ -59,6 +60,10 @@ final class QuoteDraft {
   String additionalInformation;
   String? clientSelectedProposalTypeId;
   DateTime? clientSelectionSubmittedAt;
+
+  /// Право текущего пользователя менять менеджера и РОП
+  /// (`quotes.manager.change`); без него поля только для чтения.
+  bool canChangeManager;
   final List<QuoteProposalTypeDraft> proposalTypes;
 
   factory QuoteDraft.fromJson(Map<String, dynamic> json) => QuoteDraft(
@@ -77,6 +82,7 @@ final class QuoteDraft {
     clientSelectionSubmittedAt: json['clientSelectionSubmittedAt'] == null
         ? null
         : DateTime.parse(json['clientSelectionSubmittedAt'] as String),
+    canChangeManager: json['canChangeManager'] as bool? ?? false,
     proposalTypes: ((json['proposalTypes'] as List<dynamic>?) ?? const [])
         .map(
           (item) =>

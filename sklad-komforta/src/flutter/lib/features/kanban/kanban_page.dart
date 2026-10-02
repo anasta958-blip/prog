@@ -176,11 +176,11 @@ final class _KanbanPageState extends State<KanbanPage> {
   Future<void> _openEditor(KanbanColumn column, {KanbanCard? card}) async {
     final board = widget.controller.board;
     if (board == null || board.categories.isEmpty) return;
-    final opensQuoteEditor =
-        board.specialization == WorkflowSpecialization.quote ||
-        board.specialization == WorkflowSpecialization.quoteAndPrequote;
+    // КП/ПКП и комплектация открываются в полноэкранном редакторе документа.
+    final opensDocumentEditor =
+        board.specialization != WorkflowSpecialization.standard;
     if (card != null &&
-        opensQuoteEditor &&
+        opensDocumentEditor &&
         widget.config != null &&
         widget.authController != null) {
       _stopAutoScroll();
@@ -264,25 +264,17 @@ final class _KanbanPageState extends State<KanbanPage> {
     KanbanColumn column,
     WorkflowCreationAction action,
   ) {
-    if (action == WorkflowCreationAction.order) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const AppSnackBar(
-          content: Text(
-            'Редактор комплектации будет подключён отдельным этапом.',
-          ),
-        ),
-      );
-      return;
-    }
     if (widget.config == null || widget.authController == null) return;
     _stopAutoScroll();
     setState(() {
       _quoteBoard = widget.controller.board;
       _openedQuoteCard = null;
       _newQuoteColumnId = column.id;
-      _newQuoteKind = action == WorkflowCreationAction.prequote
-          ? QuoteKind.prequote
-          : QuoteKind.quote;
+      _newQuoteKind = switch (action) {
+        WorkflowCreationAction.prequote => QuoteKind.prequote,
+        WorkflowCreationAction.quote => QuoteKind.quote,
+        WorkflowCreationAction.order => null,
+      };
     });
   }
 
@@ -334,6 +326,20 @@ final class _KanbanPageState extends State<KanbanPage> {
 
   Widget _body(bool compact) {
     final controller = widget.controller;
+    if (_quoteEditorOpen &&
+        _quoteBoard!.specialization == WorkflowSpecialization.order) {
+      return OrderEditorPage(
+        key: ValueKey(
+          'order:${_quoteBoard!.id}:${_openedQuoteCard?.id ?? _newQuoteColumnId}',
+        ),
+        config: widget.config!,
+        authController: widget.authController!,
+        board: _quoteBoard!,
+        card: _openedQuoteCard,
+        creationColumnId: _newQuoteColumnId,
+        onBack: () => unawaited(_closeQuoteEditor()),
+      );
+    }
     if (_quoteEditorOpen) {
       return QuoteEditorPage(
         key: ValueKey(
@@ -1293,8 +1299,15 @@ final class _KanbanCardTile extends StatelessWidget {
                       icon: const Icon(Icons.unarchive_outlined, size: 16),
                       label: const Text('Из архива'),
                     ),
+                  if (card.linkedCards.isNotEmpty) ...[
+                    for (final linked in card.linkedCards)
+                      _LinkedCardBadge(linked: linked),
+                    const SizedBox(height: 6),
+                  ],
                   if (card.quote case final quote?)
                     _QuoteCardDetails(card: card, quote: quote)
+                  else if (card.order case final order?)
+                    _OrderCardDetails(card: card, order: order)
                   else ...[
                     Text(
                       '№${card.number}',
@@ -1576,6 +1589,153 @@ final class _QuoteCardDetails extends StatelessWidget {
           movedAt,
           Key('kanban-quote-moved-${card.id}'),
         ),
+    ],
+  );
+}
+
+/// Пометка «карточка есть и в другом канбане» (КП ↔ комплектация). Сервер
+/// присылает её, только пока карточка стоит в столбце-триггере переноса.
+final class _LinkedCardBadge extends StatelessWidget {
+  const _LinkedCardBadge({required this.linked});
+
+  final KanbanLinkedCard linked;
+
+  @override
+  Widget build(BuildContext context) {
+    final toOrder = linked.specialization == WorkflowSpecialization.order;
+    return Container(
+      key: ValueKey('kanban-linked-${linked.cardId}'),
+      margin: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: const Color(0x1F22C55E),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0x6622C55E)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            toOrder ? Icons.inventory_2_outlined : Icons.description_outlined,
+            size: 14,
+            color: const Color(0xFF6EE7A0),
+          ),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              '${toOrder ? 'В комплектации' : 'В КП'} №${linked.cardNumber} · ${linked.columnName}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Color(0xFF6EE7A0),
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Сводка комплектации на карточке канбана.
+final class _OrderCardDetails extends StatelessWidget {
+  const _OrderCardDetails({required this.card, required this.order});
+
+  final KanbanCard card;
+  final KanbanOrderSummary order;
+
+  static const _muted = Color(0xFF8EA5C4);
+  static const _faint = Color(0xFF7188A8);
+
+  Widget _line(String label, String? value) => Padding(
+    padding: const EdgeInsets.only(top: 4),
+    child: Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(
+            text: '$label:  ',
+            style: const TextStyle(color: _muted),
+          ),
+          TextSpan(
+            text: value?.trim().isNotEmpty == true ? value!.trim() : '—',
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(fontSize: 13, height: 1.3),
+    ),
+  );
+
+  Widget _trace(String label, String? name, String? role, DateTime at) =>
+      Padding(
+        padding: const EdgeInsets.only(top: 3),
+        child: Text(
+          '$label: ${_QuoteCardDetails._person(name, role)} '
+          '(${_QuoteCardDetails._dateTime(at)})',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(color: _faint, fontSize: 10, height: 1.3),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        'Комплектация №${card.number}'
+        '${order.sourceQuoteNumber == null ? '' : ' · из КП №${order.sourceQuoteNumber}'}',
+        key: Key('kanban-order-number-${card.id}'),
+        style: const TextStyle(
+          color: _muted,
+          fontSize: 14,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      _line('Заказчик', order.clientName),
+      _line('Менеджер', order.managerName),
+      if (order.objectType?.trim().isNotEmpty ?? false)
+        _line('Тип объекта', order.objectType),
+      _line(
+        'Создано',
+        '${_QuoteCardDetails._dateTime(card.createdAt)} · '
+            '${_QuoteCardDetails._person(card.createdByName, card.createdByRole)}',
+      ),
+      const SizedBox(height: 8),
+      Wrap(
+        spacing: 10,
+        runSpacing: 4,
+        children: [
+          Text(
+            'Позиций: ${order.positionCount}',
+            key: Key('kanban-order-positions-${card.id}'),
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+          ),
+          if (order.reorderCount > 0)
+            Text(
+              'Дозаказ: ${order.reorderCount}',
+              style: const TextStyle(
+                color: Color(0xFFF59E0B),
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          Text(
+            'Счетов: ${order.invoiceCount}',
+            style: const TextStyle(color: _muted, fontSize: 12),
+          ),
+        ],
+      ),
+      const SizedBox(height: 8),
+      const Divider(height: 1),
+      const SizedBox(height: 4),
+      _trace('Изменил', card.updatedByName, card.updatedByRole, card.updatedAt),
+      if (card.movedAt case final movedAt?)
+        _trace('Статус изменил', card.movedByName, card.movedByRole, movedAt),
     ],
   );
 }

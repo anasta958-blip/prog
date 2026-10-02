@@ -421,6 +421,7 @@ class _CompanyAuditCardState extends State<CompanyAuditCard> {
       'catalog_category' => 'Категория каталога',
       'kanban_card' => 'Карточка канбана',
       'quote' => 'КП / ПКП',
+      'order' => 'Комплектация',
       'organization_configuration' ||
       'company_configuration' => 'Настройки организации',
       'organization_profile' ||
@@ -432,6 +433,11 @@ class _CompanyAuditCardState extends State<CompanyAuditCard> {
       'created' || 'import_created' => 'Создание',
       'deleted' || 'deleted_with_data' => 'Удаление',
       'moved' => 'Перемещение',
+      'moved_by_transfer' => 'Перенос между канбанами',
+      'created_from_quote' => 'Создание из КП',
+      'synced_from_quote' => 'Обновление из КП',
+      'invoice_added' => 'Добавление счёта',
+      'invoice_deleted' => 'Удаление счёта',
       'archived' => 'Перемещение в архив',
       'restored' => 'Возврат из архива',
       'password_changed' => 'Смена пароля',

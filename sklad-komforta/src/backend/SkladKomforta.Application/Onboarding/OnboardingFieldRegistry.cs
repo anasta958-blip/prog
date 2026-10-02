@@ -20,9 +20,16 @@ public static class OnboardingFieldRegistry
 {
     public const string CustomFieldPrefix = "custom_";
 
+    /// <summary>
+    /// Поля, доступные в «Поля в канбанах» канбана комплектации без поля в
+    /// категории каталога: их значения существуют только в комплектации.
+    /// </summary>
+    public static readonly IReadOnlySet<string> OrderOnlyFieldCodes =
+        new HashSet<string>(StringComparer.Ordinal) { "shipment_status" };
+
     public static readonly IReadOnlySet<string> CustomFieldTypes = new HashSet<string>(StringComparer.Ordinal)
     {
-        "text", "number", "money", "percent", "dictionary", "boolean", "relation", "enum",
+        "text", "number", "money", "percent", "dictionary", "boolean", "relation",
         "calculated_money"
     };
 
@@ -47,7 +54,6 @@ public static class OnboardingFieldRegistry
         new("supplier", "Поставщик", "dictionary", true, false, "Основные"),
         new("purchase_price", "Закупочная цена", "money", true, false, "Цены и расчёты"),
         new("minimal_price", "Минимальная цена", "money", true, false, "Цены и расчёты"),
-        new("price_type", "Тип цены", "enum", true, false, "Цены и расчёты"),
         new("markup_value", "Наценка", "percent", true, false, "Цены и расчёты"),
         new("base_price", "Цена", "money", true, false, "Цены и расчёты"),
         new("discount_value", "Скидка", "percent", true, false, "Цены и расчёты"),
@@ -55,8 +61,7 @@ public static class OnboardingFieldRegistry
         new("excluded_from_calc", "Не считать", "boolean", true, false, "Служебные"),
         new("technical_note", "Техническая информация", "text", true, false, "Служебные"),
         new("linked_services", "Связанные позиции", "relation", true, false, "Служебные"),
-        new("invoice_check", "Проверка счёта", "enum", true, false, "Комплектация"),
-        new("shipment_status", "Статус отгрузки", "enum", true, false, "Комплектация"),
+        new("shipment_status", "Статус отгрузки", "dictionary", true, false, "Комплектация"),
     ];
 
     private static readonly Dictionary<string, OnboardingFieldDefinition> ByCode =

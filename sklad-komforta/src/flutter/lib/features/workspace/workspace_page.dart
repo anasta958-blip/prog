@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/core/widgets/mobile_collapsible_navigation.dart';
+import 'package:sklad_komforta_app/core/widgets/workspace_header.dart';
 import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_controller.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_page.dart';
@@ -11,6 +12,7 @@ import 'package:sklad_komforta_app/features/company/company_models.dart';
 import 'package:sklad_komforta_app/features/company/company_page.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_controller.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_page.dart';
+import 'package:sklad_komforta_app/features/orders/pdf_viewer_window.dart';
 
 /// Главная оболочка авторизованной части приложения.
 final class WorkspacePage extends StatefulWidget {
@@ -100,90 +102,96 @@ class _WorkspacePageState extends State<WorkspacePage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    body: SafeArea(
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final desktop = constraints.maxWidth >= 840;
-          final content = switch (selectedIndex) {
-            1 => CatalogPage(controller: catalogController),
-            2 => CompanyPage(
-              controller: companyController,
-              section: companySection,
-              onSectionRequested: _selectCompanySection,
-              configurationEditGuard: configurationEditGuard,
-            ),
-            3 => _SessionsPage(controller: widget.authController),
-            _ => KanbanPage(
-              controller: kanbanController,
-              config: widget.config,
-              authController: widget.authController,
-            ),
-          };
-          if (!desktop) {
-            return Scaffold(
-              appBar: AppBar(
-                toolbarHeight: 48,
-                titleSpacing: 0,
-                title: Text(
-                  switch (selectedIndex) {
-                    1 => 'Каталог товаров',
-                    2 => companySection.label,
-                    3 => 'Активные устройства',
-                    _ => 'Канбаны',
-                  },
-                  style: const TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
+    // Окна просмотра PDF плавают над рабочей областью и закрываются вместе
+    // с ней (например, при выходе).
+    body: PdfViewerHost(
+      child: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final desktop = constraints.maxWidth >= 840;
+            final content = switch (selectedIndex) {
+              1 => CatalogPage(controller: catalogController),
+              2 => CompanyPage(
+                controller: companyController,
+                section: companySection,
+                onSectionRequested: _selectCompanySection,
+                configurationEditGuard: configurationEditGuard,
+              ),
+              3 => _SessionsPage(controller: widget.authController),
+              _ => KanbanPage(
+                controller: kanbanController,
+                config: widget.config,
+                authController: widget.authController,
+              ),
+            };
+            if (!desktop) {
+              return Scaffold(
+                appBar: AppBar(
+                  toolbarHeight: 48,
+                  titleSpacing: 0,
+                  title: Text(
+                    switch (selectedIndex) {
+                      1 => 'Каталог товаров',
+                      2 => companySection.label,
+                      3 => 'Активные устройства',
+                      _ => 'Канбаны',
+                    },
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  backgroundColor: const Color(0xFF101823),
+                ),
+                drawer: Drawer(
+                  backgroundColor: const Color(0xFF101823),
+                  child: SafeArea(
+                    child: _Navigation(
+                      selectedIndex: selectedIndex,
+                      companySection: companySection,
+                      companyExpanded: companyExpanded,
+                      lifecycle: companyController.lifecycle,
+                      onSelect: _select,
+                      onToggleCompany: _toggleCompany,
+                      onSelectCompanySection: _selectCompanySection,
+                    ),
                   ),
                 ),
-                backgroundColor: const Color(0xFF101823),
-              ),
-              drawer: Drawer(
-                backgroundColor: const Color(0xFF101823),
-                child: SafeArea(
-                  child: _Navigation(
-                    selectedIndex: selectedIndex,
-                    companySection: companySection,
-                    companyExpanded: companyExpanded,
-                    lifecycle: companyController.lifecycle,
-                    onSelect: _select,
-                    onToggleCompany: _toggleCompany,
-                    onSelectCompanySection: _selectCompanySection,
+                body: content,
+              );
+            }
+            return Row(
+              children: [
+                AnimatedContainer(
+                  key: const Key('workspace-sidebar'),
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOutCubic,
+                  width: sidebarCollapsed ? 72 : 220,
+                  child: DecoratedBox(
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF101823),
+                      border: Border(
+                        right: BorderSide(color: Color(0xFF253348)),
+                      ),
+                    ),
+                    child: _Navigation(
+                      selectedIndex: selectedIndex,
+                      companySection: companySection,
+                      companyExpanded: companyExpanded,
+                      lifecycle: companyController.lifecycle,
+                      onSelect: _select,
+                      onToggleCompany: _toggleCompany,
+                      onSelectCompanySection: _selectCompanySection,
+                      collapsed: sidebarCollapsed,
+                      onToggleSidebar: _toggleSidebar,
+                    ),
                   ),
                 ),
-              ),
-              body: content,
+                Expanded(child: content),
+              ],
             );
-          }
-          return Row(
-            children: [
-              AnimatedContainer(
-                key: const Key('workspace-sidebar'),
-                duration: const Duration(milliseconds: 180),
-                curve: Curves.easeOutCubic,
-                width: sidebarCollapsed ? 72 : 220,
-                child: DecoratedBox(
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF101823),
-                    border: Border(right: BorderSide(color: Color(0xFF253348))),
-                  ),
-                  child: _Navigation(
-                    selectedIndex: selectedIndex,
-                    companySection: companySection,
-                    companyExpanded: companyExpanded,
-                    lifecycle: companyController.lifecycle,
-                    onSelect: _select,
-                    onToggleCompany: _toggleCompany,
-                    onSelectCompanySection: _selectCompanySection,
-                    collapsed: sidebarCollapsed,
-                    onToggleSidebar: _toggleSidebar,
-                  ),
-                ),
-              ),
-              Expanded(child: content),
-            ],
-          );
-        },
+          },
+        ),
       ),
     ),
   );
@@ -297,12 +305,13 @@ final class _Navigation extends StatelessWidget {
           ),
         )
       else
-        Padding(
+        Container(
+          height: workspaceHeaderHeight,
           padding: EdgeInsets.fromLTRB(
             20,
-            12,
+            0,
             onToggleSidebar == null ? 16 : 6,
-            10,
+            0,
           ),
           child: Row(
             children: [

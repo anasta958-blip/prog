@@ -10,9 +10,13 @@ import 'package:sklad_komforta_app/features/catalog/catalog_models.dart';
 import 'package:sklad_komforta_app/features/company/company_api.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_models.dart';
 import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
+import 'package:sklad_komforta_app/features/orders/order_api.dart';
+import 'package:sklad_komforta_app/features/orders/order_models.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_api.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_configured_calculation.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_models.dart';
+
+part 'order_controller.dart';
 
 const _autoRelationSourcesKey = '_auto_relation_sources';
 
@@ -79,6 +83,22 @@ final class QuoteController extends ChangeNotifier {
   final Map<String, Future<void>> _behaviorQueues = {};
 
   double? get initialVatRate => availableVatRates.firstOrNull;
+
+  /// Добавлять ли связанные позиции каталога при выборе карточки. В
+  /// комплектации связи не материализуются: её состав задают КП и пользователь.
+  bool get attachesCatalogRelations => true;
+
+  /// Показывать ли денежные итоги категорий и разделов (в комплектации цен нет).
+  bool get showsMoney => true;
+
+  /// Видна ли строка при текущих фильтрах таблицы (фильтры есть у комплектации).
+  bool isPositionVisible(QuotePositionDraft position) => true;
+
+  /// Включены ли фильтры строк: при фильтрации перетаскивание строк отключается.
+  bool get positionFiltersActive => false;
+
+  /// Подсвечивать ли строку (в комплектации — дозаказ).
+  bool isPositionHighlighted(QuotePositionDraft position) => false;
 
   void showDraftRestoredMessage() {
     successMessage = 'Восстановлен локальный черновик';
@@ -590,6 +610,10 @@ final class QuoteController extends ChangeNotifier {
     CatalogItem item, {
     bool additionalContribution = false,
   }) async {
+    if (!attachesCatalogRelations) {
+      await positionChanged(position: primaryPosition, fieldCode: 'quantity');
+      return;
+    }
     final relationGateway = _catalogGateway is CatalogRelationGateway
         ? _catalogGateway as CatalogRelationGateway
         : null;

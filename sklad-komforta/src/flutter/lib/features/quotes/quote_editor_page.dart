@@ -14,20 +14,30 @@ import 'package:sklad_komforta_app/core/models/workflow_specialization.dart';
 import 'package:sklad_komforta_app/core/network/api_exception.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
 import 'package:sklad_komforta_app/core/widgets/app_number_field.dart';
+import 'package:sklad_komforta_app/core/widgets/workspace_header.dart';
 import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_models.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_models.dart';
+import 'package:sklad_komforta_app/features/orders/order_local_draft.dart';
+import 'package:sklad_komforta_app/features/orders/order_models.dart';
+import 'package:sklad_komforta_app/features/orders/order_preview_page.dart';
+import 'package:sklad_komforta_app/features/orders/pdf_viewer_window.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_controller.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_client_access_api.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_models.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_local_draft.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_preview_page.dart';
 
+part 'order_editor_page.dart';
+
 const _background = Color(0xFF0B1119);
 const _surface = Color(0xFF111A27);
 const _surfaceRaised = Color(0xFF162131);
 const _border = Color(0xFF293A51);
 const _muted = Color(0xFF8FA4C2);
+
+/// Значение поля, которого нет в справочнике.
+const _missingValue = Color(0xFFF59E0B);
 const _accent = Color(0xFF4D8DFF);
 
 /// Полноэкранный редактор специализированного содержимого карточки КП/ПКП.
@@ -1365,38 +1375,22 @@ final class _MetadataPanel extends StatelessWidget {
                 }
               },
             ),
-            AppSelectField<String>(
+            _EmployeeField(
+              key: const Key('quote-manager'),
+              controller: controller,
               value: draft.managerUserId,
               label: 'Менеджер',
-              options: [
-                const AppSelectOption<String>(value: null, label: 'Не указан'),
-                ...controller.employees
-                    .where((item) => item.isActive)
-                    .map(
-                      (item) => AppSelectOption(
-                        value: item.userId,
-                        label: item.displayName,
-                      ),
-                    ),
-              ],
+              enabled: draft.canChangeManager,
               onChanged: (value) => controller.updateDocument(
                 (draft) => draft.managerUserId = value,
               ),
             ),
-            AppSelectField<String>(
+            _EmployeeField(
+              key: const Key('quote-sales-head'),
+              controller: controller,
               value: draft.salesHeadUserId,
               label: 'РОП',
-              options: [
-                const AppSelectOption<String>(value: null, label: 'Не указан'),
-                ...controller.employees
-                    .where((item) => item.isActive)
-                    .map(
-                      (item) => AppSelectOption(
-                        value: item.userId,
-                        label: item.displayName,
-                      ),
-                    ),
-              ],
+              enabled: draft.canChangeManager,
               onChanged: (value) => controller.updateDocument(
                 (draft) => draft.salesHeadUserId = value,
               ),
@@ -1467,6 +1461,50 @@ final class _MetadataPanel extends StatelessWidget {
         },
       ),
     );
+  }
+}
+
+/// Выбор сотрудника (менеджер, РОП). Без права смены поле только для чтения:
+/// менеджер — создатель карточки, РОП — его руководитель.
+final class _EmployeeField extends StatelessWidget {
+  const _EmployeeField({
+    required this.controller,
+    required this.value,
+    required this.label,
+    required this.enabled,
+    required this.onChanged,
+    super.key,
+  });
+
+  final QuoteController controller;
+  final String? value;
+  final String label;
+  final bool enabled;
+  final ValueChanged<String?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final field = AppSelectField<String>(
+      value: value,
+      label: label,
+      enabled: enabled,
+      options: [
+        const AppSelectOption<String>(value: null, label: 'Не указан'),
+        ...controller.employees
+            .where((item) => item.isActive || item.userId == value)
+            .map(
+              (item) =>
+                  AppSelectOption(value: item.userId, label: item.displayName),
+            ),
+      ],
+      onChanged: enabled ? onChanged : null,
+    );
+    return enabled
+        ? field
+        : Tooltip(
+            message: 'Изменить может сотрудник с правом смены менеджера',
+            child: field,
+          );
   }
 }
 
@@ -1627,11 +1665,15 @@ final class _VariantContent extends StatelessWidget {
     required this.onAddSection,
     required this.onAddPosition,
     required this.columnWidthStore,
+    this.emptyTitle = 'Вариант пока пуст',
   });
 
   final QuoteController controller;
   final KanbanBoard board;
   final QuoteVariantDraft variant;
+
+  /// Подпись пустого документа (в комплектации — своя).
+  final String emptyTitle;
   final Set<String> expandedCategories;
   final Set<String> expandedSections;
   final ValueChanged<String> onToggleCategory;
@@ -1645,7 +1687,7 @@ final class _VariantContent extends StatelessWidget {
   Widget build(BuildContext context) => Column(
     children: [
       if (variant.categories.isEmpty)
-        _EmptyVariant(onAddCategory: onAddCategory)
+        _EmptyVariant(onAddCategory: onAddCategory, title: emptyTitle)
       else
         for (final category in variant.categories)
           Padding(
@@ -1755,10 +1797,12 @@ final class _CategoryBlock extends StatelessWidget {
                           icon: const Icon(Icons.add_circle_outline),
                         ),
                       const SizedBox(width: 8),
-                      _MoneyLabel('Закупка', category.purchaseTotal),
-                      const SizedBox(width: 16),
-                      _MoneyLabel('Розница', category.clientTotal),
-                      const SizedBox(width: 8),
+                      if (controller.showsMoney) ...[
+                        _MoneyLabel('Закупка', category.purchaseTotal),
+                        const SizedBox(width: 16),
+                        _MoneyLabel('Розница', category.clientTotal),
+                        const SizedBox(width: 8),
+                      ],
                       IconButton(
                         tooltip: 'Удалить категорию',
                         color: const Color(0xFFFF7676),
@@ -1974,6 +2018,9 @@ final class _SectionBlockState extends State<_SectionBlock> {
     final expanded = widget.expanded;
     final onToggle = widget.onToggle;
     final onAddPosition = widget.onAddPosition;
+    final visiblePositions = section.positions
+        .where(controller.isPositionVisible)
+        .toList(growable: false);
     final widthScope = widget.widthScope;
     final columnWidthStore = widget.columnWidthStore;
     return Column(
@@ -2087,19 +2134,25 @@ final class _SectionBlockState extends State<_SectionBlock> {
                                   shrinkWrap: true,
                                   physics: const NeverScrollableScrollPhysics(),
                                   buildDefaultDragHandles: false,
-                                  itemCount: section.positions.length,
-                                  onReorder: (oldIndex, newIndex) =>
-                                      controller.reorderPosition(
-                                        section,
-                                        oldIndex,
-                                        newIndex,
-                                      ),
+                                  itemCount: visiblePositions.length,
+                                  onReorder: (oldIndex, newIndex) {
+                                    // При фильтрации индексы видимых строк не
+                                    // совпадают с порядком раздела.
+                                    if (controller.positionFiltersActive) {
+                                      return;
+                                    }
+                                    controller.reorderPosition(
+                                      section,
+                                      oldIndex,
+                                      newIndex,
+                                    );
+                                  },
                                   itemBuilder: (context, index) => _PositionRow(
-                                    key: ValueKey(section.positions[index].id),
+                                    key: ValueKey(visiblePositions[index].id),
                                     controller: controller,
                                     entry: entry,
                                     section: section,
-                                    position: section.positions[index],
+                                    position: visiblePositions[index],
                                     fields: fields,
                                     fieldWidths: fieldWidths,
                                     index: index,
@@ -2237,8 +2290,10 @@ final class _SectionHeader extends StatelessWidget {
             ),
             const SizedBox(width: 10),
           ],
-          _MoneyLabel('Итого', section.clientTotal),
-          const SizedBox(width: 8),
+          if (controller.showsMoney) ...[
+            _MoneyLabel('Итого', section.clientTotal),
+            const SizedBox(width: 8),
+          ],
           IconButton(
             tooltip: 'Удалить раздел',
             color: const Color(0xFFFF7676),
@@ -2982,9 +3037,13 @@ final class _PositionFieldCell extends StatelessWidget {
         .where((item) => item.isNotEmpty)
         .toSet()
         .toList(growable: false);
+    // Значение, которого больше нет в справочнике (удалено или
+    // переименовано в настройках), не прячется: оно показывается с пометкой,
+    // пока пользователь не выберет другое.
     return _RowSelect(
-      value: values.contains(value) ? value : null,
+      value: value.isEmpty ? null : value,
       values: values,
+      missing: value.isNotEmpty && !values.contains(value),
       width: width,
       onChanged: onChanged,
     );
@@ -3039,23 +3098,34 @@ final class _PositionRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final changedExternally = position.values['changed_externally'] == true;
     final isNew = position.catalogItemId == null;
+    // Дозаказ в комплектации: оранжевая полоса слева и тёплая заливка.
+    final highlighted = controller.isPositionHighlighted(position);
     return Container(
+      key: highlighted ? ValueKey('position-reorder-${position.id}') : null,
       height: 48,
       decoration: BoxDecoration(
-        color: isNew
+        color: highlighted
+            ? const Color(0x24F59E0B)
+            : isNew
             ? const Color(0x1AF5B942)
             : changedExternally
             ? const Color(0x18EF5350)
             : index.isEven
             ? const Color(0xFF101A27)
             : const Color(0xFF0E1722),
-        border: Border(
-          bottom: const BorderSide(color: Color(0xFF233248)),
-          left: changedExternally
-              ? const BorderSide(color: Color(0xFFEF5350), width: 2)
-              : BorderSide.none,
-        ),
+        border: const Border(bottom: BorderSide(color: Color(0xFF233248))),
       ),
+      // Полоса слева рисуется поверх строки и не отнимает ширину у колонок
+      // таблицы фиксированной ширины.
+      foregroundDecoration: highlighted || changedExternally
+          ? BoxDecoration(
+              border: Border(
+                left: highlighted
+                    ? const BorderSide(color: Color(0xFFF59E0B), width: 3)
+                    : const BorderSide(color: Color(0xFFEF5350), width: 2),
+              ),
+            )
+          : null,
       child: Row(
         children: [
           SizedBox(
@@ -3425,6 +3495,7 @@ final class _TextField extends StatelessWidget {
     required this.label,
     required this.onChanged,
     this.maxLines = 1,
+    super.key,
   });
   final String initialValue;
   final String label;
@@ -3468,12 +3539,17 @@ final class _RowSelect extends StatelessWidget {
     required this.values,
     required this.width,
     required this.onChanged,
+    this.missing = false,
   });
 
   final String? value;
   final List<String> values;
   final double width;
   final ValueChanged<String?> onChanged;
+
+  /// [value] отсутствует в [values]: показывается оранжевым с подсказкой и
+  /// первым пунктом меню.
+  final bool missing;
 
   @override
   Widget build(BuildContext context) => SizedBox(
@@ -3490,6 +3566,17 @@ final class _RowSelect extends StatelessWidget {
             onPressed: () => onChanged(null),
             child: const Text('Не выбрано'),
           ),
+          if (missing)
+            MenuItemButton(
+              closeOnActivate: true,
+              onPressed: () => onChanged(value),
+              child: Text(
+                '$value (нет в справочнике)',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: _missingValue),
+              ),
+            ),
           for (final item in values)
             MenuItemButton(
               closeOnActivate: true,
@@ -3513,11 +3600,20 @@ final class _RowSelect extends StatelessWidget {
             child: Row(
               children: [
                 Expanded(
-                  child: Text(
-                    value ?? '',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 11),
+                  child: _OptionalTooltip(
+                    message: missing
+                        ? 'Этого значения нет в справочнике'
+                        : null,
+                    child: Text(
+                      value ?? '',
+                      key: missing ? const Key('row-select-missing') : null,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: missing ? _missingValue : null,
+                      ),
+                    ),
                   ),
                 ),
                 const Icon(Icons.arrow_drop_down, size: 17, color: _muted),
@@ -3528,6 +3624,18 @@ final class _RowSelect extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// Подсказка только при наличии текста.
+final class _OptionalTooltip extends StatelessWidget {
+  const _OptionalTooltip({required this.message, required this.child});
+
+  final String? message;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) =>
+      message == null ? child : Tooltip(message: message, child: child);
 }
 
 final class _RowInput extends StatefulWidget {
@@ -3991,8 +4099,12 @@ final class _MoneyLabel extends StatelessWidget {
 }
 
 final class _EmptyVariant extends StatelessWidget {
-  const _EmptyVariant({required this.onAddCategory});
+  const _EmptyVariant({
+    required this.onAddCategory,
+    this.title = 'Вариант пока пуст',
+  });
   final VoidCallback onAddCategory;
+  final String title;
 
   @override
   Widget build(BuildContext context) => _Panel(
@@ -4002,10 +4114,7 @@ final class _EmptyVariant extends StatelessWidget {
         children: [
           const Icon(Icons.inventory_2_outlined, size: 42, color: _muted),
           const SizedBox(height: 12),
-          const Text(
-            'Вариант пока пуст',
-            style: TextStyle(fontWeight: FontWeight.w700),
-          ),
+          Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
           const SizedBox(height: 6),
           const Text(
             'Добавьте первую категорию из настроек организации.',
