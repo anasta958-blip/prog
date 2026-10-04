@@ -22,6 +22,8 @@ import 'package:sklad_komforta_app/features/orders/order_local_draft.dart';
 import 'package:sklad_komforta_app/features/orders/order_models.dart';
 import 'package:sklad_komforta_app/features/orders/order_preview_page.dart';
 import 'package:sklad_komforta_app/features/orders/pdf_viewer_window.dart';
+import 'package:sklad_komforta_app/features/outbound/outbound_models.dart';
+import 'package:sklad_komforta_app/features/outbound/outbound_send.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_controller.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_client_access_api.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_models.dart';
@@ -51,6 +53,7 @@ final class QuoteEditorPage extends StatefulWidget {
     this.createKind,
     required this.onBack,
     this.controller,
+    this.outboundGatewayFactory,
     super.key,
   });
 
@@ -62,6 +65,9 @@ final class QuoteEditorPage extends StatefulWidget {
   final QuoteKind? createKind;
   final VoidCallback onBack;
   final QuoteController? controller;
+
+  /// Транспорт внешней отправки; в тестах — память.
+  final OutboundGatewayFactory? outboundGatewayFactory;
 
   @override
   State<QuoteEditorPage> createState() => _QuoteEditorPageState();
@@ -102,6 +108,54 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
       );
     }
     _initializeEditor();
+    _loadOutbound();
+  }
+
+  /// Способы внешней отправки для кнопки «Отправить».
+  OutboundChannels outboundChannels = OutboundChannels.none;
+  bool sending = false;
+
+  Future<void> _loadOutbound() async {
+    final channels = await loadOutboundChannels(
+      widget.authController,
+      gatewayFactory: widget.outboundGatewayFactory,
+    );
+    if (mounted) setState(() => outboundChannels = channels);
+  }
+
+  /// Отправляет PDF — тот же, что при печати. Несохранённые правки сначала
+  /// сохраняются с согласия пользователя: сервер отправляет сохранённую версию.
+  Future<void> _sendDocument(OutboundChannel channel) async {
+    if (sending || controller.saving) return;
+    if (controller.dirty ||
+        (controller.persistedCardId ?? widget.card?.id) == null) {
+      if (!await _confirmSaveAndSend(context)) return;
+      final saved = await controller.save(
+        board: widget.board,
+        card: widget.card,
+        creationColumnId: widget.creationColumnId,
+      );
+      if (!saved || !mounted) return;
+    }
+    final scope = await _askPrintScope(title: 'Что отправить?');
+    final cardId = controller.persistedCardId ?? widget.card?.id;
+    if (scope == null || cardId == null || !mounted) return;
+    final selection = controller.printSelection(scope);
+    setState(() => sending = true);
+    try {
+      await sendCardDocument(
+        context,
+        auth: widget.authController,
+        boardId: widget.board.id,
+        cardId: cardId,
+        channel: channel,
+        proposalTypeId: selection.typeId,
+        variantId: selection.variantId,
+        gatewayFactory: widget.outboundGatewayFactory,
+      );
+    } finally {
+      if (mounted) setState(() => sending = false);
+    }
   }
 
   Future<void> _initializeEditor() async {
@@ -216,6 +270,12 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
                   onPreview: _openPreview,
                   onPrint: _printPdf,
                   onShare: creatingClientAccess ? null : _manageClientAccess,
+                  sendButton: OutboundSendButton(
+                    channels: outboundChannels,
+                    compact: compact,
+                    busy: sending,
+                    onSend: _sendDocument,
+                  ),
                   onSave: () => controller.save(
                     board: widget.board,
                     card: widget.card,
@@ -661,8 +721,11 @@ final class _CommandBar extends StatelessWidget {
     required this.onPrint,
     required this.onShare,
     required this.onSave,
+    this.sendButton,
   });
 
+  /// Кнопка «Отправить» (Telegram, почта); скрыта, если способов нет.
+  final Widget? sendButton;
   final QuoteController controller;
   final KanbanCard? card;
   final KanbanBoard board;
@@ -750,6 +813,7 @@ final class _CommandBar extends StatelessWidget {
                       )
                     : const Icon(Icons.print_outlined, size: 18),
               ),
+              ?sendButton,
               const SizedBox(width: 7),
               IconButton.outlined(
                 onPressed: onShare,
@@ -769,6 +833,7 @@ final class _CommandBar extends StatelessWidget {
                 label: 'Печать',
                 onPressed: controller.printing ? null : onPrint,
               ),
+              ?sendButton,
               _CommandAction(
                 icon: Icons.link,
                 label: 'Ссылка',
@@ -787,6 +852,34 @@ final class _CommandBar extends StatelessWidget {
     );
   }
 }
+
+/// Спрашивает, сохранить ли документ перед отправкой: сервер отправляет
+/// только сохранённую версию.
+Future<bool> _confirmSaveAndSend(BuildContext context) async =>
+    await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        icon: const Icon(Icons.save_outlined),
+        title: const Text('Сохранить и отправить?'),
+        content: const Text(
+          'В документе есть несохранённые изменения. Отправляется сохранённая '
+          'версия, поэтому сначала документ будет сохранён.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton.icon(
+            key: const Key('outbound-save-and-send'),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            icon: const Icon(Icons.send_outlined, size: 18),
+            label: const Text('Сохранить и отправить'),
+          ),
+        ],
+      ),
+    ) ==
+    true;
 
 final class _CommandAction extends StatelessWidget {
   const _CommandAction({

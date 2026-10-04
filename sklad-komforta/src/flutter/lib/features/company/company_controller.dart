@@ -78,6 +78,9 @@ final class CompanyController extends ChangeNotifier {
   bool canViewAudit = true;
   bool loading = false;
   bool saving = false;
+
+  /// Растёт при изменении настроек внешней отправки другим пользователем.
+  int outboundRevision = 0;
   String? error;
   bool saved = false;
   final Set<String> _approvedCategoryDataDeletions = <String>{};
@@ -123,6 +126,9 @@ final class CompanyController extends ChangeNotifier {
     final source = _realtime;
     if (source == null || _realtimeSubscription != null) return;
     _realtimeSubscription = source.events.listen((event) {
+      if (event.section == 'outbound' || event.kind == RealtimeEvent.resync) {
+        outboundRevision++;
+      }
       if (event.section == 'configuration' ||
           event.section == 'profile' ||
           event.kind == RealtimeEvent.resync) {

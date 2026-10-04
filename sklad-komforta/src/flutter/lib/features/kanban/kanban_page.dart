@@ -12,6 +12,8 @@ import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_card_editor.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_controller.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_models.dart';
+import 'package:sklad_komforta_app/features/outbound/outbound_models.dart';
+import 'package:sklad_komforta_app/features/outbound/outbound_send.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_editor_page.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_models.dart';
 
@@ -21,12 +23,16 @@ final class KanbanPage extends StatefulWidget {
     required this.controller,
     this.config,
     this.authController,
+    this.outboundGatewayFactory,
     super.key,
   });
 
   final KanbanController controller;
   final AppConfig? config;
   final AuthController? authController;
+
+  /// Транспорт внешней отправки; в тестах — память.
+  final OutboundGatewayFactory? outboundGatewayFactory;
 
   @override
   State<KanbanPage> createState() => _KanbanPageState();
@@ -39,6 +45,52 @@ final class _KanbanPageState extends State<KanbanPage> {
   double _autoScrollDirection = 0;
   bool _mobileToolbarExpanded = false;
   bool _openingClientLink = false;
+
+  /// Способы внешней отправки для меню карточек КП, ПКП и комплектаций.
+  OutboundChannels _outbound = OutboundChannels.none;
+  bool _sendingDocument = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadOutbound();
+  }
+
+  Future<void> _loadOutbound() async {
+    final auth = widget.authController;
+    if (auth == null || widget.config == null) return;
+    final channels = await loadOutboundChannels(
+      auth,
+      gatewayFactory: widget.outboundGatewayFactory,
+    );
+    if (mounted) setState(() => _outbound = channels);
+  }
+
+  /// Отправка из меню карточки: КП/ПКП — весь документ, как «Весь документ»
+  /// при печати; комплектация — её PDF.
+  Future<void> _sendCard(KanbanCard card, OutboundChannel channel) async {
+    final auth = widget.authController;
+    if (auth == null || _sendingDocument) return;
+    setState(() => _sendingDocument = true);
+    try {
+      await sendCardDocument(
+        context,
+        auth: auth,
+        boardId: card.workflowId,
+        cardId: card.id,
+        channel: channel,
+        gatewayFactory: widget.outboundGatewayFactory,
+      );
+    } finally {
+      if (mounted) setState(() => _sendingDocument = false);
+    }
+  }
+
+  /// Отправлять можно КП, ПКП и комплектации.
+  bool _sendsDocuments(KanbanBoard board) =>
+      board.specialization == WorkflowSpecialization.quote ||
+      board.specialization == WorkflowSpecialization.quoteAndPrequote ||
+      board.specialization == WorkflowSpecialization.order;
 
   Future<void> _openClientLink(KanbanCard card) async {
     final config = widget.config;
@@ -290,6 +342,8 @@ final class _KanbanPageState extends State<KanbanPage> {
       _newQuoteKind = null;
       _quoteBoard = null;
     });
+    // Настройки отправки могли измениться, пока был открыт редактор.
+    unawaited(_loadOutbound());
     if (widget.controller.board?.id != boardId) return;
     final currentPage = widget.controller.pageFor(columnId)?.page ?? 1;
     await widget.controller.loadColumn(columnId, page: currentPage);
@@ -337,6 +391,7 @@ final class _KanbanPageState extends State<KanbanPage> {
         board: _quoteBoard!,
         card: _openedQuoteCard,
         creationColumnId: _newQuoteColumnId,
+        outboundGatewayFactory: widget.outboundGatewayFactory,
         onBack: () => unawaited(_closeQuoteEditor()),
       );
     }
@@ -351,6 +406,7 @@ final class _KanbanPageState extends State<KanbanPage> {
         card: _openedQuoteCard,
         creationColumnId: _newQuoteColumnId,
         createKind: _newQuoteKind,
+        outboundGatewayFactory: widget.outboundGatewayFactory,
         onBack: () => unawaited(_closeQuoteEditor()),
       );
     }
@@ -433,6 +489,11 @@ final class _KanbanPageState extends State<KanbanPage> {
                             ? _openClientLink
                             : null,
                         sharingBusy: _openingClientLink,
+                        sendChannels: _sendsDocuments(board)
+                            ? _outbound.available
+                            : const [],
+                        sendingBusy: _sendingDocument,
+                        onSend: _sendCard,
                         onDrop: (card, targetIndex) => _dropCard(
                           card,
                           board.columns[index].id,
@@ -743,11 +804,19 @@ final class _KanbanColumnPanel extends StatelessWidget {
     required this.onDragEnd,
     this.onShare,
     this.sharingBusy = false,
+    this.sendChannels = const [],
+    this.sendingBusy = false,
+    this.onSend,
   });
 
   final KanbanController controller;
   final KanbanBoard board;
   final KanbanColumn column;
+
+  /// Способы внешней отправки документа карточки (меню карточки).
+  final List<OutboundChannel> sendChannels;
+  final bool sendingBusy;
+  final void Function(KanbanCard card, OutboundChannel channel)? onSend;
   final bool isFirst;
   final bool canCreate;
   final VoidCallback onCreate;
@@ -928,6 +997,11 @@ final class _KanbanColumnPanel extends StatelessWidget {
                               ? null
                               : () => onShare!(card),
                           sharingBusy: sharingBusy,
+                          sendChannels: sendChannels,
+                          sendingBusy: sendingBusy,
+                          onSend: onSend == null
+                              ? null
+                              : (channel) => onSend!(card, channel),
                           onArchive: controller.saving
                               ? null
                               : () => _archiveCard(context, card),
@@ -989,6 +1063,11 @@ final class _KanbanColumnPanel extends StatelessWidget {
                                     ? null
                                     : () => onShare!(card),
                                 sharingBusy: sharingBusy,
+                                sendChannels: sendChannels,
+                                sendingBusy: sendingBusy,
+                                onSend: onSend == null
+                                    ? null
+                                    : (channel) => onSend!(card, channel),
                                 onArchive: controller.saving
                                     ? null
                                     : () => _archiveCard(context, card),
@@ -1150,8 +1229,15 @@ final class _KanbanCardTile extends StatelessWidget {
     this.onArchive,
     this.onShare,
     this.sharingBusy = false,
+    this.sendChannels = const [],
+    this.sendingBusy = false,
+    this.onSend,
   });
 
+  /// Способы внешней отправки: пункты «В Telegram» и «На почту» меню.
+  final List<OutboundChannel> sendChannels;
+  final bool sendingBusy;
+  final ValueChanged<OutboundChannel>? onSend;
   final KanbanCard card;
   final KanbanBoard board;
   final Color accent;
@@ -1219,14 +1305,17 @@ final class _KanbanCardTile extends StatelessWidget {
                       ),
                       if (!dragPreview) ...[
                         const SizedBox(width: 6),
-                        if (!card.isArchived || onShare != null)
+                        if (!card.isArchived ||
+                            onShare != null ||
+                            (onSend != null && sendChannels.isNotEmpty))
                           SizedBox.square(
                             dimension: 30,
                             child: PopupMenuButton<String>(
                               tooltip: 'Действия карточки',
                               enabled:
                                   onArchive != null ||
-                                  (onShare != null && !sharingBusy),
+                                  (onShare != null && !sharingBusy) ||
+                                  (onSend != null && sendChannels.isNotEmpty),
                               padding: EdgeInsets.zero,
                               icon: const Icon(Icons.more_vert, size: 18),
                               position: PopupMenuPosition.under,
@@ -1234,17 +1323,40 @@ final class _KanbanCardTile extends StatelessWidget {
                               menuPadding: const EdgeInsets.symmetric(
                                 vertical: 4,
                               ),
-                              constraints: const BoxConstraints.tightFor(
-                                width: 112,
+                              constraints: BoxConstraints.tightFor(
+                                width: sendChannels.isEmpty ? 112 : 150,
                               ),
                               onSelected: (action) {
                                 if (action == 'share') {
                                   onShare?.call();
-                                } else {
+                                } else if (action == 'archive') {
                                   onArchive?.call();
+                                } else {
+                                  for (final channel in sendChannels) {
+                                    if (action == 'send-${channel.code}') {
+                                      onSend?.call(channel);
+                                    }
+                                  }
                                 }
                               },
                               itemBuilder: (_) => [
+                                if (onSend != null)
+                                  for (final channel in sendChannels)
+                                    PopupMenuItem(
+                                      key: ValueKey(
+                                        'card-send-${channel.code}-${card.id}',
+                                      ),
+                                      value: 'send-${channel.code}',
+                                      enabled: !sendingBusy,
+                                      height: 32,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                      ),
+                                      child: Text(
+                                        channel.label,
+                                        style: const TextStyle(fontSize: 13),
+                                      ),
+                                    ),
                                 if (onShare != null)
                                   PopupMenuItem(
                                     value: 'share',

@@ -7,6 +7,8 @@ import 'package:sklad_komforta_app/features/auth/auth_api.dart';
 import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
 import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
 import 'package:sklad_komforta_app/features/onboarding/organization_onboarding_page.dart';
+import 'package:sklad_komforta_app/features/outbound/outbound_api.dart';
+import 'package:sklad_komforta_app/features/outbound/outbound_models.dart';
 
 void main() {
   testWidgets('столбец-триггер переноса и дозаказ настраиваются в канбанах', (
@@ -39,6 +41,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    // Раздел «Внешняя отправка» есть среди вкладок настроек.
+    expect(find.text('Внешняя отправка'), findsOneWidget);
     for (final toggle
         in find.bySemanticsLabel('Развернуть канбан').evaluate().toList()) {
       await tester.tap(find.byWidget(toggle.widget));
@@ -82,6 +86,51 @@ void main() {
     await tester.tap(find.text('Сохранить изменения').first);
     await tester.pumpAndSettle();
     expect(saved.last.workflows.first.columns[1].transferTo, isNull);
+    auth.dispose();
+  });
+  testWidgets('вкладка «Внешняя отправка» открывается и сохраняет раздел', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 2400);
+    addTearDown(tester.view.reset);
+    final auth = AuthController(
+      const AppConfig(
+        apiBaseUrl: 'https://example.test/api/v1',
+        environment: 'test',
+      ),
+      api: _Gateway(),
+      tokens: _Tokens(),
+    )..accessToken = 'access-token';
+    final outbound = _Outbound();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: OrganizationOnboardingPage(
+            controller: auth,
+            settingsDraft: _draft(),
+            outboundGateway: outbound,
+            onSettingsSave: (draft, {deleteCategoryData = const []}) async =>
+                true,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Внешняя отправка'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Внешняя отправка'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('Telegram'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('outbound-chat-id-1')),
+      '-1001234567890',
+    );
+    await tester.tap(find.text('Сохранить изменения').first);
+    await tester.pumpAndSettle();
+    expect(outbound.saved?.chatId, '-1001234567890');
     auth.dispose();
   });
 }
@@ -134,4 +183,24 @@ final class _Gateway implements AuthGateway {
 final class _Tokens implements TokenRepository {
   @override
   dynamic noSuchMethod(Invocation invocation) => Future<void>.value();
+}
+
+final class _Outbound implements OutboundGateway {
+  OutboundSettingsModel? saved;
+
+  @override
+  Future<OutboundSettingsModel> getSettings(String accessToken) async =>
+      OutboundSettingsModel();
+
+  @override
+  Future<OutboundSettingsModel> saveSettings(
+    String accessToken,
+    OutboundSettingsModel settings,
+  ) async => saved = settings.copy();
+
+  @override
+  void close() {}
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

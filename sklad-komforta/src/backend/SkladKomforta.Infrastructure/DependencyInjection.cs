@@ -142,6 +142,20 @@ public static class DependencyInjection
         services.AddScoped<SkladKomforta.Application.Orders.IOrderService, Orders.PostgresOrderService>();
         services.AddScoped<SkladKomforta.Application.Orders.IOrderPdfService, Orders.OrderPdfService>();
         services.AddScoped<Kanban.IKanbanColumnEntryHandler, Orders.OrderTransferHandler>();
+        services.AddOptions<OutboundOptions>().Bind(configuration.GetSection(OutboundOptions.SectionName));
+        services.AddSingleton<Outbound.OutboundSecretProtector>();
+        services.AddScoped<SkladKomforta.Application.Outbound.IOutboundSettingsService, Outbound.PostgresOutboundSettingsService>();
+        services.AddScoped<SkladKomforta.Application.Outbound.IDocumentDeliveryService, Outbound.DocumentDeliveryService>();
+        services.AddSingleton<SkladKomforta.Application.Abstractions.Outbound.IEmailTransport, Outbound.SmtpEmailTransport>();
+        services.AddSingleton<SkladKomforta.Application.Abstractions.Outbound.ITelegramTransport, Outbound.TelegramBotTransport>();
+        // Токен бота входит в адрес запроса Bot API: журналирование HTTP для
+        // этого клиента отключено, чтобы токен не попал в логи.
+        services.AddHttpClient(Outbound.TelegramBotTransport.ClientName, client =>
+            {
+                client.BaseAddress = Outbound.TelegramBotTransport.BaseAddress;
+                client.Timeout = TimeSpan.FromSeconds(60);
+            })
+            .RemoveAllLoggers();
         services.AddScoped<SkladKomforta.Application.Company.ICompanyService, Company.PostgresCompanyService>();
         services.AddScoped<SkladKomforta.Application.Company.ICompanyWorkspaceService, Company.PostgresCompanyWorkspaceService>();
         services.AddHttpClient<SkladKomforta.Application.Company.ICompanyRegistryLookup, Company.EgrulCompanyRegistryLookup>(client =>

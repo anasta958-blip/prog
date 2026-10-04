@@ -16,8 +16,12 @@ final class OrderEditorPage extends StatefulWidget {
     required this.onBack,
     this.controller,
     this.pdfViewerBuilder,
+    this.outboundGatewayFactory,
     super.key,
   });
+
+  /// Транспорт внешней отправки; в тестах — память.
+  final OutboundGatewayFactory? outboundGatewayFactory;
 
   final AppConfig config;
   final AuthController authController;
@@ -70,6 +74,46 @@ final class _OrderEditorPageState extends State<OrderEditorPage> {
       );
     }
     _initializeEditor();
+    _loadOutbound();
+  }
+
+  /// Способы внешней отправки для кнопки «Отправить».
+  OutboundChannels outboundChannels = OutboundChannels.none;
+  bool sending = false;
+
+  Future<void> _loadOutbound() async {
+    final channels = await loadOutboundChannels(
+      widget.authController,
+      gatewayFactory: widget.outboundGatewayFactory,
+    );
+    if (mounted) setState(() => outboundChannels = channels);
+  }
+
+  /// Отправляет PDF комплектации — тот же, что при печати.
+  Future<void> _sendDocument(OutboundChannel channel) async {
+    if (sending || controller.saving) return;
+    if (controller.dirty || controller.persistedCardId == null) {
+      if (!await _confirmSaveAndSend(context)) return;
+      final saved = await controller.saveOrder(
+        creationColumnId: widget.creationColumnId,
+      );
+      if (!saved || !mounted) return;
+    }
+    final cardId = controller.persistedCardId;
+    if (cardId == null) return;
+    setState(() => sending = true);
+    try {
+      await sendCardDocument(
+        context,
+        auth: widget.authController,
+        boardId: widget.board.id,
+        cardId: cardId,
+        channel: channel,
+        gatewayFactory: widget.outboundGatewayFactory,
+      );
+    } finally {
+      if (mounted) setState(() => sending = false);
+    }
   }
 
   Future<void> _initializeEditor() async {
@@ -182,6 +226,12 @@ final class _OrderEditorPageState extends State<OrderEditorPage> {
                   onBack: _requestBack,
                   onPreview: _openPreview,
                   onPrint: _printPdf,
+                  sendButton: OutboundSendButton(
+                    channels: outboundChannels,
+                    compact: compact,
+                    busy: sending,
+                    onSend: _sendDocument,
+                  ),
                   onSave: () => controller.saveOrder(
                     creationColumnId: widget.creationColumnId,
                   ),
@@ -531,8 +581,11 @@ final class _OrderCommandBar extends StatelessWidget {
     required this.onPreview,
     required this.onPrint,
     required this.onSave,
+    this.sendButton,
   });
 
+  /// Кнопка «Отправить» (Telegram, почта); скрыта, если способов нет.
+  final Widget? sendButton;
   final OrderController controller;
   final KanbanCard? card;
   final bool compact;
@@ -593,6 +646,7 @@ final class _OrderCommandBar extends StatelessWidget {
                 tooltip: 'Печать',
                 icon: const Icon(Icons.print_outlined, size: 18),
               ),
+              ?sendButton,
             ] else ...[
               _CommandAction(
                 icon: Icons.visibility_outlined,
@@ -604,6 +658,7 @@ final class _OrderCommandBar extends StatelessWidget {
                 label: 'Печать',
                 onPressed: controller.printing ? null : onPrint,
               ),
+              ?sendButton,
             ],
             const SizedBox(width: 7),
             OutlinedButton.icon(

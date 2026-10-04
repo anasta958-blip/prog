@@ -6,7 +6,7 @@ using SkladKomforta.Application.Onboarding;
 
 namespace SkladKomforta.Api.Onboarding;
 
-/// <summary>HTTP-граница девятишаговой первичной настройки организации.</summary>
+/// <summary>HTTP-граница десятишаговой первичной настройки организации.</summary>
 internal static class OnboardingEndpoints
 {
     /// <summary>Регистрирует загрузку, сохранение черновика и финальную активацию.</summary>

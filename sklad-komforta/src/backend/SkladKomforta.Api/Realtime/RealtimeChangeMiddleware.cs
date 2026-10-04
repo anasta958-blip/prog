@@ -60,6 +60,12 @@ internal sealed class RealtimeChangeMiddleware(RequestDelegate next)
             yield return new RealtimeChange(organizationId, RealtimeTopics.Catalog, RealtimeChange.Configuration);
             yield return Company(organizationId, "configuration", null);
         }
+        else if (path.StartsWithSegments("/api/v1/company/outbound"))
+        {
+            // Проверка отправки ничего не меняет.
+            if (path.StartsWithSegments("/api/v1/company/outbound/test")) yield break;
+            yield return Company(organizationId, "outbound", null);
+        }
         else if (path.StartsWithSegments("/api/v1/company/profile"))
         {
             yield return Company(organizationId, "profile", null);

@@ -136,6 +136,7 @@ final class _OrganizationSettingsSectionState
                 onCategoryDeletionApprovalsDiscarded:
                     widget.controller.discardCategoryDataDeletionApprovals,
                 configurationEditGuard: _configurationEditGuard,
+                outboundRevision: widget.controller.outboundRevision,
               ),
       ),
     ],

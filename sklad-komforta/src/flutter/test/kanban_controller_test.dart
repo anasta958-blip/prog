@@ -20,6 +20,8 @@ import 'package:sklad_komforta_app/features/kanban/kanban_api.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_controller.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_models.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_page.dart';
+import 'package:sklad_komforta_app/features/outbound/outbound_api.dart';
+import 'package:sklad_komforta_app/features/outbound/outbound_models.dart';
 
 void main() {
   setUpAll(() => initializeDateFormatting('ru'));
@@ -70,6 +72,7 @@ void main() {
         ],
       }),
     ];
+    final outbound = _MemoryOutboundGateway();
     final controller = KanbanController(config, auth, gateway: gateway);
     await controller.initialize();
     await tester.pumpWidget(
@@ -79,6 +82,7 @@ void main() {
             controller: controller,
             config: config,
             authController: auth,
+            outboundGatewayFactory: (_) => outbound,
           ),
         ),
       ),
@@ -91,6 +95,20 @@ void main() {
     expect(find.text('Счетов: 2'), findsOneWidget);
     expect(find.text('В КП №7 · Завершено'), findsOneWidget);
     expect(find.textContaining('Дом'), findsOneWidget);
+
+    // Меню карточки: отправка PDF в настроенные способы.
+    await tester.tap(find.byTooltip('Действия карточки'));
+    await tester.pumpAndSettle();
+    expect(find.text('В Telegram'), findsOneWidget);
+    await tester.tap(find.text('На почту'));
+    await tester.pumpAndSettle();
+    expect(outbound.sent, [
+      ('board-quotes', 'order-card', OutboundChannel.email),
+    ]);
+    expect(
+      find.textContaining('отправлено на boss@example.com'),
+      findsOneWidget,
+    );
 
     controller.dispose();
     auth.dispose();
@@ -1067,4 +1085,37 @@ final class _MemoryTokenRepository implements TokenRepository {
   Future<String?> readRefreshToken() async => null;
   @override
   Future<void> writeRefreshToken(String? value) async {}
+}
+
+/// Telegram и почта настроены со значениями по умолчанию.
+final class _MemoryOutboundGateway implements OutboundGateway {
+  final sent = <(String, String, OutboundChannel)>[];
+
+  @override
+  Future<OutboundChannels> getChannels(String accessToken) async =>
+      const OutboundChannels(telegramReady: true, emailReady: true);
+
+  @override
+  Future<OutboundSendResult> send(
+    String accessToken, {
+    required String boardId,
+    required String cardId,
+    required OutboundChannel channel,
+    int? topicId,
+    String? recipient,
+    String? proposalTypeId,
+    String? variantId,
+  }) async {
+    sent.add((boardId, cardId, channel));
+    return const OutboundSendResult(
+      destination: 'boss@example.com',
+      fileName: 'Лесная, 5 — 03.10.2026.pdf',
+    );
+  }
+
+  @override
+  void close() {}
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

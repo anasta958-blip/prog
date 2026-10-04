@@ -5,6 +5,7 @@ import 'package:sklad_komforta_app/core/widgets/collapse_toggle.dart';
 import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
 import 'package:sklad_komforta_app/core/models/workflow_specialization.dart';
 import 'package:sklad_komforta_app/core/widgets/mobile_collapsible_navigation.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
 import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
@@ -12,8 +13,11 @@ import 'package:sklad_komforta_app/features/company/company_profile_form.dart';
 import 'package:sklad_komforta_app/features/company/configuration_edit_guard.dart';
 import 'package:sklad_komforta_app/features/onboarding/onboarding_field_registry.dart';
 import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
+import 'package:sklad_komforta_app/features/outbound/outbound_api.dart';
+import 'package:sklad_komforta_app/features/outbound/outbound_settings_controller.dart';
+import 'package:sklad_komforta_app/features/outbound/outbound_settings_editor.dart';
 
-/// Полноэкранный девятишаговый мастер создания изолированной организации.
+/// Полноэкранный десятишаговый мастер создания изолированной организации.
 final class OrganizationOnboardingPage extends StatefulWidget {
   const OrganizationOnboardingPage({
     required this.controller,
@@ -25,8 +29,17 @@ final class OrganizationOnboardingPage extends StatefulWidget {
     this.onCategoryDeletionApproved,
     this.onCategoryDeletionApprovalsDiscarded,
     this.configurationEditGuard,
+    this.outboundGateway,
+    this.outboundRevision = 0,
     super.key,
   });
+
+  /// Транспорт раздела «Внешняя отправка»; в тестах — память.
+  final OutboundGateway? outboundGateway;
+
+  /// Растёт, когда настройки внешней отправки изменил другой пользователь:
+  /// раздел перечитывает их, если в нём нет несохранённых правок.
+  final int outboundRevision;
 
   /// Общий auth controller, владеющий tenant JWT и сетевым состоянием.
   final AuthController controller;
@@ -77,6 +90,7 @@ final class _OrganizationOnboardingPageState
     ('Зависимости', Icons.account_tree_outlined),
     ('Роли', Icons.admin_panel_settings_outlined),
     ('Справочники', Icons.menu_book_outlined),
+    ('Внешняя отправка', Icons.forward_to_inbox_outlined),
     ('Проверка', Icons.fact_check_outlined),
   ];
   static const _permissions = {
@@ -91,6 +105,8 @@ final class _OrganizationOnboardingPageState
     'orders.manage': 'Управление комплектациями',
     'orders.invoices.manage': 'Счета комплектаций',
     'orders.manager.change': 'Смена менеджера и РОП комплектации',
+    'outbound.settings.manage': 'Настройка внешней отправки',
+    'documents.send': 'Отправка документов',
     'documents.view': 'Просмотр документов',
     'documents.manage': 'Управление документами',
   };
@@ -104,7 +120,37 @@ final class _OrganizationOnboardingPageState
   ];
   // Реквизиты юридических лиц редактируются в отдельной вкладке «Компания».
   // Здесь остаётся только рабочая конфигурация без второго источника данных.
-  static const _settingsStepIndexes = [1, 2, 3, 4, 5, 7];
+  static const _settingsStepIndexes = [1, 2, 3, 4, 5, 7, _outboundStep];
+
+  /// Шаг «Внешняя отправка» хранит данные не в черновике конфигурации, а
+  /// сохраняет их сразу на сервер (секреты не должны попадать в черновик).
+  static const _outboundStep = 8;
+  static const _reviewStep = 9;
+  OutboundSettingsController? _outbound;
+
+  OutboundSettingsController get _outboundSettings => _outbound ??=
+      OutboundSettingsController(
+          widget.controller,
+          gateway: widget.outboundGateway,
+        )
+        // Кнопка страницы показывает ход сохранения раздела.
+        ..addListener(_outboundChanged)
+        // Раздел создаётся во время сборки шага: загрузка (и её уведомления)
+        // начинается после кадра, а не посреди build.
+        ..scheduleLoad();
+
+  void _outboundChanged() {
+    if (!mounted) return;
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() {});
+      });
+    } else {
+      setState(() {});
+    }
+  }
+
   late OrganizationOnboardingDraft draft;
   late String _savedDraftJson;
   late int step;
@@ -136,6 +182,10 @@ final class _OrganizationOnboardingPageState
   String? get _error =>
       _settingsMode ? widget.settingsError : widget.controller.error;
 
+  /// Раздел «Внешняя отправка» сохраняет или проверяет настройки.
+  bool get _outboundBusy =>
+      step == _outboundStep && (_outbound?.saving ?? false);
+
   @override
   void initState() {
     super.initState();
@@ -149,7 +199,7 @@ final class _OrganizationOnboardingPageState
     _collapseConfiguredBlocks();
     step = _settingsMode
         ? _settingsStepIndexes.first
-        : draft.currentStep.clamp(1, 9) - 1;
+        : draft.currentStep.clamp(1, 10) - 1;
     widget.configurationEditGuard?.attach(this, _confirmLeave);
   }
 
@@ -162,6 +212,9 @@ final class _OrganizationOnboardingPageState
     )) {
       oldWidget.configurationEditGuard?.detach(this);
       widget.configurationEditGuard?.attach(this, _confirmLeave);
+    }
+    if (oldWidget.outboundRevision != widget.outboundRevision) {
+      _outbound?.refreshFromServer();
     }
     if (_settingsMode &&
         widget.settingsDraft != null &&
@@ -213,6 +266,7 @@ final class _OrganizationOnboardingPageState
   @override
   void dispose() {
     widget.configurationEditGuard?.detach(this);
+    _outbound?.dispose();
     super.dispose();
   }
 
@@ -236,7 +290,8 @@ final class _OrganizationOnboardingPageState
   }
 
   Future<bool> _confirmLeave(BuildContext context) async {
-    if (!_settingsMode || !_hasUnsavedChanges) return true;
+    final outboundDirty = _outbound?.dirty ?? false;
+    if (!_settingsMode || (!_hasUnsavedChanges && !outboundDirty)) return true;
     final leave = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -264,6 +319,7 @@ final class _OrganizationOnboardingPageState
     );
     if (!mounted || leave != true) return false;
     setState(_discardUnsavedChanges);
+    _outbound?.discard();
     return true;
   }
 
@@ -332,9 +388,16 @@ final class _OrganizationOnboardingPageState
       _showMessage('Проверьте заполнение реквизитов организации.');
       return;
     }
+    // Шаг «Внешняя отправка» сначала сохраняет свои настройки на сервер.
+    if (step == _outboundStep &&
+        (_outbound?.dirty ?? false) &&
+        !await _outboundSettings.save()) {
+      return;
+    }
+    if (!mounted) return;
     _sanitizeWorkflowLinks();
     if (_settingsMode) {
-      draft.currentStep = 9;
+      draft.currentStep = 10;
       final saved = await widget.onSettingsSave!(
         draft,
         deleteCategoryData: _approvedCategoryDataDeletions.toList(),
@@ -342,22 +405,26 @@ final class _OrganizationOnboardingPageState
       if (!mounted || !saved) return;
       setState(() {
         _approvedCategoryDataDeletions.clear();
-        step = (step + 1).clamp(0, 8);
+        step = (step + 1).clamp(0, _reviewStep);
       });
       return;
     }
-    draft.currentStep = (step + 2).clamp(1, 9);
+    draft.currentStep = (step + 2).clamp(1, 10);
     await widget.controller.saveOnboardingStep(draft);
     if (!mounted || widget.controller.error != null) return;
     setState(() {
       draft = widget.controller.onboardingDraft ?? draft;
-      step = (step + 1).clamp(0, 8);
+      step = (step + 1).clamp(0, _reviewStep);
     });
   }
 
   Future<void> _saveSettings() async {
+    if (step == _outboundStep) {
+      await _outboundSettings.save();
+      return;
+    }
     _sanitizeWorkflowLinks();
-    draft.currentStep = 9;
+    draft.currentStep = 10;
     // Сохраняем именно отправленный снимок. Уведомление родительского
     // контроллера во время await не должно заменить новые правила старой
     // конфигурацией до завершения успешного сохранения.
@@ -562,27 +629,27 @@ final class _OrganizationOnboardingPageState
             SizedBox(
               width: 250,
               child: FilledButton.icon(
-                onPressed: _busy
+                onPressed: _busy || _outboundBusy
                     ? null
                     : _settingsMode
                     ? _saveSettings
-                    : step == 8
+                    : step == _reviewStep
                     ? widget.controller.activateOrganization
                     : _saveAndContinue,
-                icon: _busy
+                icon: _busy || _outboundBusy
                     ? const SizedBox.square(
                         dimension: 18,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : Icon(
-                        _settingsMode || step == 8
+                        _settingsMode || step == _reviewStep
                             ? Icons.save_outlined
                             : Icons.arrow_forward,
                       ),
                 label: Text(
                   _settingsMode
                       ? 'Сохранить изменения'
-                      : step == 8
+                      : step == _reviewStep
                       ? 'Активировать организацию'
                       : 'Сохранить и продолжить',
                 ),
@@ -603,6 +670,7 @@ final class _OrganizationOnboardingPageState
     5 => _dependenciesEditor(),
     6 => _rolesEditor(),
     7 => _dictionariesEditor(),
+    _outboundStep => OutboundSettingsEditor(controller: _outboundSettings),
     _ => _review(),
   };
 
@@ -3318,6 +3386,7 @@ final class _Progress extends StatelessWidget {
     'Зависимости',
     'Роли',
     'Справочники',
+    'Внешняя отправка',
     'Проверка',
   ];
   @override

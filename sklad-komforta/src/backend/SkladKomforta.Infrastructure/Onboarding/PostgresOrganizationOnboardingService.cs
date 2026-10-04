@@ -69,7 +69,7 @@ internal sealed class PostgresOrganizationOnboardingService(
         var state = await ReadStateAsync(connection, cancellationToken);
         if (state.IsCompleted) return state;
 
-        var draft = state.Draft with { CurrentStep = 9 };
+        var draft = state.Draft with { CurrentStep = 10 };
         OnboardingValidator.Validate(draft, true);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 

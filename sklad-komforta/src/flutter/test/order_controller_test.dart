@@ -15,6 +15,8 @@ import 'package:sklad_komforta_app/features/company/company_models.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_models.dart';
 import 'package:sklad_komforta_app/features/orders/order_api.dart';
 import 'package:sklad_komforta_app/features/orders/order_models.dart';
+import 'package:sklad_komforta_app/features/outbound/outbound_api.dart';
+import 'package:sklad_komforta_app/features/outbound/outbound_models.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_api.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_controller.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_editor_page.dart';
@@ -291,6 +293,59 @@ void main() {
     final first =
         controller.snapshot!.categories.first.sections.first.positions.first;
     expect(first.values['shipment_status'], 'На складе');
+
+    controller.dispose();
+    auth.dispose();
+  });
+  testWidgets('отправка комплектации: несохранённые правки сначала '
+      'сохраняются', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1500, 1100);
+    addTearDown(tester.view.reset);
+    final auth = authorized();
+    final orders = _MemoryOrderGateway();
+    final outbound = _MemoryOutboundGateway();
+    final controller = OrderController(
+      config,
+      auth,
+      orderGateway: orders,
+      catalogGateway: _CatalogGateway(),
+      companyGateway: _CompanyGateway(),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: OrderEditorPage(
+            config: config,
+            authController: auth,
+            board: _orderBoard,
+            card: _card(),
+            controller: controller,
+            onBack: () {},
+            outboundGatewayFactory: (_) => outbound,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byKey(const Key('order-title')), 'Лесная, 7');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('outbound-send')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('outbound-send-telegram')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('outbound-send-email')));
+    await tester.pumpAndSettle();
+    expect(find.text('Сохранить и отправить?'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('outbound-save-and-send')));
+    await tester.pumpAndSettle();
+
+    expect(orders.saved?.title, 'Лесная, 7');
+    expect(outbound.sent, [('card-12', OutboundChannel.email)]);
+    expect(
+      find.textContaining('отправлено на boss@example.com'),
+      findsOneWidget,
+    );
 
     controller.dispose();
     auth.dispose();
@@ -601,4 +656,48 @@ final class _MemoryTokenRepository implements TokenRepository {
 
   @override
   Future<void> writeRefreshToken(String? value) async {}
+}
+
+/// Почта настроена с получателем по умолчанию: адрес не спрашивается.
+final class _MemoryOutboundGateway implements OutboundGateway {
+  final sent = <(String, OutboundChannel)>[];
+
+  @override
+  Future<OutboundChannels> getChannels(String accessToken) async =>
+      const OutboundChannels(emailReady: true);
+
+  @override
+  Future<OutboundSendResult> send(
+    String accessToken, {
+    required String boardId,
+    required String cardId,
+    required OutboundChannel channel,
+    int? topicId,
+    String? recipient,
+    String? proposalTypeId,
+    String? variantId,
+  }) async {
+    sent.add((cardId, channel));
+    return const OutboundSendResult(
+      destination: 'boss@example.com',
+      fileName: 'Лесная, 7 — 03.10.2026.pdf',
+    );
+  }
+
+  @override
+  Future<OutboundSettingsModel> getSettings(String accessToken) =>
+      throw UnimplementedError();
+
+  @override
+  Future<OutboundSettingsModel> saveSettings(
+    String accessToken,
+    OutboundSettingsModel settings,
+  ) => throw UnimplementedError();
+
+  @override
+  Future<String> test(String accessToken, OutboundChannel channel) =>
+      throw UnimplementedError();
+
+  @override
+  void close() {}
 }

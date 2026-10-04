@@ -31,7 +31,7 @@ internal sealed class PostgresCompanyService(
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
         var draft = await ReadDraftAsync(connection, cancellationToken);
         var profile = await ReadAsync(connection, cancellationToken);
-        return draft with { Company = ToDraft(profile), CurrentStep = 9 };
+        return draft with { Company = ToDraft(profile), CurrentStep = 10 };
     }
 
     public async Task<OrganizationOnboardingDraft> UpdateConfigurationAsync(
@@ -40,7 +40,7 @@ internal sealed class PostgresCompanyService(
         IReadOnlyList<string> deleteCategoryData,
         CancellationToken cancellationToken)
     {
-        var normalized = draft with { CurrentStep = 9 };
+        var normalized = draft with { CurrentStep = 10 };
         // Рабочая конфигурация уже активирована. При её редактировании проверяем
         // структуру и ссылки, но не требования мастера первичной активации:
         // удаление категории может временно оставить канбан без категорий.

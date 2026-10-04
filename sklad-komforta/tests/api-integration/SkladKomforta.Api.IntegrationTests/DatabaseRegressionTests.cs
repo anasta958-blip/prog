@@ -7,6 +7,8 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 using SkladKomforta.Application.Onboarding;
@@ -550,7 +552,9 @@ public sealed class DatabaseFactAttribute : FactAttribute
     }
 }
 
-internal sealed class RegressionFactory(string connectionString) : WebApplicationFactory<Program>
+internal sealed class RegressionFactory(
+    string connectionString,
+    Action<IServiceCollection>? configureServices = null) : WebApplicationFactory<Program>
 {
     internal const string BootstrapToken = "isolated-regression-bootstrap-token";
 
@@ -562,6 +566,7 @@ internal sealed class RegressionFactory(string connectionString) : WebApplicatio
         builder.UseSetting("Security:BootstrapToken", BootstrapToken);
         builder.UseSetting("Security:TotpEncryptionKey", Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)));
         builder.UseSetting("Jwt:SigningKey", Convert.ToBase64String(RandomNumberGenerator.GetBytes(48)));
+        if (configureServices is not null) builder.ConfigureTestServices(configureServices);
     }
 }
 

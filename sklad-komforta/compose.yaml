@@ -97,6 +97,7 @@ services:
       Security__TotpEncryptionKey: ${TOTP_ENCRYPTION_KEY}
       Security__BootstrapToken: ${BOOTSTRAP_TOKEN}
       Cors__AllowedOrigins__0: ${FLUTTER_WEB_ORIGIN:-http://localhost:3000}
+      Outbound__AllowPrivateSmtpHosts: ${OUTBOUND_ALLOW_PRIVATE_SMTP_HOSTS:-false}
     ports:
       - "${API_PORT:-8080}:8080"
     depends_on:

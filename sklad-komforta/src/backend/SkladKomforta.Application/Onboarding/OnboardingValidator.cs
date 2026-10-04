@@ -21,8 +21,8 @@ public static class OnboardingValidator
     /// </summary>
     public static void Validate(OrganizationOnboardingDraft draft, bool forActivation)
     {
-        if (draft.CurrentStep is < 1 or > 9)
-            Fail("onboarding_step_invalid", "Номер шага должен быть от 1 до 9.");
+        if (draft.CurrentStep is < 1 or > 10)
+            Fail("onboarding_step_invalid", "Номер шага должен быть от 1 до 10.");
 
         ValidateCompany(draft.Company);
         ValidateUnique(draft.Workflows.Select(item => item.Code), "Коды канбанов");

@@ -169,7 +169,7 @@ public sealed record MoneyPipelineDraft(
     string? ClientId = null);
 
 /// <summary>
-/// Полный серверный черновик девятишаговой настройки. Клиент всегда отправляет
+/// Полный серверный черновик десятишаговой настройки. Клиент всегда отправляет
 /// агрегат целиком, поэтому сервер может валидировать согласованность связей.
 /// </summary>
 public sealed record OrganizationOnboardingDraft(

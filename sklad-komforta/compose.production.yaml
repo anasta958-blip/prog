@@ -26,6 +26,7 @@ services:
       Security__TotpEncryptionKey: ${TOTP_ENCRYPTION_KEY:?Set TOTP_ENCRYPTION_KEY}
       Security__BootstrapToken: ${BOOTSTRAP_TOKEN:?Set BOOTSTRAP_TOKEN}
       Cors__AllowedOrigins__0: https://${APP_DOMAIN:?Set APP_DOMAIN}
+      Outbound__AllowPrivateSmtpHosts: ${OUTBOUND_ALLOW_PRIVATE_SMTP_HOSTS:-false}
       ReverseProxy__TrustForwardedHeaders: "true"
     expose:
       - "8080"
