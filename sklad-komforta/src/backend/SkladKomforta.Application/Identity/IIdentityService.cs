@@ -39,6 +39,10 @@ public interface IIdentityService
     /// <summary>Отзывает все сессии пользователя, кроме выполняющей запрос.</summary>
     Task RevokeOtherSessionsAsync(Guid userId, Guid currentSessionId, CancellationToken cancellationToken);
 
-    /// <summary>Создаёт первого директора только при пустой таблице пользователей.</summary>
+    /// <summary>
+    /// Создаёт директора новой организации (закрытый bootstrap-endpoint с
+    /// секретным токеном). Директоров может быть несколько; каждый создаёт свою
+    /// организацию. Занятый логин — 409 <c>bootstrap_login_taken</c>.
+    /// </summary>
     Task<Guid> BootstrapDirectorAsync(BootstrapDirectorRequest request, CancellationToken cancellationToken);
 }

@@ -29,11 +29,15 @@ internal sealed partial class PostgresIdentityService
 
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-        await using (var check = new NpgsqlCommand("SELECT EXISTS (SELECT 1 FROM public.users)", connection, transaction))
+        // Директоров может быть несколько: каждый затем создаёт свою изолированную
+        // организацию. Логин уникален во всей системе (citext, без учёта регистра).
+        await using (var check = new NpgsqlCommand(
+                         "SELECT EXISTS (SELECT 1 FROM public.users WHERE login = @login)", connection, transaction))
         {
+            check.Parameters.AddWithValue("login", login);
             if (await check.ExecuteScalarAsync(cancellationToken) is true)
             {
-                throw Failure(409, "bootstrap_completed", "Первичный директор уже создан.");
+                throw LoginTaken();
             }
         }
 
@@ -47,10 +51,21 @@ internal sealed partial class PostgresIdentityService
         insert.Parameters.AddWithValue("login", login);
         insert.Parameters.AddWithValue("hash", passwordHash);
         insert.Parameters.AddWithValue("name", displayName);
-        await insert.ExecuteNonQueryAsync(cancellationToken);
+        try
+        {
+            await insert.ExecuteNonQueryAsync(cancellationToken);
+        }
+        catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.UniqueViolation)
+        {
+            // Тот же логин создан параллельным запросом между проверкой и вставкой.
+            throw LoginTaken();
+        }
         await transaction.CommitAsync(cancellationToken);
         return userId;
     }
+
+    private static IdentityException LoginTaken() =>
+        Failure(409, "bootstrap_login_taken", "Этот логин уже занят. Выберите другой.");
 
     /// <inheritdoc />
     public async Task<OrganizationOnboardingResult> CreateOrganizationAsync(
