@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'employee_password_dialog.dart';
+import 'vat_rates_field.dart';
 import 'package:sklad_komforta_app/core/widgets/collapse_toggle.dart';
 import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
 import 'package:flutter/services.dart';
@@ -246,7 +247,9 @@ final class _EmployeesSection extends StatelessWidget {
       children: [
         _SectionHeader(
           title: 'Дерево иерархии сотрудников',
-          subtitle: 'Руководители и вся их нижестоящая ветка сотрудников.',
+          subtitle: controller.lifecycle == null
+              ? 'Руководители и вся их нижестоящая ветка сотрудников.'
+              : 'Сотрудников: ${controller.lifecycle!.employeeCount} из ${controller.lifecycle!.employeeLimit}. Директор в лимит не входит.',
           trailing: FilledButton.icon(
             onPressed:
                 controller.roles
@@ -917,13 +920,13 @@ final class _LegalEntityDialogState extends State<_LegalEntityDialog>
   final key = GlobalKey<FormState>();
   bool submitting = false;
   String? submitError;
-  late String vatRatesInput;
+  late List<double?> vatRates;
 
   @override
   void initState() {
     super.initState();
     widget.item.companyType = _normalizeLegalType(widget.item.companyType);
-    vatRatesInput = _formatVatRates(widget.item.vatRates);
+    vatRates = List.of(widget.item.vatRates);
   }
 
   @override
@@ -1145,14 +1148,9 @@ final class _LegalEntityDialogState extends State<_LegalEntityDialog>
                 maximumLength: 2000,
               ),
               const SizedBox(height: 12),
-              TextFormField(
-                initialValue: vatRatesInput,
-                onChanged: (value) => vatRatesInput = value,
-                validator: _validateVatRates,
-                decoration: const InputDecoration(
-                  labelText: 'Доступные ставки НДС',
-                  helperText: 'Укажите через запятую: Без НДС, 5, 10, 20',
-                ),
+              VatRatesField(
+                initialValue: vatRates,
+                onChanged: (value) => vatRates = value,
               ),
               CheckboxListTile(
                 value: widget.item.isDefault,
@@ -1189,7 +1187,7 @@ final class _LegalEntityDialogState extends State<_LegalEntityDialog>
 
   Future<void> _submit() async {
     if (key.currentState?.validate() != true) return;
-    widget.item.vatRates = _parseVatRates(vatRatesInput)!;
+    widget.item.vatRates = List.of(vatRates);
     setState(() {
       submitting = true;
       submitError = null;
@@ -1209,41 +1207,6 @@ final class _LegalEntityDialogState extends State<_LegalEntityDialog>
           widget.controller.error ?? 'Не удалось сохранить юридическое лицо.';
     });
   }
-}
-
-List<double?>? _parseVatRates(String value) {
-  final result = <double?>[];
-  for (final rawToken in value.split(',')) {
-    final token = rawToken.trim();
-    if (token.isEmpty) return null;
-    if (token.toLowerCase() == 'без ндс') {
-      result.add(null);
-      continue;
-    }
-    final rate = double.tryParse(token.replaceAll('%', '').trim());
-    if (rate == null || rate < 0 || rate > 100) return null;
-    result.add(rate);
-  }
-  return result.isEmpty ||
-          result.length > 20 ||
-          result.toSet().length != result.length
-      ? null
-      : result;
-}
-
-String _formatVatRates(List<double?> rates) => rates
-    .map((rate) {
-      if (rate == null) return 'Без НДС';
-      return rate == rate.roundToDouble()
-          ? rate.toInt().toString()
-          : rate.toString();
-    })
-    .join(', ');
-
-String? _validateVatRates(String? value) {
-  return value != null && _parseVatRates(value) != null
-      ? null
-      : 'Укажите уникальные ставки от 0 до 100 через запятую; для работы без НДС напишите «Без НДС»';
 }
 
 final class _ClientDialog extends StatefulWidget {

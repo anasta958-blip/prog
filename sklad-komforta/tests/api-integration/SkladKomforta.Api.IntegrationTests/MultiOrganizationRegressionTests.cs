@@ -64,7 +64,7 @@ public sealed partial class DatabaseRegressionTests
         staff.DefaultRequestHeaders.Add("X-Bootstrap-Token", RegressionFactory.BootstrapToken);
         await Send(staff, HttpMethod.Post, "/auth/bootstrap/director", new
         {
-            login, displayName = "Директор " + login, temporaryPassword = "Regression-test-123!",
+            login, displayName = "Директор " + login, temporaryPassword = "Regression-test-123!", employeeLimit = 2,
         });
         staff.DefaultRequestHeaders.Remove("X-Bootstrap-Token");
         var started = await Send(staff, HttpMethod.Post, "/auth/login", new
@@ -88,5 +88,6 @@ public sealed partial class DatabaseRegressionTests
         var draft = OrderDraft() with { Company = OrderDraft().Company with { OrganizationName = organizationName } };
         await Send(staff, HttpMethod.Post, "/onboarding/draft", draft);
         await Send(staff, HttpMethod.Post, "/onboarding/activate");
+        Assert.Equal(2, (await Send(staff, HttpMethod.Get, "/company/lifecycle"))["employeeLimit"]!.GetValue<int>());
     }
 }

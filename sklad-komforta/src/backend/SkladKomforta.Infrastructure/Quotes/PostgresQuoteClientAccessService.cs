@@ -136,7 +136,6 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
              WHERE organization_id = @organization_id
                AND quote_id = @quote_id
                AND revoked_at IS NULL
-               AND expires_at > now()
              ORDER BY created_at DESC
              LIMIT 1
             """, connection))
@@ -147,7 +146,7 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
             if (!await reader.ReadAsync(cancellationToken))
                 return new QuoteClientAccessStatus(false, null, null, null);
             status = new QuoteClientAccessStatus(
-                true,
+                ReadTimestamp(reader, 1) > DateTimeOffset.UtcNow,
                 ReadTimestamp(reader, 0),
                 ReadTimestamp(reader, 1),
                 reader.IsDBNull(2) ? null : ReadTimestamp(reader, 2),
@@ -172,6 +171,41 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
     }
 
     /// <inheritdoc />
+    public async Task<QuoteClientAccessStatus> ExtendAsync(Guid actorUserId, Guid boardId, Guid cardId,
+        ExtendQuoteClientAccessRequest request, CancellationToken cancellationToken)
+    {
+        if (request.AdditionalDays is < 1 or > 30)
+            throw Failure(400, "quote_client_link_lifetime_invalid", "Продлить ссылку можно на срок от 1 до 30 дней.");
+        var quote = await _quoteService.GetAsync(actorUserId, boardId, cardId, cancellationToken);
+        await using var connection = await OpenTenantConnectionAsync(_tenantContext.SchemaName, cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("""
+            UPDATE public.quote_client_access_links
+               SET expires_at = GREATEST(expires_at, now()) + make_interval(days => @days)
+             WHERE id = (SELECT id FROM public.quote_client_access_links
+                          WHERE organization_id = @organization_id AND quote_id = @quote_id
+                            AND revoked_at IS NULL ORDER BY created_at DESC LIMIT 1)
+               AND revoked_at IS NULL
+            RETURNING expires_at
+            """, connection, transaction);
+        command.Parameters.AddWithValue("days", request.AdditionalDays);
+        command.Parameters.AddWithValue("organization_id", _tenantContext.OrganizationId);
+        command.Parameters.AddWithValue("quote_id", quote.Id);
+        var expires = await command.ExecuteScalarAsync(cancellationToken);
+        if (expires is null)
+            throw Failure(409, "quote_client_link_missing", "Нет ссылки для продления. Создайте новую ссылку.");
+        await using var audit = new NpgsqlCommand("""
+            INSERT INTO audit_log (actor_user_id, entity_type, entity_id, action, diff)
+            VALUES (@actor, 'quote', @quote, 'client_link_extended', CAST(@diff AS jsonb))
+            """, connection, transaction);
+        audit.Parameters.AddWithValue("actor", actorUserId);
+        audit.Parameters.AddWithValue("quote", quote.Id);
+        audit.Parameters.AddWithValue("diff", JsonSerializer.Serialize(new { after = new { expiresAt = expires } }));
+        await audit.ExecuteNonQueryAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return await GetStatusAsync(actorUserId, boardId, cardId, cancellationToken);
+    }
+
     public async Task RevokeAsync(
         Guid actorUserId,
         Guid boardId,

@@ -16,7 +16,7 @@ public sealed record CompanyProfile(
     string? Email);
 
 /// <summary>Общий срок действия организации, применяемый ко всем её аккаунтам.</summary>
-public sealed record OrganizationLifecycle(DateTimeOffset ActiveUntil, bool IsFrozen);
+public sealed record OrganizationLifecycle(DateTimeOffset ActiveUntil, bool IsFrozen, int EmployeeLimit = 5, int EmployeeCount = 0);
 
 /// <summary>Рабочие данные, которые будут удалены вместе с категорией каталога.</summary>
 public sealed record CategoryDeletionImpact(

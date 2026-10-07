@@ -133,7 +133,22 @@ public sealed partial class DatabaseRegressionTests
             .Single(value => Text(value!, "action") == "password_changed")!;
         Assert.DoesNotContain("Employee-after-456!", resetAudit.ToJsonString());
         Assert.DoesNotContain("password_hash", resetAudit.ToJsonString());
+        object QuotaEmployee(int number) => new {
+            login = $"quota-employee-{number}", displayName = $"Сотрудник {number}",
+            temporaryPassword = "Employee-start-123!", roleId = Text(employeeRole, "id"),
+        };
+        for (var number = 1; number <= 3; number++)
+            await Send(staff, HttpMethod.Post, "/company/employees", QuotaEmployee(number));
+        var quotaResponses = await Task.WhenAll(Enumerable.Range(4, 2).Select(number =>
+            staff.PostAsJsonAsync("/api/v1/company/employees", QuotaEmployee(number))));
+        Assert.Single(quotaResponses, response => response.StatusCode == HttpStatusCode.OK);
+        Assert.Single(quotaResponses, response => response.StatusCode == HttpStatusCode.Conflict);
+        foreach (var response in quotaResponses) response.Dispose();
+        var quotaStatus = await Send(staff, HttpMethod.Get, "/company/lifecycle");
+        Assert.Equal(5, quotaStatus["employeeLimit"]!.GetValue<int>());
+        Assert.Equal(5, quotaStatus["employeeCount"]!.GetValue<int>());
         await Send(staff, HttpMethod.Delete, employeePath);
+        await Send(staff, HttpMethod.Post, "/company/employees", QuotaEmployee(6));
 
         var roundtrip = await Send(staff, HttpMethod.Put, "/company/configuration", new { draft, deleteCategoryData = Array.Empty<string>() });
         Assert.Single(roundtrip["rules"]!.AsArray());
@@ -283,6 +298,24 @@ public sealed partial class DatabaseRegressionTests
             var auditAfterReveal = (await Send(staff, HttpMethod.Get, "/company/audit")).AsArray();
             Assert.Equal(auditBeforeReveal + 1, auditAfterReveal.Count);
             Assert.Contains(auditAfterReveal, entry => Text(entry!, "action") == "client_link_secret_viewed");
+            await Send(staff, HttpMethod.Post, quotePath + "/client-access/extend", new { additionalDays = 0 }, HttpStatusCode.BadRequest);
+            var extended = await Send(staff, HttpMethod.Post, quotePath + "/client-access/extend", new { additionalDays = 3 });
+            Assert.Equal(Text(link, "accessToken"), Text(extended, "accessToken"));
+            Assert.Equal(Text(link, "password"), Text(extended, "password"));
+            Assert.Equal(DateTimeOffset.Parse(Text(reopened, "expiresAt"), System.Globalization.CultureInfo.InvariantCulture).AddDays(3), DateTimeOffset.Parse(Text(extended, "expiresAt"), System.Globalization.CultureInfo.InvariantCulture));
+            await using (var expiryConnection = new NpgsqlConnection(database.ConnectionString))
+            {
+                await expiryConnection.OpenAsync();
+                await using var expire = new NpgsqlCommand("UPDATE public.quote_client_access_links SET created_at = now() - interval '2 days', expires_at = now() - interval '1 second' WHERE quote_id = @id AND revoked_at IS NULL", expiryConnection);
+                expire.Parameters.AddWithValue("id", Guid.Parse(Text(saved, "id")));
+                await expire.ExecuteNonQueryAsync();
+            }
+            var expiredStatus = await Send(staff, HttpMethod.Get, quotePath + "/client-access");
+            Assert.False(expiredStatus["isActive"]!.GetValue<bool>());
+            var renewed = await Send(staff, HttpMethod.Post, quotePath + "/client-access/extend", new { additionalDays = 7 });
+            Assert.True(renewed["isActive"]!.GetValue<bool>());
+            Assert.Equal(Text(link, "accessToken"), Text(renewed, "accessToken"));
+            Assert.Equal(Text(link, "password"), Text(renewed, "password"));
             using var guest = factory.CreateClient();
             await Send(guest, HttpMethod.Post, "/client/quotes/login", new
             {
@@ -366,6 +399,7 @@ public sealed partial class DatabaseRegressionTests
             var revokedStatus = await Send(staff, HttpMethod.Get, quotePath + "/client-access");
             Assert.False(revokedStatus["isActive"]!.GetValue<bool>());
             Assert.Null(revokedStatus["password"]);
+            await Send(staff, HttpMethod.Post, quotePath + "/client-access/extend", new { additionalDays = 7 }, HttpStatusCode.Conflict);
             await Send(staff, HttpMethod.Delete, path);
             await Send(staff, HttpMethod.Get, quotePath, expected: HttpStatusCode.NotFound);
         }

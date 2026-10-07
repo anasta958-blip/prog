@@ -257,6 +257,7 @@ final class CompanyController extends ChangeNotifier {
       (token) => _workspaceApi!.createEmployee(token, value),
     );
     employees = await _auth.executeAuthorized(_workspaceApi!.getEmployees);
+    lifecycle = await _auth.executeAuthorized(_workspaceApi!.getLifecycle);
   });
 
   Future<bool> updateEmployee(String membershipId, UpdateEmployeeModel value) =>
@@ -272,6 +273,7 @@ final class CompanyController extends ChangeNotifier {
       (token) => _workspaceApi!.deleteEmployee(token, membershipId),
     );
     employees = await _auth.executeAuthorized(_workspaceApi!.getEmployees);
+    lifecycle = await _auth.executeAuthorized(_workspaceApi!.getLifecycle);
   });
 
   Future<bool> changeEmployeePassword(String membershipId, String password) =>

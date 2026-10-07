@@ -41,11 +41,17 @@ final class OrganizationLifecycle {
   const OrganizationLifecycle({
     required this.activeUntil,
     required this.isFrozen,
+    this.employeeLimit = 5,
+    this.employeeCount = 0,
   });
   final DateTime activeUntil;
   final bool isFrozen;
+  final int employeeLimit;
+  final int employeeCount;
   factory OrganizationLifecycle.fromJson(Map<String, dynamic> json) =>
       OrganizationLifecycle(
+        employeeLimit: json['employeeLimit'] as int? ?? 5,
+        employeeCount: json['employeeCount'] as int? ?? 0,
         activeUntil: DateTime.parse(json['activeUntil'] as String).toLocal(),
         isFrozen: json['isFrozen'] as bool? ?? false,
       );

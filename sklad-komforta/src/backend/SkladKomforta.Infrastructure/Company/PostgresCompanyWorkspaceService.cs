@@ -28,11 +28,11 @@ internal sealed class PostgresCompanyWorkspaceService(
     {
         await using var connection = await connectionFactory.OpenPublicConnectionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT active_until, NOT is_active OR active_until <= now() FROM public.organizations WHERE id = @id AND deleted_at IS NULL";
+        command.CommandText = "SELECT active_until, NOT is_active OR active_until <= now(), employee_limit, (SELECT count(*)::int FROM public.organization_members WHERE organization_id = @id AND NOT is_director AND deleted_at IS NULL) FROM public.organizations WHERE id = @id AND deleted_at IS NULL";
         Add(command, "id", tenantContext.OrganizationId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken)) throw NotFound("organization_not_found", "Организация не найдена.");
-        return new OrganizationLifecycle(reader.GetFieldValue<DateTimeOffset>(0), reader.GetBoolean(1));
+        return new OrganizationLifecycle(reader.GetFieldValue<DateTimeOffset>(0), reader.GetBoolean(1), reader.GetInt32(2), reader.GetInt32(3));
     }
 
     /// <inheritdoc />
@@ -230,6 +230,24 @@ internal sealed class PostgresCompanyWorkspaceService(
         var membershipId = Guid.NewGuid();
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        // Serialize creations for the organization so concurrent requests cannot exceed the quota.
+        int employeeLimit;
+        await using (var quota = connection.CreateCommand())
+        {
+            quota.Transaction = transaction;
+            quota.CommandText = "SELECT employee_limit FROM public.organizations WHERE id = @id AND deleted_at IS NULL FOR UPDATE";
+            Add(quota, "id", tenantContext.OrganizationId);
+            employeeLimit = (int)(await quota.ExecuteScalarAsync(cancellationToken)
+                ?? throw NotFound("organization_not_found", "Организация не найдена."));
+        }
+        await using (var count = connection.CreateCommand())
+        {
+            count.Transaction = transaction;
+            count.CommandText = "SELECT count(*) FROM public.organization_members WHERE organization_id = @id AND NOT is_director AND deleted_at IS NULL";
+            Add(count, "id", tenantContext.OrganizationId);
+            if ((long)(await count.ExecuteScalarAsync(cancellationToken))! >= employeeLimit)
+                throw new IdentityException(409, "employee_limit_reached", $"Достигнут лимит сотрудников: {employeeLimit}. Обратитесь к администратору сервиса.");
+        }
         await ValidateRoleAndSupervisorAsync(connection, transaction, request.RoleId, request.SupervisorMembershipId, null, cancellationToken);
         try
         {

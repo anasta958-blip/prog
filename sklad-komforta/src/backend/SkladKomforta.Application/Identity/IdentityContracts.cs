@@ -43,7 +43,7 @@ public sealed record RefreshTokenRequest(string RefreshToken);
 public sealed record CreateOrganizationRequest(string Name);
 
 /// <summary>Запрос одноразового административного создания первого директора.</summary>
-public sealed record BootstrapDirectorRequest(string Login, string DisplayName, string TemporaryPassword);
+public sealed record BootstrapDirectorRequest(string Login, string DisplayName, string TemporaryPassword, int EmployeeLimit = 5);
 
 /// <summary>Метаданные запроса, которые нельзя принимать из JSON клиента.</summary>
 public sealed record AuthenticationClientContext(string? IpAddress, string? UserAgent);

@@ -349,11 +349,9 @@ void main() {
       final api = QuoteClientAccessApi(
         config,
         client: MockClient((request) async {
-          expect(request.method, 'GET');
-          expect(
-            request.url.path,
-            endsWith('/kanbans/board-quotes/cards/card-1/quote/client-access'),
-          );
+          final extending = request.url.path.endsWith('/client-access/extend');
+          expect(request.method, extending ? 'POST' : 'GET');
+          if (extending) expect(jsonDecode(request.body)['additionalDays'], 7);
           return http.Response(
             jsonEncode({
               'ok': true,
@@ -362,7 +360,9 @@ void main() {
                 'accessToken': 'existing-token',
                 'password': 'existing-password',
                 'createdAt': '2026-09-01T12:00:00Z',
-                'expiresAt': '2027-09-01T12:00:00Z',
+                'expiresAt': extending
+                    ? '2027-09-08T12:00:00Z'
+                    : '2027-09-01T12:00:00Z',
               },
             }),
             200,
@@ -393,6 +393,13 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsOneWidget);
       expect(find.text('existing-password'), findsOneWidget);
+      await tester.tap(find.text('Продлить'));
+      await tester.pumpAndSettle();
+      expect(find.text('existing-password'), findsOneWidget);
+      expect(
+        find.text('Срок ссылки продлён. Адрес и пароль не изменились.'),
+        findsOneWidget,
+      );
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       api.close();

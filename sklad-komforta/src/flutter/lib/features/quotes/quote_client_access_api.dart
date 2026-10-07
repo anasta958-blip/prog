@@ -55,6 +55,25 @@ final class QuoteClientAccessApi {
     );
   }
 
+  Future<QuoteClientAccessStatus> extendLink(
+    String employeeToken,
+    String boardId,
+    String cardId,
+    int days,
+  ) async {
+    final response = await _client.post(
+      Uri.parse('${_managerPath(boardId, cardId)}/extend'),
+      headers: {
+        'Authorization': 'Bearer $employeeToken',
+        'Content-Type': 'application/json; charset=utf-8',
+      },
+      body: jsonEncode({'additionalDays': days}),
+    );
+    return QuoteClientAccessStatus.fromJson(
+      decodeApiResponse(response) as Map<String, dynamic>,
+    );
+  }
+
   Future<void> revokeLink(
     String employeeToken,
     String boardId,

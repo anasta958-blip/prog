@@ -1034,6 +1034,9 @@ Future<void> showQuoteClientAccessDialog({
         onRevoke: () => auth.executeAuthorized(
           (token) => client.revokeLink(token, boardId, cardId),
         ),
+        onExtend: (days) => auth.executeAuthorized(
+          (token) => client.extendLink(token, boardId, cardId, days),
+        ),
       ),
     );
   } on Object catch (exception) {
@@ -1059,12 +1062,14 @@ final class _ClientAccessDialog extends StatefulWidget {
     required this.publicAppBaseUrl,
     required this.onCreate,
     required this.onRevoke,
+    required this.onExtend,
   });
 
   final QuoteClientAccessStatus initialStatus;
   final String publicAppBaseUrl;
   final Future<CreatedQuoteClientAccess> Function(int lifetimeDays) onCreate;
   final Future<void> Function() onRevoke;
+  final Future<QuoteClientAccessStatus> Function(int days) onExtend;
 
   @override
   State<_ClientAccessDialog> createState() => _ClientAccessDialogState();
@@ -1148,11 +1153,11 @@ final class _ClientAccessDialogState extends State<_ClientAccessDialog> {
               ),
             ),
           ],
-          if (created == null || !createdNow) ...[
+          ...[
             const SizedBox(height: 16),
             AppSelectField<int>(
               value: lifetimeDays,
-              label: 'Срок новой ссылки',
+              label: 'Срок новой ссылки / продление на',
               options: [
                 for (final days in _lifetimes)
                   AppSelectOption(value: days, label: _daysLabel(days)),
@@ -1161,6 +1166,14 @@ final class _ClientAccessDialogState extends State<_ClientAccessDialog> {
                   ? null
                   : (value) => setState(() => lifetimeDays = value ?? 7),
             ),
+            if (status.expiresAt != null)
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text(
+                  'Продление добавляет дни к текущему сроку, а для истёкшей ссылки — к сегодняшней дате. Адрес и пароль сохраняются.',
+                  style: TextStyle(color: _muted, fontSize: 12),
+                ),
+              ),
             if (status.isActive) ...[
               const SizedBox(height: 10),
               const Text(
@@ -1187,6 +1200,12 @@ final class _ClientAccessDialogState extends State<_ClientAccessDialog> {
       ),
     ),
     actions: [
+      if (status.expiresAt != null)
+        TextButton.icon(
+          onPressed: loading ? null : _extend,
+          icon: const Icon(Icons.update, size: 18),
+          label: const Text('Продлить'),
+        ),
       if (status.isActive && !createdNow)
         TextButton.icon(
           onPressed: loading ? null : _revoke,
@@ -1235,6 +1254,32 @@ final class _ClientAccessDialogState extends State<_ClientAccessDialog> {
       if (mounted) {
         setState(() => error = 'Не удалось создать клиентскую ссылку.');
       }
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
+  }
+
+  Future<void> _extend() async {
+    setState(() {
+      loading = true;
+      error = null;
+    });
+    try {
+      final updated = await widget.onExtend(lifetimeDays);
+      if (!mounted) return;
+      setState(() {
+        status = updated;
+        created = updated.secrets;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const AppSnackBar(
+          content: Text('Срок ссылки продлён. Адрес и пароль не изменились.'),
+        ),
+      );
+    } on ApiException catch (exception) {
+      if (mounted) setState(() => error = exception.message);
+    } catch (_) {
+      if (mounted) setState(() => error = 'Не удалось продлить ссылку.');
     } finally {
       if (mounted) setState(() => loading = false);
     }
@@ -1338,7 +1383,11 @@ final class _ClientAccessStatusPanel extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  status.isActive ? 'Доступ активен' : 'Активной ссылки нет',
+                  status.isActive
+                      ? 'Доступ активен'
+                      : status.expiresAt != null
+                      ? 'Срок ссылки истёк'
+                      : 'Активной ссылки нет',
                   style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
                 if (status.expiresAt case final expiresAt?) ...[

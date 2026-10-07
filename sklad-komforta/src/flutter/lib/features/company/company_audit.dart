@@ -469,6 +469,7 @@ class _CompanyAuditCardState extends State<CompanyAuditCard> {
       'image_deleted' => 'Удаление изображения',
       'client_selection_submitted' => 'Выбор клиента',
       'client_link_secret_viewed' => 'Просмотр ссылки и пароля клиента',
+      'client_link_extended' => 'Продление ссылки клиента',
       'onboarding_completed' => 'Завершение настройки',
       _ => 'Изменение',
     };

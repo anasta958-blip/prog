@@ -7,8 +7,13 @@
 проходит первичную настройку; организации изолированы схемами
 `tenant_<uuid>`.
 
-- Тело: `{ "login", "displayName", "temporaryPassword" }` (пароль — по
+- Тело: `{ "login", "displayName", "temporaryPassword", "employeeLimit" }` (пароль — по
   `PasswordPolicy`, логин 3–100 символов).
+- `employeeLimit` — целое неотрицательное число сотрудников (по умолчанию 5).
+  Лимит записывается при создании директора и переносится в его организацию.
+  Директор не занимает место; отключённые сотрудники занимают, удалённые — нет.
+  Изменение лимита недоступно через настройки организации. Сервер блокирует
+  создание сверх лимита, включая одновременные запросы, с кодом `employee_limit_reached`.
 - Логин уникален во всей системе без учёта регистра: занятый — 409
   `bootstrap_login_taken` (и при гонке двух запросов — по уникальному индексу).
 - Неверный или отсутствующий токен — 404, как у несуществующего адреса.
@@ -21,7 +26,7 @@
 ```powershell
 Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/v1/auth/bootstrap/director `
   -Headers @{ 'X-Bootstrap-Token' = '<BOOTSTRAP_TOKEN>' } -ContentType 'application/json; charset=utf-8' `
-  -Body '{"login":"director2","displayName":"Иванов Иван","temporaryPassword":"Временный-пароль-123!"}'
+  -Body '{"login":"director2","displayName":"Иванов Иван","temporaryPassword":"Временный-пароль-123!","employeeLimit":5}'
 ```
 
 Регрессия: `DatabaseRegressionTests.SeveralDirectorsCreateIsolatedOrganizations`

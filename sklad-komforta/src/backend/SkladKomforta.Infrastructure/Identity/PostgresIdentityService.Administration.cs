@@ -14,6 +14,8 @@ internal sealed partial class PostgresIdentityService
         BootstrapDirectorRequest request,
         CancellationToken cancellationToken)
     {
+        if (request.EmployeeLimit < 0)
+            throw Failure(400, "employee_limit_invalid", "Лимит сотрудников не может быть отрицательным.");
         var validation = PasswordPolicy.Validate(request.TemporaryPassword);
         if (!validation.IsValid)
         {
@@ -44,13 +46,14 @@ internal sealed partial class PostgresIdentityService
         var userId = Guid.NewGuid();
         var passwordHash = _passwordHasher.HashPassword(userId.ToString("N"), request.TemporaryPassword);
         await using var insert = new NpgsqlCommand(
-            "INSERT INTO public.users (id, login, password_hash, display_name, must_change_password) VALUES (@id, @login, @hash, @name, true)",
+            "INSERT INTO public.users (id, login, password_hash, display_name, must_change_password, employee_limit) VALUES (@id, @login, @hash, @name, true, @employee_limit)",
             connection,
             transaction);
         insert.Parameters.AddWithValue("id", userId);
         insert.Parameters.AddWithValue("login", login);
         insert.Parameters.AddWithValue("hash", passwordHash);
         insert.Parameters.AddWithValue("name", displayName);
+        insert.Parameters.AddWithValue("employee_limit", request.EmployeeLimit);
         try
         {
             await insert.ExecuteNonQueryAsync(cancellationToken);
@@ -98,13 +101,14 @@ internal sealed partial class PostgresIdentityService
         }
 
         await using (var organization = new NpgsqlCommand(
-            "INSERT INTO public.organizations (id, name, schema_name) VALUES (@id, @name, @schema)",
+            "INSERT INTO public.organizations (id, name, schema_name, employee_limit) SELECT @id, @name, @schema, employee_limit FROM public.users WHERE id = @user_id",
             connection,
             transaction))
         {
             organization.Parameters.AddWithValue("id", organizationId);
             organization.Parameters.AddWithValue("name", name);
             organization.Parameters.AddWithValue("schema", schema.Value);
+            organization.Parameters.AddWithValue("user_id", userId);
             await organization.ExecuteNonQueryAsync(cancellationToken);
         }
 

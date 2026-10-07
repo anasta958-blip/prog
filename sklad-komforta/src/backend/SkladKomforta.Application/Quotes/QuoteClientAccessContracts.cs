@@ -2,6 +2,7 @@ namespace SkladKomforta.Application.Quotes;
 
 /// <summary>Параметры новой парольной ссылки на одно сохранённое КП или ПКП.</summary>
 public sealed record CreateQuoteClientAccessRequest(int LifetimeDays = 7);
+public sealed record ExtendQuoteClientAccessRequest(int AdditionalDays = 7);
 
 /// <summary>
 /// Секреты новой ссылки. В базе они хранятся хешами для проверки и зашифрованными
@@ -105,6 +106,8 @@ public sealed record QuoteClientPosition(
 /// <summary>Изолированный use case парольного доступа внешнего клиента.</summary>
 public interface IQuoteClientAccessService
 {
+    Task<QuoteClientAccessStatus> ExtendAsync(Guid actorUserId, Guid boardId, Guid cardId,
+        ExtendQuoteClientAccessRequest request, CancellationToken cancellationToken);
     Task<QuoteClientAccessStatus> GetStatusAsync(
         Guid actorUserId,
         Guid boardId,

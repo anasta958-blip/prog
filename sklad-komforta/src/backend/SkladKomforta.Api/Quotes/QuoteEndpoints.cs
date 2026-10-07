@@ -71,6 +71,12 @@ internal static class QuoteEndpoints
                     UserId(context.User), boardId, cardId, request, token))))
             .RequireTenantPermission("quotes.manage");
 
+        quotes.MapPost("/client-access/extend", async (
+                HttpContext context, Guid boardId, Guid cardId,
+                ExtendQuoteClientAccessRequest request, IQuoteClientAccessService service, CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.ExtendAsync(UserId(context.User), boardId, cardId, request, token))))
+            .RequireTenantPermission("quotes.manage");
+
         quotes.MapGet("/client-access", async (
                 HttpContext context,
                 Guid boardId,
