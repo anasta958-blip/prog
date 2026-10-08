@@ -211,6 +211,14 @@ internal sealed partial class PostgresIdentityService
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// Сколько только что заменённый refresh-токен ещё принимается. Ответ с
+    /// новой cookie может не дойти до браузера (перезагрузка страницы во время
+    /// запроса, одновременный запуск двух вкладок) — без этого окна такой
+    /// пользователь получал 401 и входил заново.
+    /// </summary>
+    private static readonly TimeSpan RotationGracePeriod = TimeSpan.FromSeconds(60);
+
     /// <inheritdoc />
     public async Task<TokenPair> RefreshAsync(
         RefreshTokenRequest request,
@@ -222,15 +230,37 @@ internal sealed partial class PostgresIdentityService
             throw Failure(401, "refresh_invalid", "Сессия недействительна.");
         }
 
+        // Одновременные обновления одной сессии сериализуются блокировкой
+        // строки; при конфликте SERIALIZABLE запрос повторяется с новым снимком.
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await RotateRefreshTokenAsync(request.RefreshToken, client, cancellationToken);
+            }
+            catch (PostgresException exception) when (
+                exception.SqlState == PostgresErrorCodes.SerializationFailure && attempt < 3)
+            {
+            }
+        }
+    }
+
+    private async Task<TokenPair> RotateRefreshTokenAsync(
+        string refreshToken,
+        AuthenticationClientContext client,
+        CancellationToken cancellationToken)
+    {
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
         const string select = """
             SELECT s.id, s.user_id, s.organization_id, s.device_type, s.device_name,
-                   u.display_name
+                   u.display_name, s.revoked_at IS NULL, s.replaced_by
             FROM public.refresh_sessions AS s
             JOIN public.users AS u ON u.id = s.user_id
             LEFT JOIN public.organizations AS organization ON organization.id = s.organization_id
-            WHERE s.token_hash = @hash AND s.revoked_at IS NULL AND s.expires_at > now()
+            WHERE s.token_hash = @hash AND s.expires_at > now()
+              AND (s.revoked_at IS NULL
+                   OR (s.replaced_by IS NOT NULL AND s.revoked_at > now() - @grace))
               AND u.is_active AND u.deleted_at IS NULL
               AND (s.organization_id IS NULL OR (
                     organization.is_active AND organization.deleted_at IS NULL
@@ -238,7 +268,8 @@ internal sealed partial class PostgresIdentityService
             FOR UPDATE OF s
             """;
         await using var command = new NpgsqlCommand(select, connection, transaction);
-        command.Parameters.AddWithValue("hash", IdentitySecurity.HashToken(request.RefreshToken));
+        command.Parameters.AddWithValue("hash", IdentitySecurity.HashToken(refreshToken));
+        command.Parameters.AddWithValue("grace", RotationGracePeriod);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken))
         {
@@ -251,12 +282,37 @@ internal sealed partial class PostgresIdentityService
         var deviceType = (DeviceType)reader.GetInt16(3);
         var deviceName = reader.IsDBNull(4) ? null : reader.GetString(4);
         var displayName = reader.GetString(5);
+        var active = reader.GetBoolean(6);
+        Guid? replacedBy = reader.IsDBNull(7) ? null : reader.GetGuid(7);
         await reader.DisposeAsync();
 
-        await using (var revoke = new NpgsqlCommand("UPDATE public.refresh_sessions SET revoked_at = now() WHERE id = @id", connection, transaction))
+        // Заменяется действующая сессия. Повтор уже заменённого токена (в окне
+        // ожидания) заменяет действующий конец его цепочки: ту пару браузер так
+        // и не получил, поэтому она отзывается и не остаётся «висящей».
+        Guid? replacedId = previousId;
+        if (!active)
         {
-            revoke.Parameters.AddWithValue("id", previousId);
-            await revoke.ExecuteNonQueryAsync(cancellationToken);
+            const string tip = """
+                WITH RECURSIVE chain AS (
+                    SELECT id, replaced_by, revoked_at, 1 AS depth
+                    FROM public.refresh_sessions WHERE id = @start
+                    UNION ALL
+                    SELECT next.id, next.replaced_by, next.revoked_at, chain.depth + 1
+                    FROM public.refresh_sessions AS next
+                    JOIN chain ON next.id = chain.replaced_by
+                    WHERE chain.depth < 20
+                )
+                SELECT id FROM chain WHERE revoked_at IS NULL LIMIT 1
+                """;
+            await using var find = new NpgsqlCommand(tip, connection, transaction);
+            find.Parameters.AddWithValue("start", replacedBy!.Value);
+            replacedId = await find.ExecuteScalarAsync(cancellationToken) as Guid?;
+            // Цепочку закрыли выходом или отзывом устройства — повтор старого
+            // токена не должен восстанавливать сессию.
+            if (replacedId is null)
+            {
+                throw Failure(401, "refresh_invalid", "Сессия недействительна.");
+            }
         }
 
         var newToken = IdentitySecurity.CreateToken(64);
@@ -279,6 +335,16 @@ internal sealed partial class PostgresIdentityService
             create.Parameters.AddWithValue("user_agent", (object?)client.UserAgent ?? DBNull.Value);
             create.Parameters.AddWithValue("expires_at", expiresAt);
             await create.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        if (replacedId is { } replaced)
+        {
+            await using var revoke = new NpgsqlCommand(
+                "UPDATE public.refresh_sessions SET revoked_at = now(), replaced_by = @new_id WHERE id = @id",
+                connection, transaction);
+            revoke.Parameters.AddWithValue("id", replaced);
+            revoke.Parameters.AddWithValue("new_id", newId);
+            await revoke.ExecuteNonQueryAsync(cancellationToken);
         }
 
         await transaction.CommitAsync(cancellationToken);

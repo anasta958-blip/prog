@@ -48,6 +48,8 @@ class _WorkspacePageState extends State<WorkspacePage> {
 
   /// Боковая панель на широком экране свёрнута до иконок.
   bool sidebarCollapsed = false;
+  // Сохраняет состояние открытой страницы при смене адаптивной оболочки.
+  final GlobalKey _contentKey = GlobalKey();
   final ConfigurationEditGuard configurationEditGuard =
       ConfigurationEditGuard();
 
@@ -109,7 +111,7 @@ class _WorkspacePageState extends State<WorkspacePage> {
         child: LayoutBuilder(
           builder: (context, constraints) {
             final desktop = constraints.maxWidth >= 840;
-            final content = switch (selectedIndex) {
+            final page = switch (selectedIndex) {
               1 => CatalogPage(controller: catalogController),
               2 => CompanyPage(
                 controller: companyController,
@@ -124,6 +126,7 @@ class _WorkspacePageState extends State<WorkspacePage> {
                 authController: widget.authController,
               ),
             };
+            final content = KeyedSubtree(key: _contentKey, child: page);
             if (!desktop) {
               return Scaffold(
                 appBar: AppBar(
