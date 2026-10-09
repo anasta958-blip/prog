@@ -54,6 +54,15 @@ void main() {
     expect(find.text('Статусы отгрузки'), findsOneWidget);
     expect(find.byKey(const ValueKey('reorder-from-montage')), findsOneWidget);
     expect(find.byKey(const ValueKey('reorder-from-buy')), findsNothing);
+    for (final width in [375.0, 1024.0]) {
+      tester.view.physicalSize = Size(width, 2400);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      final name = find.widgetWithText(TextFormField, 'Столбец 1').first;
+      expect(tester.getSize(name).width, greaterThan(100));
+    }
+    tester.view.physicalSize = const Size(1400, 2400);
+    await tester.pumpAndSettle();
 
     await tester.ensureVisible(
       find.byKey(const ValueKey('reorder-from-montage')),

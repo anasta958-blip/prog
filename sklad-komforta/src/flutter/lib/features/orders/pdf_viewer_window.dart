@@ -47,9 +47,29 @@ final class _PdfDocumentView extends StatefulWidget {
 
 final class _PdfDocumentViewState extends State<_PdfDocumentView> {
   final viewer = PdfViewerController();
+  // PDFium загружается только при первом настоящем просмотре документа.
+  static Future<void>? _initialization;
+  late final ready = _initialization ??= pdfrxFlutterInitialize(
+    dismissPdfiumWasmWarnings: true,
+  );
 
   @override
-  Widget build(BuildContext context) => PdfViewer.data(
+  Widget build(BuildContext context) => FutureBuilder<void>(
+    future: ready,
+    builder: (context, snapshot) {
+      if (snapshot.hasError) {
+        return const Center(
+          child: Text('Не удалось загрузить модуль просмотра PDF.'),
+        );
+      }
+      if (snapshot.connectionState != ConnectionState.done) {
+        return const Center(child: CircularProgressIndicator());
+      }
+      return _viewer();
+    },
+  );
+
+  Widget _viewer() => PdfViewer.data(
     widget.bytes,
     sourceName: widget.title,
     controller: viewer,

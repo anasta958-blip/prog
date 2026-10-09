@@ -618,17 +618,19 @@ void main() {
     await tester.pumpAndSettle();
 
     // Горизонтальная прокрутка доски (у поля поиска своя, внутренняя).
+    final boardScroll = find.byWidgetPredicate(
+      (widget) =>
+          widget is SingleChildScrollView &&
+          widget.scrollDirection == Axis.horizontal,
+    );
     final scrollable = find
-        .descendant(
-          of: find.byType(SingleChildScrollView),
-          matching: find.byType(Scrollable),
-        )
+        .descendant(of: boardScroll, matching: find.byType(Scrollable))
         .first;
     final position = tester.state<ScrollableState>(scrollable).position;
     expect(position.pixels, 0);
 
     final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
-    await gesture.down(tester.getCenter(find.byType(SingleChildScrollView)));
+    await gesture.down(tester.getCenter(boardScroll));
     await gesture.moveBy(const Offset(-120, 0));
     await gesture.up();
     await tester.pumpAndSettle();

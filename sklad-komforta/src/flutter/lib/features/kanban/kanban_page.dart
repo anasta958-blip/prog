@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:sklad_komforta_app/core/formatters/russian.dart';
 import 'dart:ui' show PointerDeviceKind;
 
 import 'package:flutter/material.dart';
@@ -24,10 +25,14 @@ final class KanbanPage extends StatefulWidget {
     this.config,
     this.authController,
     this.outboundGatewayFactory,
+    this.backRequest = 0,
     super.key,
   });
 
   final KanbanController controller;
+
+  /// Повторный выбор пункта «Канбаны» запрашивает штатный выход из редактора.
+  final int backRequest;
   final AppConfig? config;
   final AuthController? authController;
 
@@ -383,6 +388,7 @@ final class _KanbanPageState extends State<KanbanPage> {
     if (_quoteEditorOpen &&
         _quoteBoard!.specialization == WorkflowSpecialization.order) {
       return OrderEditorPage(
+        backRequest: widget.backRequest,
         key: ValueKey(
           'order:${_quoteBoard!.id}:${_openedQuoteCard?.id ?? _newQuoteColumnId}',
         ),
@@ -397,6 +403,7 @@ final class _KanbanPageState extends State<KanbanPage> {
     }
     if (_quoteEditorOpen) {
       return QuoteEditorPage(
+        backRequest: widget.backRequest,
         key: ValueKey(
           'quote:${_quoteBoard!.id}:${_openedQuoteCard?.id ?? _newQuoteColumnId}:${_newQuoteKind?.name}',
         ),
@@ -542,122 +549,96 @@ final class _Toolbar extends StatelessWidget {
   final VoidCallback onToggle;
 
   @override
-  Widget build(BuildContext context) {
-    final selector = _BoardSelector(controller: controller);
-    final authorSelector = _CardAuthorSelector(controller: controller);
-    if (compact) {
-      return DecoratedBox(
-        decoration: const BoxDecoration(
-          color: Color(0xFF101823),
-          border: Border(bottom: BorderSide(color: Color(0xFF253348))),
-        ),
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.view_kanban_outlined,
-                    color: Color(0xFF4D8DFF),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      controller.board?.name ?? 'Канбаны',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                  CollapseToggle(
-                    expanded: expanded,
-                    compact: true,
-                    onPressed: onToggle,
-                  ),
-                ],
-              ),
-            ),
-            AnimatedCrossFade(
-              firstChild: const SizedBox(width: double.infinity),
-              secondChild: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                child: Column(
-                  children: [
-                    selector,
-                    const SizedBox(height: 8),
-                    _CardSearchField(controller: controller),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Expanded(child: authorSelector),
-                        const SizedBox(width: 8),
-                        IconButton.outlined(
-                          tooltip: 'Обновить',
-                          onPressed: controller.loading
-                              ? null
-                              : controller.reload,
-                          icon: const Icon(Icons.refresh),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              crossFadeState: expanded
-                  ? CrossFadeState.showSecond
-                  : CrossFadeState.showFirst,
-              duration: const Duration(milliseconds: 180),
-            ),
-          ],
-        ),
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final narrow = constraints.maxWidth < 700;
+      final fields = LayoutBuilder(
+        builder: (context, space) {
+          final selector = _BoardSelector(controller: controller);
+          final author = _CardAuthorSelector(controller: controller);
+          final search = _CardSearchField(controller: controller);
+          if (space.maxWidth >= 650) {
+            return Row(
+              children: [
+                Expanded(child: selector),
+                const SizedBox(width: 10),
+                SizedBox(width: 240, child: search),
+                const SizedBox(width: 10),
+                Expanded(child: author),
+              ],
+            );
+          }
+          return Column(
+            children: [
+              selector,
+              const SizedBox(height: 12),
+              search,
+              const SizedBox(height: 12),
+              author,
+            ],
+          );
+        },
       );
-    }
-    return Container(
-      padding: const EdgeInsets.fromLTRB(22, 16, 22, 14),
-      decoration: const BoxDecoration(
-        color: Color(0xFF101823),
-        border: Border(bottom: BorderSide(color: Color(0xFF253348))),
-      ),
-      child: Row(
+      final heading = Row(
         children: [
-          const Icon(
-            Icons.view_kanban_outlined,
-            color: Color(0xFF4D8DFF),
-            size: 28,
-          ),
-          const SizedBox(width: 12),
-          const Text(
-            'Канбаны',
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(width: 24),
-          SizedBox(width: 320, child: selector),
-          const SizedBox(width: 12),
-          SizedBox(width: 320, child: authorSelector),
-          const SizedBox(width: 12),
-          Flexible(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 280),
-              child: _CardSearchField(controller: controller),
+          const Icon(Icons.view_kanban_outlined, color: Color(0xFF4D8DFF)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              narrow ? controller.board?.name ?? 'Канбаны' : 'Канбаны',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w800),
             ),
           ),
-          const Spacer(),
           if (controller.board case final board?)
-            _MetaChip(
-              icon: Icons.view_column_outlined,
-              label: '${board.columns.length} столбцов',
+            Text(
+              russianCount(
+                board.columns.length,
+                'столбец',
+                'столбца',
+                'столбцов',
+              ),
             ),
-          const SizedBox(width: 8),
-          IconButton.outlined(
+          IconButton(
             tooltip: 'Обновить канбан',
             onPressed: controller.loading ? null : controller.reload,
             icon: const Icon(Icons.refresh),
           ),
+          if (narrow)
+            CollapseToggle(
+              expanded: expanded,
+              compact: true,
+              onPressed: onToggle,
+            ),
         ],
-      ),
-    );
-  }
+      );
+      return Container(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+        decoration: const BoxDecoration(
+          color: Color(0xFF101823),
+          border: Border(bottom: BorderSide(color: Color(0xFF253348))),
+        ),
+        child: constraints.maxWidth >= 1150
+            ? Row(
+                children: [
+                  SizedBox(width: 290, child: heading),
+                  const SizedBox(width: 16),
+                  Expanded(child: fields),
+                ],
+              )
+            : Column(
+                children: [
+                  heading,
+                  if (!narrow || expanded) ...[
+                    const SizedBox(height: 10),
+                    fields,
+                  ],
+                ],
+              ),
+      );
+    },
+  );
 }
 
 /// Поиск карточек по названию или номеру. Запрос отправляется через 350 мс
@@ -964,6 +945,12 @@ final class _KanbanColumnPanel extends StatelessWidget {
                     onDrop: onDrop,
                     onDragMove: onDragMove,
                     child: _EmptyColumn(
+                      specialized:
+                          board.specialization !=
+                          WorkflowSpecialization.standard,
+                      hasIncoming: board.transitions.any(
+                        (item) => item.toColumnId == column.id,
+                      ),
                       isFirst: isFirst,
                       canCreate: canCreate,
                       hasCategories: board.categories.isNotEmpty,
@@ -1095,6 +1082,8 @@ final class _KanbanColumnPanel extends StatelessWidget {
 
 final class _EmptyColumn extends StatelessWidget {
   const _EmptyColumn({
+    this.specialized = false,
+    this.hasIncoming = false,
     required this.isFirst,
     required this.canCreate,
     required this.hasCategories,
@@ -1102,45 +1091,53 @@ final class _EmptyColumn extends StatelessWidget {
   });
 
   final bool isFirst;
+  final bool specialized;
+  final bool hasIncoming;
   final bool canCreate;
   final bool hasCategories;
   final VoidCallback onCreate;
 
   @override
   Widget build(BuildContext context) => Center(
-    child: Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            isFirst ? Icons.note_add_outlined : Icons.inbox_outlined,
-            size: 32,
-            color: const Color(0xFF637C9F),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            canCreate
-                ? 'В этом столбце пока нет карточек'
-                : hasCategories
-                ? 'Создание карточек отключено настройками канбана'
-                : 'Назначьте канбану хотя бы одну категорию',
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: Color(0xFF8EA3C0),
-              fontSize: 12,
-              height: 1.35,
+    child: SingleChildScrollView(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              isFirst ? Icons.note_add_outlined : Icons.inbox_outlined,
+              size: 32,
+              color: const Color(0xFF637C9F),
             ),
-          ),
-          if (canCreate) ...[
-            const SizedBox(height: 14),
-            OutlinedButton.icon(
-              onPressed: onCreate,
-              icon: const Icon(Icons.add, size: 17),
-              label: const Text('Создать карточку'),
+            const SizedBox(height: 10),
+            Text(
+              canCreate
+                  ? 'В этом столбце пока нет карточек'
+                  : specialized
+                  ? (hasIncoming
+                        ? 'Карточек нет. Перенесите карточку сюда.'
+                        : 'Карточек нет')
+                  : hasCategories
+                  ? 'Создание карточек отключено настройками канбана'
+                  : 'Назначьте канбану хотя бы одну категорию',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Color(0xFF8EA3C0),
+                fontSize: 12,
+                height: 1.35,
+              ),
             ),
+            if (canCreate) ...[
+              const SizedBox(height: 14),
+              OutlinedButton.icon(
+                onPressed: onCreate,
+                icon: const Icon(Icons.add, size: 17),
+                label: const Text('Создать карточку'),
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     ),
   );
@@ -1946,30 +1943,6 @@ final class _ColumnPager extends StatelessWidget {
               : () => onPage(page.page + 1),
           icon: const Icon(Icons.chevron_right, size: 20),
         ),
-      ],
-    ),
-  );
-}
-
-final class _MetaChip extends StatelessWidget {
-  const _MetaChip({required this.icon, required this.label});
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
-    decoration: BoxDecoration(
-      color: const Color(0xFF142033),
-      borderRadius: BorderRadius.circular(10),
-      border: Border.all(color: const Color(0xFF293A53)),
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 16, color: const Color(0xFF7FAEFF)),
-        const SizedBox(width: 7),
-        Text(label, style: const TextStyle(fontSize: 12)),
       ],
     ),
   );

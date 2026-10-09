@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/widgets/preview_table.dart';
 import 'package:intl/intl.dart';
 import 'package:sklad_komforta_app/features/company/company_models.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_models.dart';
@@ -449,8 +450,8 @@ final class _PositionTable extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 8),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
+        PreviewTable(
+          minimumWidth: _positionTableWidth,
           child: Table(
             defaultVerticalAlignment: TableCellVerticalAlignment.middle,
             border: TableBorder.all(color: _paperBorder),

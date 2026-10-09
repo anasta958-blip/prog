@@ -21,6 +21,61 @@ void main() {
     environment: 'test',
   );
 
+  testWidgets('повторный выбор канбанов вызывает штатный выход редактора', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(375, 812);
+    addTearDown(tester.view.reset);
+    final auth = AuthController(
+      config,
+      api: _NoopAuthGateway(),
+      tokens: _MemoryTokenRepository(),
+    );
+    final controller = QuoteController(config, auth);
+    final type = QuoteProposalTypeDraft.create();
+    controller
+      ..draft = QuoteDraft(
+        kind: QuoteKind.prequote,
+        title: 'Тест',
+        clientId: '',
+        executorCompanyId: '',
+        selectionMode: 'variant',
+        proposalTypes: [type],
+      )
+      ..activeTypeId = type.id
+      ..activeVariantId = type.variants.first.id;
+    var exits = 0;
+    Widget editor(int request) => MaterialApp(
+      home: Scaffold(
+        body: QuoteEditorPage(
+          config: config,
+          authController: auth,
+          board: _quoteBoard,
+          controller: controller,
+          backRequest: request,
+          onBack: () => exits++,
+        ),
+      ),
+    );
+    await tester.pumpWidget(editor(0));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(editor(1));
+    await tester.pumpAndSettle();
+    expect(exits, 1);
+    controller.updateDocument((draft) => draft.title = 'Изменено');
+    await tester.pumpWidget(editor(2));
+    await tester.pumpAndSettle();
+    expect(find.text('Есть несохранённые изменения'), findsOneWidget);
+    await tester.tap(find.text('Остаться'));
+    await tester.pumpAndSettle();
+    expect(exits, 1);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+    auth.dispose();
+  });
+
   testWidgets(
     'уведомление о черновике исчезает через 5 секунд и не стирает новое',
     (tester) async {
@@ -1028,7 +1083,10 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('ГРУППА'), findsOneWidget);
-    expect(find.byKey(const ValueKey('quote-entry-saved-name')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('quote-entry-saved-name')),
+      findsOneWidget,
+    );
     expect(
       find.byKey(const ValueKey('quote-entry-saved-marking')),
       findsOneWidget,

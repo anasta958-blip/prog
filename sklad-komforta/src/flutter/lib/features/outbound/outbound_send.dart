@@ -132,6 +132,7 @@ final class OutboundSendButton extends StatelessWidget {
     required this.onSend,
     this.compact = false,
     this.busy = false,
+    this.menuItem = false,
     super.key,
   });
 
@@ -140,10 +141,27 @@ final class OutboundSendButton extends StatelessWidget {
   final bool compact;
   final bool busy;
 
+  /// Встраивание отправки подменю в мобильную командную панель.
+  final bool menuItem;
+
   @override
   Widget build(BuildContext context) {
     final available = channels.available;
     if (available.isEmpty) return const SizedBox.shrink();
+    if (menuItem) {
+      return SubmenuButton(
+        leadingIcon: const Icon(Icons.forward_to_inbox_outlined),
+        menuChildren: [
+          for (final channel in available)
+            MenuItemButton(
+              onPressed: busy ? null : () => onSend(channel),
+              leadingIcon: Icon(outboundChannelIcon(channel)),
+              child: Text(channel.label),
+            ),
+        ],
+        child: const Text('Отправить'),
+      );
+    }
     return MenuAnchor(
       alignmentOffset: const Offset(0, 4),
       menuChildren: [

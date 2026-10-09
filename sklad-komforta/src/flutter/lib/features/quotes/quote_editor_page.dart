@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'package:sklad_komforta_app/core/formatters/russian.dart';
 import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/widgets/document_command_bar.dart';
 import 'package:sklad_komforta_app/core/widgets/collapse_toggle.dart';
 import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
 import 'package:flutter/services.dart';
@@ -14,7 +16,6 @@ import 'package:sklad_komforta_app/core/models/workflow_specialization.dart';
 import 'package:sklad_komforta_app/core/network/api_exception.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
 import 'package:sklad_komforta_app/core/widgets/app_number_field.dart';
-import 'package:sklad_komforta_app/core/widgets/workspace_header.dart';
 import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_models.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_models.dart';
@@ -54,6 +55,7 @@ final class QuoteEditorPage extends StatefulWidget {
     required this.onBack,
     this.controller,
     this.outboundGatewayFactory,
+    this.backRequest = 0,
     super.key,
   });
 
@@ -64,6 +66,9 @@ final class QuoteEditorPage extends StatefulWidget {
   final String? creationColumnId;
   final QuoteKind? createKind;
   final VoidCallback onBack;
+
+  /// Изменение счётчика вызывает тот же выход, что и кнопка «Назад».
+  final int backRequest;
   final QuoteController? controller;
 
   /// Транспорт внешней отправки; в тестах — память.
@@ -74,6 +79,16 @@ final class QuoteEditorPage extends StatefulWidget {
 }
 
 final class _QuoteEditorPageState extends State<QuoteEditorPage> {
+  @override
+  void didUpdateWidget(covariant QuoteEditorPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.backRequest != widget.backRequest) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_requestBack());
+      });
+    }
+  }
+
   late final QuoteController controller;
   late final bool ownsController;
   final Set<String> expandedCategories = <String>{};
@@ -272,7 +287,8 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
                   onShare: creatingClientAccess ? null : _manageClientAccess,
                   sendButton: OutboundSendButton(
                     channels: outboundChannels,
-                    compact: compact,
+                    compact: constraints.maxWidth < 1100,
+                    menuItem: constraints.maxWidth < 600,
                     busy: sending,
                     onSend: _sendDocument,
                   ),
@@ -723,134 +739,52 @@ final class _CommandBar extends StatelessWidget {
     required this.onSave,
     this.sendButton,
   });
-
-  /// Кнопка «Отправить» (Telegram, почта); скрыта, если способов нет.
-  final Widget? sendButton;
   final QuoteController controller;
   final KanbanCard? card;
   final KanbanBoard board;
   final bool compact;
-  final VoidCallback onBack;
-  final VoidCallback onPreview;
-  final VoidCallback onPrint;
+  final VoidCallback onBack, onPreview, onPrint, onSave;
   final VoidCallback? onShare;
-  final VoidCallback onSave;
-
+  final Widget? sendButton;
   @override
-  Widget build(BuildContext context) {
-    final draft = controller.draft!;
-    return DecoratedBox(
-      decoration: const BoxDecoration(
-        color: Color(0xFF0F1722),
-        border: Border(bottom: BorderSide(color: _border)),
+  Widget build(BuildContext context) => DocumentCommandBar(
+    title: card == null
+        ? 'Новая ${controller.draft!.kind.label}'
+        : '${controller.draft!.kind.label} №${card!.number}',
+    shortTitle: card == null
+        ? 'Новая ${controller.draft!.kind.label}'
+        : '${controller.draft!.kind.label} №${card!.number}',
+    saving: controller.saving,
+    onBack: onBack,
+    onSave: onSave,
+    commands: [
+      DocumentCommand('Предпросмотр', Icons.visibility_outlined, onPreview),
+      DocumentCommand(
+        'Печать',
+        Icons.print_outlined,
+        controller.printing ? null : onPrint,
       ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Row(
-          children: [
-            const Icon(Icons.description_outlined, color: _accent),
-            const SizedBox(width: 9),
-            Text(
-              card == null
-                  ? 'Новая ${draft.kind.label}'
-                  : '${draft.kind.label} №${card!.number}',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-            ),
-            if (!compact) ...[
-              const SizedBox(width: 18),
-              const Text(
-                'Коммерческие предложения',
-                style: TextStyle(color: _muted),
-              ),
-            ],
-            const Spacer(),
-            if (board.specialization == WorkflowSpecialization.quoteAndPrequote)
-              SizedBox(
-                width: 130,
-                child: AppSelectField<QuoteKind>(
-                  value: draft.kind,
-                  label: 'Документ',
-                  isDense: true,
-                  options: QuoteKind.values
-                      .map(
-                        (value) =>
-                            AppSelectOption(value: value, label: value.label),
-                      )
-                      .toList(),
-                  onChanged: (value) {
-                    if (value != null) {
-                      controller.updateDocument((draft) => draft.kind = value);
-                    }
-                  },
-                ),
-              ),
-            const SizedBox(width: 8),
-            FilledButton.icon(
-              onPressed: controller.saving ? null : onSave,
-              icon: controller.saving
-                  ? const SizedBox.square(
-                      dimension: 15,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.save_outlined, size: 18),
-              label: Text(compact ? '' : 'Сохранить'),
-            ),
-            if (compact) ...[
-              const SizedBox(width: 7),
-              IconButton.outlined(
-                onPressed: onPreview,
-                tooltip: 'Предпросмотр',
-                icon: const Icon(Icons.visibility_outlined, size: 18),
-              ),
-              const SizedBox(width: 7),
-              IconButton.outlined(
-                onPressed: controller.printing ? null : onPrint,
-                tooltip: 'Печать',
-                icon: controller.printing
-                    ? const SizedBox.square(
-                        dimension: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.print_outlined, size: 18),
-              ),
-              ?sendButton,
-              const SizedBox(width: 7),
-              IconButton.outlined(
-                onPressed: onShare,
-                tooltip: 'Ссылка для клиента',
-                icon: const Icon(Icons.link, size: 18),
-              ),
-            ],
-            if (!compact) ...[
-              const SizedBox(width: 7),
-              _CommandAction(
-                icon: Icons.visibility_outlined,
-                label: 'Предпросмотр',
-                onPressed: onPreview,
-              ),
-              _CommandAction(
-                icon: Icons.print_outlined,
-                label: 'Печать',
-                onPressed: controller.printing ? null : onPrint,
-              ),
-              ?sendButton,
-              _CommandAction(
-                icon: Icons.link,
-                label: 'Ссылка',
-                onPressed: onShare,
-              ),
-            ],
-            const SizedBox(width: 7),
-            OutlinedButton.icon(
-              onPressed: onBack,
-              icon: const Icon(Icons.arrow_back, size: 18),
-              label: Text(compact ? '' : 'Назад'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+      DocumentCommand('Ссылка', Icons.link, onShare),
+    ],
+    extra: sendButton,
+    selector: board.specialization != WorkflowSpecialization.quoteAndPrequote
+        ? null
+        : AppSelectField<QuoteKind>(
+            value: controller.draft!.kind,
+            label: 'Документ',
+            isDense: true,
+            options: QuoteKind.values
+                .map(
+                  (value) => AppSelectOption(value: value, label: value.label),
+                )
+                .toList(),
+            onChanged: (value) {
+              if (value != null) {
+                controller.updateDocument((draft) => draft.kind = value);
+              }
+            },
+          ),
+  );
 }
 
 /// Спрашивает, сохранить ли документ перед отправкой: сервер отправляет
@@ -881,27 +815,6 @@ Future<bool> _confirmSaveAndSend(BuildContext context) async =>
     ) ==
     true;
 
-final class _CommandAction extends StatelessWidget {
-  const _CommandAction({
-    required this.icon,
-    required this.label,
-    required this.onPressed,
-  });
-  final IconData icon;
-  final String label;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(left: 7),
-    child: OutlinedButton.icon(
-      onPressed: onPressed,
-      icon: Icon(icon, size: 17),
-      label: Text(label),
-    ),
-  );
-}
-
 /// Выбор содержимого предпросмотра и печати: вариант, тип или весь документ.
 final class _PrintScopeDialog extends StatelessWidget {
   const _PrintScopeDialog({
@@ -919,15 +832,6 @@ final class _PrintScopeDialog extends StatelessWidget {
   static String _named(String value) =>
       value.trim().isEmpty ? 'без названия' : value.trim();
 
-  static String _plural(int count, String one, String few, String many) {
-    final lastTwo = count % 100;
-    final last = count % 10;
-    if (lastTwo >= 11 && lastTwo <= 14) return '$count $many';
-    if (last == 1) return '$count $one';
-    if (last >= 2 && last <= 4) return '$count $few';
-    return '$count $many';
-  }
-
   @override
   Widget build(BuildContext context) => SimpleDialog(
     title: Text(title),
@@ -944,7 +848,7 @@ final class _PrintScopeDialog extends StatelessWidget {
         icon: Icons.category_outlined,
         title: 'Тип «${_named(type.name)}»',
         subtitle:
-            'Все варианты типа: ${_plural(type.variants.length, 'вариант', 'варианта', 'вариантов')}',
+            'Все варианты типа: ${russianCount(type.variants.length, 'вариант', 'варианта', 'вариантов')}',
         scope: QuotePrintScope.type,
       ),
       _PrintScopeOption(
@@ -952,7 +856,7 @@ final class _PrintScopeDialog extends StatelessWidget {
         icon: Icons.description_outlined,
         title: 'Весь документ',
         subtitle:
-            'Все типы и варианты: ${_plural(typeCount, 'тип', 'типа', 'типов')}',
+            'Все типы и варианты: ${russianCount(typeCount, 'тип', 'типа', 'типов')}',
         scope: QuotePrintScope.all,
       ),
     ],
@@ -1859,6 +1763,33 @@ final class _VariantContent extends StatelessWidget {
   );
 }
 
+final class _CategoryHeading extends StatelessWidget {
+  const _CategoryHeading({required this.children});
+  final List<Widget> children;
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      if (constraints.maxWidth >= 600) return Row(children: children);
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          (children.first as Flexible).child,
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: children
+                .skip(1)
+                .where((child) => child is! SizedBox)
+                .toList(),
+          ),
+        ],
+      );
+    },
+  );
+}
+
 final class _CategoryBlock extends StatelessWidget {
   const _CategoryBlock({
     required this.controller,
@@ -1913,13 +1844,11 @@ final class _CategoryBlock extends StatelessWidget {
                 const Icon(Icons.folder_outlined, size: 18, color: _accent),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Row(
+                  child: _CategoryHeading(
                     children: [
                       Flexible(
                         child: Text(
                           category.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontWeight: FontWeight.w800),
                         ),
                       ),
@@ -2436,19 +2365,24 @@ final class _SectionHeader extends StatelessWidget {
             _MoneyLabel('Итого', section.clientTotal),
             const SizedBox(width: 8),
           ],
-          IconButton(
-            tooltip: 'Удалить раздел',
-            color: const Color(0xFFFF7676),
-            icon: const Icon(Icons.delete_outline, size: 20),
-            onPressed: controller.saving
-                ? null
-                : () => _confirmTabRemoval(
-                    context,
-                    title: 'Удалить раздел «${section.name}»?',
-                    content:
-                        'Раздел и все его позиции будут удалены из этого варианта. Связанные автоматические позиции будут пересчитаны. Каталог товаров не изменится.',
-                    onConfirmed: () => controller.removeSection(section),
-                  ),
+          TooltipTheme(
+            data: const TooltipThemeData(
+              triggerMode: TooltipTriggerMode.manual,
+            ),
+            child: IconButton(
+              tooltip: 'Удалить раздел',
+              color: const Color(0xFFFF7676),
+              icon: const Icon(Icons.delete_outline, size: 20),
+              onPressed: controller.saving
+                  ? null
+                  : () => _confirmTabRemoval(
+                      context,
+                      title: 'Удалить раздел «${section.name}»?',
+                      content:
+                          'Раздел и все его позиции будут удалены из этого варианта. Связанные автоматические позиции будут пересчитаны. Каталог товаров не изменится.',
+                      onConfirmed: () => controller.removeSection(section),
+                    ),
+            ),
           ),
         ],
       );
@@ -2469,10 +2403,20 @@ final class _SectionHeader extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            title,
+            Row(
+              children: [
+                Expanded(child: title),
+                actions.children.last,
+              ],
+            ),
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
-              child: actions,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: actions.children
+                    .take(actions.children.length - 1)
+                    .toList(),
+              ),
             ),
           ],
         ),
@@ -2561,15 +2505,18 @@ final class _HeaderCell extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(6, 0, 12, 0),
           child: Align(
             alignment: Alignment.centerLeft,
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Color(0xFFA9BEDA),
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
-                letterSpacing: .25,
+            child: Tooltip(
+              message: label,
+              child: Text(
+                label,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Color(0xFFA9BEDA),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: .25,
+                ),
               ),
             ),
           ),
@@ -3185,7 +3132,7 @@ final class _PositionFieldCell extends StatelessWidget {
     return _RowSelect(
       value: value.isEmpty ? null : value,
       values: values,
-      missing: value.isNotEmpty && !values.contains(value),
+      missing: values.isNotEmpty && value.isNotEmpty && !values.contains(value),
       width: width,
       onChanged: onChanged,
     );
@@ -3341,7 +3288,7 @@ final class _SummaryColumn extends StatelessWidget {
         ],
         footer: (
           'Маржинальность',
-          '${variant.systemSummary.marginPercent.toStringAsFixed(1)}%',
+          russianPercent(variant.systemSummary.marginPercent),
         ),
       ),
       if (controller.activeType case final type?)
@@ -3356,7 +3303,7 @@ final class _SummaryColumn extends StatelessWidget {
           ],
           footer: (
             'Маржинальность',
-            '${type.systemSummary.marginPercent.toStringAsFixed(1)}%',
+            russianPercent(type.systemSummary.marginPercent),
           ),
         ),
     ];

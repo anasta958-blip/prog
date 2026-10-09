@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/widgets/preview_table.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_models.dart';
 import 'package:sklad_komforta_app/features/orders/order_models.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_models.dart';
@@ -201,32 +202,35 @@ final class _SectionTable extends StatelessWidget {
         children: [
           Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
           const SizedBox(height: 7),
-          Table(
-            border: TableBorder.all(color: _paperBorder, width: 0.8),
-            columnWidths: {
-              0: const FixedColumnWidth(34),
-              1: const FlexColumnWidth(2.6),
-              2: const FlexColumnWidth(1.7),
-              3: const FixedColumnWidth(62),
-              4: const FixedColumnWidth(48),
-              for (var index = 0; index < fields.length; index++)
-                5 + index: const FlexColumnWidth(1.2),
-            },
-            children: [
-              TableRow(
-                decoration: const BoxDecoration(color: _paperHeader),
-                children: [for (final header in headers) _cell(header, true)],
-              ),
-              for (var index = 0; index < rows.length; index++)
-                _row(index, rows[index]),
-              if (rows.isEmpty)
+          PreviewTable(
+            minimumWidth: 640 + fields.length * 100.0,
+            child: Table(
+              border: TableBorder.all(color: _paperBorder, width: 0.8),
+              columnWidths: {
+                0: const FixedColumnWidth(34),
+                1: const FlexColumnWidth(2.6),
+                2: const FlexColumnWidth(1.7),
+                3: const FixedColumnWidth(62),
+                4: const FixedColumnWidth(48),
+                for (var index = 0; index < fields.length; index++)
+                  5 + index: const FlexColumnWidth(1.2),
+              },
+              children: [
                 TableRow(
-                  children: [
-                    for (var index = 0; index < headers.length; index++)
-                      _cell(index == 1 ? 'Позиции не добавлены' : '', false),
-                  ],
+                  decoration: const BoxDecoration(color: _paperHeader),
+                  children: [for (final header in headers) _cell(header, true)],
                 ),
-            ],
+                for (var index = 0; index < rows.length; index++)
+                  _row(index, rows[index]),
+                if (rows.isEmpty)
+                  TableRow(
+                    children: [
+                      for (var index = 0; index < headers.length; index++)
+                        _cell(index == 1 ? 'Позиции не добавлены' : '', false),
+                    ],
+                  ),
+              ],
+            ),
           ),
         ],
       ),

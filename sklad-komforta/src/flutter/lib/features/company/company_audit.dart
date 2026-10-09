@@ -634,6 +634,13 @@ class _CompanyAuditCardState extends State<CompanyAuditCard> {
                                   change.after,
                                   const Color(0xFFD2E4FF),
                                 );
+                                if (const {
+                                  'created',
+                                  'import_created',
+                                  'created_from_quote',
+                                }.contains(entry.action)) {
+                                  return after;
+                                }
                                 if (constraints.maxWidth < 500) {
                                   return Column(
                                     crossAxisAlignment:

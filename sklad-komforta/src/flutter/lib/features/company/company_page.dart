@@ -55,7 +55,7 @@ final class CompanyPage extends StatelessWidget {
       }
       return MediaQuery(
         data: MediaQuery.of(context).copyWith(supportsAnnounce: false),
-        child: ColoredBox(
+        child: Material(
           color: const Color(0xFF080E16),
           child: switch (section) {
             CompanySection.clients => _ClientsSection(controller: controller),
@@ -95,36 +95,58 @@ final class _OrganizationSettingsSectionState
   int tab = 0;
   late final ConfigurationEditGuard _configurationEditGuard =
       widget.configurationEditGuard ?? ConfigurationEditGuard();
+  Widget get _sectionSelector => AppSelectField<int>(
+    value: tab,
+    label: 'Настройки',
+    isDense: true,
+    options: const [
+      AppSelectOption(value: 0, label: 'Юридические лица'),
+      AppSelectOption(value: 1, label: 'Рабочая конфигурация'),
+    ],
+    onChanged: (value) {
+      if (value != null) _selectTab({value});
+    },
+  );
   @override
   Widget build(BuildContext context) => Column(
     children: [
-      _SectionHeader(
-        compact: true,
-        title: 'Настройки организации',
-        subtitle:
-            'Юридические лица и рабочая конфигурация текущей организации.',
-        trailing: SegmentedButton<int>(
-          segments: const [
-            ButtonSegment(
-              value: 0,
-              icon: Icon(Icons.business_outlined),
-              label: Text('Юридические лица'),
-            ),
-            ButtonSegment(
-              value: 1,
-              icon: Icon(Icons.tune_outlined),
-              label: Text('Рабочая конфигурация'),
-            ),
-          ],
-          selected: {tab},
-          showSelectedIcon: false,
-          onSelectionChanged: _selectTab,
+      if (MediaQuery.sizeOf(context).width < 840 && tab == 0)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+          child: _sectionSelector,
         ),
-      ),
+      if (MediaQuery.sizeOf(context).width >= 840)
+        _SectionHeader(
+          compact: true,
+          title: 'Настройки организации',
+          subtitle:
+              'Юридические лица и рабочая конфигурация текущей организации.',
+          trailing: SegmentedButton<int>(
+            segments: const [
+              ButtonSegment(
+                value: 0,
+                icon: Icon(Icons.business_outlined),
+                label: Text('Юридические лица'),
+              ),
+              ButtonSegment(
+                value: 1,
+                icon: Icon(Icons.tune_outlined),
+                label: Text('Рабочая конфигурация'),
+              ),
+            ],
+            selected: {tab},
+            showSelectedIcon: false,
+            onSelectionChanged: _selectTab,
+          ),
+        ),
       Expanded(
         child: tab == 0
             ? _LegalEntitiesSection(controller: widget.controller)
             : OrganizationOnboardingPage(
+                settingsNavigationLeading:
+                    MediaQuery.sizeOf(context).width < 840
+                    ? _sectionSelector
+                    : null,
                 controller: widget.controller.authController,
                 settingsDraft: widget.controller.configuration,
                 settingsBusy: widget.controller.saving,
@@ -211,9 +233,10 @@ final class _ClientsSection extends StatelessWidget {
                       icon: Icons.person_outline,
                       title: item.name,
                       badge: _partyTypeLabel(item.companyType),
+                      wrapTitleWords: true,
                       lines: [
-                        item.companyName,
-                        item.contactName,
+                        if (item.companyName != item.name) item.companyName,
+                        if (item.contactName != item.name) item.contactName,
                         item.phone,
                         item.email,
                         item.address,
@@ -315,13 +338,29 @@ final class _InlineNotice extends StatelessWidget {
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        child: Row(
-          children: [
-            const Icon(Icons.info_outline, size: 18, color: Color(0xFF6EA3FF)),
-            const SizedBox(width: 10),
-            Expanded(child: Text(text, style: const TextStyle(fontSize: 12))),
-            TextButton(onPressed: onAction, child: Text(actionLabel)),
-          ],
+        child: LayoutBuilder(
+          builder: (context, constraints) => constraints.maxWidth < 520
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(text),
+                    TextButton(onPressed: onAction, child: Text(actionLabel)),
+                  ],
+                )
+              : Row(
+                  children: [
+                    const Icon(
+                      Icons.info_outline,
+                      size: 18,
+                      color: Color(0xFF6EA3FF),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(text, style: const TextStyle(fontSize: 12)),
+                    ),
+                    TextButton(onPressed: onAction, child: Text(actionLabel)),
+                  ],
+                ),
         ),
       ),
     ),
@@ -355,8 +394,21 @@ final class _EmployeeTreeNodeState extends State<_EmployeeTreeNode> {
         )
         .toList();
     return Container(
-      margin: EdgeInsets.only(left: widget.depth == 0 ? 0 : 24, bottom: 10),
-      padding: EdgeInsets.only(left: widget.depth == 0 ? 0 : 12),
+      margin: EdgeInsets.only(
+        left: widget.depth == 0
+            ? 0
+            : MediaQuery.sizeOf(context).width < 600
+            ? (widget.depth <= 2 ? 6 : 0)
+            : 24,
+        bottom: 10,
+      ),
+      padding: EdgeInsets.only(
+        left: widget.depth == 0
+            ? 0
+            : MediaQuery.sizeOf(context).width < 600
+            ? (widget.depth <= 2 ? 6 : 0)
+            : 12,
+      ),
       decoration: widget.depth == 0
           ? null
           : const BoxDecoration(
@@ -365,50 +417,55 @@ final class _EmployeeTreeNodeState extends State<_EmployeeTreeNode> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(
-                width: 38,
-                child: children.isEmpty
-                    ? const SizedBox.shrink()
-                    : IconButton(
-                        onPressed: () => setState(() => expanded = !expanded),
-                        icon: AnimatedRotation(
-                          turns: expanded ? .25 : 0,
-                          duration: const Duration(milliseconds: 160),
-                          child: const Icon(Icons.chevron_right),
-                        ),
-                        tooltip: expanded
-                            ? 'Свернуть ветку'
-                            : 'Развернуть ветку',
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final toggle = CollapseToggle(
+                expanded: expanded,
+                compact: true,
+                expandTooltip: 'Развернуть ветку',
+                collapseTooltip: 'Свернуть ветку',
+                onPressed: () => setState(() => expanded = !expanded),
+              );
+              final card = _EntityCard(
+                icon: widget.employee.isDirector
+                    ? Icons.workspace_premium_outlined
+                    : Icons.badge_outlined,
+                title: widget.employee.displayName,
+                badge: widget.employee.roleName,
+                lines: [
+                  'Логин: ${widget.employee.login}',
+                  widget.employee.email,
+                  'Активен до ${_date(widget.employee.activeUntil)}',
+                ],
+                onEdit: () =>
+                    _editEmployee(context, widget.controller, widget.employee),
+                onDelete: widget.employee.isDirector
+                    ? null
+                    : () => widget.controller.deleteEmployee(
+                        widget.employee.membershipId,
                       ),
-              ),
-              Expanded(
-                child: _EntityCard(
-                  icon: widget.employee.isDirector
-                      ? Icons.workspace_premium_outlined
-                      : Icons.badge_outlined,
-                  title: widget.employee.displayName,
-                  badge: widget.employee.roleName,
-                  lines: [
-                    'Логин: ${widget.employee.login}',
-                    widget.employee.email,
-                    'Активен до ${_date(widget.employee.activeUntil)}',
+              );
+              if (constraints.maxWidth < 520) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (children.isNotEmpty)
+                      Align(alignment: Alignment.centerLeft, child: toggle),
+                    card,
                   ],
-                  onEdit: () => _editEmployee(
-                    context,
-                    widget.controller,
-                    widget.employee,
+                );
+              }
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: 38,
+                    child: children.isEmpty ? const SizedBox.shrink() : toggle,
                   ),
-                  onDelete: widget.employee.isDirector
-                      ? null
-                      : () => widget.controller.deleteEmployee(
-                          widget.employee.membershipId,
-                        ),
-                ),
-              ),
-            ],
+                  Expanded(child: card),
+                ],
+              );
+            },
           ),
           if (expanded)
             for (final child in children)
@@ -461,7 +518,7 @@ final class _AccessSection extends StatelessWidget {
                           style: const TextStyle(fontWeight: FontWeight.w700),
                         ),
                         subtitle: Text(
-                          '${role.permissionCodes.length} прав · '
+                          '${role.permissionCodes.contains('system.full_access') ? 'Полный доступ' : '${role.permissionCodes.length} прав'} · '
                           '${role.subordinateRoleIds.length} подчинённых ролей · '
                           '${_cardVisibilityLabel(role.cardVisibilityMode)}',
                         ),
@@ -477,7 +534,16 @@ final class _AccessSection extends StatelessWidget {
                                   spacing: 7,
                                   runSpacing: 7,
                                   children: [
-                                    for (final code in role.permissionCodes)
+                                    if (role.permissionCodes.contains(
+                                      'system.full_access',
+                                    ))
+                                      const Chip(label: Text('Полный доступ')),
+                                    for (final code
+                                        in role.permissionCodes.where(
+                                          (_) => !role.permissionCodes.contains(
+                                            'system.full_access',
+                                          ),
+                                        ))
                                       Chip(
                                         label: Text(
                                           _permissionName(
@@ -689,6 +755,7 @@ final class _EntityCard extends StatelessWidget {
     required this.title,
     required this.badge,
     required this.lines,
+    this.wrapTitleWords = false,
     this.onEdit,
     this.onDelete,
   });
@@ -696,10 +763,90 @@ final class _EntityCard extends StatelessWidget {
   final String title;
   final String badge;
   final List<String?> lines;
+  final bool wrapTitleWords;
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
+
+  Widget _compact() => Card(
+    margin: const EdgeInsets.only(bottom: 10),
+    child: Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 22, color: const Color(0xFF6EA3FF)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: wrapTitleWords
+                    ? Wrap(
+                        spacing: 4,
+                        children: [
+                          for (final word in title.split(RegExp(r'\s+')))
+                            Text(
+                              word,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                        ],
+                      )
+                    : Text(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+              ),
+            ],
+          ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Chip(label: Text(badge)),
+          ),
+          Text(
+            lines
+                .whereType<String>()
+                .where((value) => value.trim().isNotEmpty)
+                .join(' · '),
+            style: const TextStyle(color: Color(0xFF91A6C2), fontSize: 12),
+          ),
+          if (onEdit != null || onDelete != null)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                if (onEdit != null)
+                  IconButton(
+                    onPressed: onEdit,
+                    tooltip: 'Редактировать',
+                    icon: const Icon(Icons.edit_outlined),
+                  ),
+                if (onDelete != null)
+                  IconButton(
+                    onPressed: onDelete,
+                    tooltip: 'Удалить',
+                    icon: const Icon(Icons.delete_outline),
+                    color: const Color(0xFFFF6F86),
+                  ),
+              ],
+            ),
+        ],
+      ),
+    ),
+  );
+
   @override
-  Widget build(BuildContext context) => Card(
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) =>
+        constraints.maxWidth < 520 ? _compact() : _wide(),
+  );
+
+  Widget _wide() => Card(
     margin: const EdgeInsets.only(bottom: 10),
     child: Padding(
       padding: const EdgeInsets.all(16),
@@ -724,13 +871,30 @@ final class _EntityCard extends StatelessWidget {
                   spacing: 9,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
+                    if (!wrapTitleWords)
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      )
+                    else
+                      Wrap(
+                        spacing: 4,
+                        children: [
+                          for (final word in title.split(RegExp(r'\s+')))
+                            Text(
+                              word,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                        ],
                       ),
-                    ),
                     Chip(
                       label: Text(badge, style: const TextStyle(fontSize: 10)),
                       visualDensity: VisualDensity.compact,
@@ -931,7 +1095,7 @@ final class _LegalEntityDialogState extends State<_LegalEntityDialog>
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+    insetPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
     contentPadding: const EdgeInsets.fromLTRB(24, 32, 24, 0),
     title: Text(
       widget.item.id.isEmpty
@@ -943,6 +1107,7 @@ final class _LegalEntityDialogState extends State<_LegalEntityDialog>
       child: Form(
         key: key,
         child: SingleChildScrollView(
+          padding: const EdgeInsets.only(top: 10),
           child: Column(
             // Новый ключ после поиска по ИНН пересоздаёт поля с обновлёнными
             // initialValue, не превращая всю форму в набор контроллеров.
@@ -978,7 +1143,7 @@ final class _LegalEntityDialogState extends State<_LegalEntityDialog>
                 required: true,
               ),
               const SizedBox(height: 12),
-              Row(
+              _DialogFieldRow(
                 children: [
                   Expanded(
                     child: _digitsField(
@@ -1034,7 +1199,7 @@ final class _LegalEntityDialogState extends State<_LegalEntityDialog>
                 (value) => widget.item.address = value,
               ),
               const SizedBox(height: 12),
-              Row(
+              _DialogFieldRow(
                 children: [
                   Expanded(
                     child: _phoneField(
@@ -1062,7 +1227,7 @@ final class _LegalEntityDialogState extends State<_LegalEntityDialog>
                 validator: _websiteValidator,
               ),
               const SizedBox(height: 12),
-              Row(
+              _DialogFieldRow(
                 children: [
                   Expanded(
                     child: _formField(
@@ -1100,7 +1265,7 @@ final class _LegalEntityDialogState extends State<_LegalEntityDialog>
                 required: true,
               ),
               const SizedBox(height: 12),
-              Row(
+              _DialogFieldRow(
                 children: [
                   Expanded(
                     child: _digitsField(
@@ -1232,7 +1397,7 @@ final class _ClientDialogState extends State<_ClientDialog>
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+    insetPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
     title: Text(item.id.isEmpty ? 'Новый клиент' : 'Редактирование клиента'),
     content: SizedBox(
       width: 780,
@@ -1241,6 +1406,7 @@ final class _ClientDialogState extends State<_ClientDialog>
         child: Form(
           key: formKey,
           child: SingleChildScrollView(
+            padding: const EdgeInsets.only(top: 10),
             child: Column(
               key: ValueKey(formRevision),
               mainAxisSize: MainAxisSize.min,
@@ -2509,6 +2675,16 @@ Widget _phoneField(
 
 /// Адаптивная сетка полей сохраняет широкую форму на desktop и не создаёт
 /// горизонтального переполнения на небольших окнах.
+final class _DialogFieldRow extends StatelessWidget {
+  const _DialogFieldRow({required this.children});
+  final List<Widget> children;
+  @override
+  Widget build(BuildContext context) => _DialogFieldGrid(
+    columns: children.whereType<Expanded>().length,
+    children: [for (final child in children.whereType<Expanded>()) child.child],
+  );
+}
+
 final class _DialogFieldGrid extends StatelessWidget {
   const _DialogFieldGrid({required this.children, required this.columns});
 
@@ -2518,7 +2694,11 @@ final class _DialogFieldGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
-      final actualColumns = constraints.maxWidth < 640 ? 1 : columns;
+      final actualColumns = constraints.maxWidth < 520
+          ? 1
+          : constraints.maxWidth < 760
+          ? columns.clamp(1, 2)
+          : columns;
       const gap = 10.0;
       final width =
           (constraints.maxWidth - gap * (actualColumns - 1)) / actualColumns;

@@ -259,6 +259,7 @@ void main() {
                       .first['positions']
                   as List;
           (positions.first as Map)['values'] = {'shipment_status': 'В пути'};
+          (positions.first as Map)['unit'] = 'шт';
           return json;
         },
       ),
@@ -476,6 +477,14 @@ const _orderBoard = KanbanBoard(
             KanbanDictionaryOption(id: 's1', value: 'ВентАид', sortOrder: 0),
             KanbanDictionaryOption(id: 's2', value: 'Turkov', sortOrder: 1),
           ],
+        ),
+        KanbanField(
+          code: 'unit',
+          label: 'Единица измерения',
+          fieldType: 'dictionary',
+          isRequired: false,
+          sortOrder: 4,
+          options: [],
         ),
         KanbanField(
           code: 'shipment_status',

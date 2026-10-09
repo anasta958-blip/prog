@@ -14,6 +14,36 @@ CompanyAuditEntryModel entry(Object? before, Object? after, {int id = 1}) =>
     );
 
 void main() {
+  for (final width in [375.0, 1024.0]) {
+    testWidgets('создание показывает только итоговые значения $width', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(Size(width, 812));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CompanyAuditCard(
+              entry: CompanyAuditEntryModel(
+                id: 1,
+                entityType: 'catalog_item',
+                action: 'created',
+                createdAt: DateTime(2026, 10, 9),
+                diff: {
+                  'before': null,
+                  'after': {'name': 'Новый товар'},
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(find.text('Было'), findsNothing);
+      expect(find.text('Стало'), findsOneWidget);
+      expect(find.text('Новый товар'), findsWidgets);
+      expect(tester.takeException(), isNull);
+    });
+  }
   testWidgets('short changes have no redundant expand button', (tester) async {
     await tester.pumpWidget(
       MaterialApp(

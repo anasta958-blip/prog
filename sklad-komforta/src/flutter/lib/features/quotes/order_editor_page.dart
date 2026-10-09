@@ -17,6 +17,7 @@ final class OrderEditorPage extends StatefulWidget {
     this.controller,
     this.pdfViewerBuilder,
     this.outboundGatewayFactory,
+    this.backRequest = 0,
     super.key,
   });
 
@@ -29,6 +30,9 @@ final class OrderEditorPage extends StatefulWidget {
   final KanbanCard? card;
   final String? creationColumnId;
   final VoidCallback onBack;
+
+  /// Изменение счётчика вызывает тот же выход, что и кнопка «Назад».
+  final int backRequest;
   final OrderController? controller;
 
   /// Область просмотра PDF-счёта; тесты подменяют её, чтобы обойтись без
@@ -40,6 +44,16 @@ final class OrderEditorPage extends StatefulWidget {
 }
 
 final class _OrderEditorPageState extends State<OrderEditorPage> {
+  @override
+  void didUpdateWidget(covariant OrderEditorPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.backRequest != widget.backRequest) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_requestBack());
+      });
+    }
+  }
+
   late final OrderController controller;
   late final bool ownsController;
   final Set<String> expandedCategories = <String>{};
@@ -228,7 +242,8 @@ final class _OrderEditorPageState extends State<OrderEditorPage> {
                   onPrint: _printPdf,
                   sendButton: OutboundSendButton(
                     channels: outboundChannels,
-                    compact: compact,
+                    compact: constraints.maxWidth < 1100,
+                    menuItem: constraints.maxWidth < 600,
                     busy: sending,
                     onSend: _sendDocument,
                   ),
@@ -583,93 +598,29 @@ final class _OrderCommandBar extends StatelessWidget {
     required this.onSave,
     this.sendButton,
   });
-
-  /// Кнопка «Отправить» (Telegram, почта); скрыта, если способов нет.
-  final Widget? sendButton;
   final OrderController controller;
   final KanbanCard? card;
   final bool compact;
-  final VoidCallback onBack;
-  final VoidCallback onPreview;
-  final VoidCallback onPrint;
-  final VoidCallback onSave;
-
+  final VoidCallback onBack, onPreview, onPrint, onSave;
+  final Widget? sendButton;
   @override
-  Widget build(BuildContext context) => DecoratedBox(
-    decoration: const BoxDecoration(
-      color: Color(0xFF0F1722),
-      border: Border(bottom: BorderSide(color: _border)),
-    ),
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      // Высота совпадает с блоком названия программы в боковой панели.
-      child: SizedBox(
-        height: workspaceHeaderHeight,
-        child: Row(
-          children: [
-            const Icon(Icons.inventory_2_outlined, color: _accent),
-            const SizedBox(width: 9),
-            // Заголовок занимает всё свободное место — кнопки прижаты вправо.
-            Expanded(
-              child: Text(
-                card == null
-                    ? 'Новая комплектация'
-                    : 'Комплектация №${card!.number}',
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-            FilledButton.icon(
-              key: const Key('order-save'),
-              onPressed: controller.saving ? null : onSave,
-              icon: controller.saving
-                  ? const SizedBox.square(
-                      dimension: 15,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.save_outlined, size: 18),
-              label: Text(compact ? '' : 'Сохранить'),
-            ),
-            if (compact) ...[
-              const SizedBox(width: 7),
-              IconButton.outlined(
-                onPressed: onPreview,
-                tooltip: 'Предпросмотр',
-                icon: const Icon(Icons.visibility_outlined, size: 18),
-              ),
-              const SizedBox(width: 7),
-              IconButton.outlined(
-                onPressed: controller.printing ? null : onPrint,
-                tooltip: 'Печать',
-                icon: const Icon(Icons.print_outlined, size: 18),
-              ),
-              ?sendButton,
-            ] else ...[
-              _CommandAction(
-                icon: Icons.visibility_outlined,
-                label: 'Предпросмотр',
-                onPressed: onPreview,
-              ),
-              _CommandAction(
-                icon: Icons.print_outlined,
-                label: 'Печать',
-                onPressed: controller.printing ? null : onPrint,
-              ),
-              ?sendButton,
-            ],
-            const SizedBox(width: 7),
-            OutlinedButton.icon(
-              onPressed: onBack,
-              icon: const Icon(Icons.arrow_back, size: 18),
-              label: Text(compact ? '' : 'Назад'),
-            ),
-          ],
-        ),
+  Widget build(BuildContext context) => DocumentCommandBar(
+    title: card == null
+        ? 'Новая комплектация'
+        : 'Комплектация №${card!.number}',
+    shortTitle: card == null ? 'Новая' : '№${card!.number}',
+    saving: controller.saving,
+    onBack: onBack,
+    onSave: onSave,
+    commands: [
+      DocumentCommand('Предпросмотр', Icons.visibility_outlined, onPreview),
+      DocumentCommand(
+        'Печать',
+        Icons.print_outlined,
+        controller.printing ? null : onPrint,
       ),
-    ),
+    ],
+    extra: sendButton,
   );
 }
 

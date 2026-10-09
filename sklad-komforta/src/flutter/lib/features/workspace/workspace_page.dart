@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/platform/workspace_address.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/core/widgets/mobile_collapsible_navigation.dart';
@@ -43,6 +44,7 @@ class _WorkspacePageState extends State<WorkspacePage> {
   late final KanbanController kanbanController;
   late final bool ownsKanbanController;
   int selectedIndex = 0;
+  int _boardBackRequest = 0;
   CompanySection companySection = CompanySection.settings;
   bool companyExpanded = false;
 
@@ -77,6 +79,24 @@ class _WorkspacePageState extends State<WorkspacePage> {
   @override
   void initState() {
     super.initState();
+    final path = readWorkspacePath()
+        .split('/')
+        .where((part) => part.isNotEmpty)
+        .toList();
+    selectedIndex = switch (path.firstOrNull) {
+      'catalog' => 1,
+      'company' => 2,
+      'devices' => 3,
+      _ => 0,
+    };
+    if (selectedIndex == 2) {
+      companySection =
+          CompanySection.values
+              .where((section) => section.name == path.lastOrNull)
+              .firstOrNull ??
+          CompanySection.settings;
+      companyExpanded = true;
+    }
     _restoreSidebar();
     ownsCatalogController = widget.catalogController == null;
     catalogController =
@@ -92,6 +112,8 @@ class _WorkspacePageState extends State<WorkspacePage> {
         widget.kanbanController ??
         KanbanController(widget.config, widget.authController);
     kanbanController.initialize();
+    if (selectedIndex == 2) companyController.initialize();
+    if (selectedIndex == 3) widget.authController.loadSessions();
   }
 
   @override
@@ -121,6 +143,7 @@ class _WorkspacePageState extends State<WorkspacePage> {
               ),
               3 => _SessionsPage(controller: widget.authController),
               _ => KanbanPage(
+                backRequest: _boardBackRequest,
                 controller: kanbanController,
                 config: widget.config,
                 authController: widget.authController,
@@ -155,6 +178,8 @@ class _WorkspacePageState extends State<WorkspacePage> {
                       companyExpanded: companyExpanded,
                       lifecycle: companyController.lifecycle,
                       onSelect: _select,
+                      onLogout: () =>
+                          _confirmLogout(context, widget.authController),
                       onToggleCompany: _toggleCompany,
                       onSelectCompanySection: _selectCompanySection,
                     ),
@@ -169,7 +194,7 @@ class _WorkspacePageState extends State<WorkspacePage> {
                   key: const Key('workspace-sidebar'),
                   duration: const Duration(milliseconds: 180),
                   curve: Curves.easeOutCubic,
-                  width: sidebarCollapsed ? 72 : 220,
+                  width: sidebarCollapsed ? 72 : 248,
                   child: DecoratedBox(
                     decoration: const BoxDecoration(
                       color: Color(0xFF101823),
@@ -183,6 +208,8 @@ class _WorkspacePageState extends State<WorkspacePage> {
                       companyExpanded: companyExpanded,
                       lifecycle: companyController.lifecycle,
                       onSelect: _select,
+                      onLogout: () =>
+                          _confirmLogout(context, widget.authController),
                       onToggleCompany: _toggleCompany,
                       onSelectCompanySection: _selectCompanySection,
                       collapsed: sidebarCollapsed,
@@ -205,11 +232,16 @@ class _WorkspacePageState extends State<WorkspacePage> {
       return;
     }
     if (!mounted) return;
-    setState(() => selectedIndex = index);
-    if (index == 0) kanbanController.reload();
+    final returningToBoard = index == 0 && selectedIndex == 0;
+    setState(() {
+      selectedIndex = index;
+      if (returningToBoard) _boardBackRequest++;
+    });
+    if (index == 0 && !returningToBoard) kanbanController.reload();
     if (index == 1) catalogController.reloadConfiguration();
     if (index == 2) companyController.initialize();
     if (index == 3) widget.authController.loadSessions();
+    _saveAddress();
     Navigator.maybePop(context);
   }
 
@@ -226,6 +258,7 @@ class _WorkspacePageState extends State<WorkspacePage> {
       }
     });
     companyController.initialize();
+    _saveAddress();
   }
 
   Future<void> _selectCompanySection(CompanySection section) async {
@@ -240,13 +273,45 @@ class _WorkspacePageState extends State<WorkspacePage> {
       companyExpanded = true;
     });
     companyController.initialize();
+    _saveAddress();
     Navigator.maybePop(context);
   }
+
+  void _saveAddress() => writeWorkspacePath(switch (selectedIndex) {
+    1 => '/catalog',
+    2 => '/company/${companySection.name}',
+    3 => '/devices',
+    _ => '/kanban',
+  });
+}
+
+Future<void> _confirmLogout(
+  BuildContext context,
+  AuthController controller,
+) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Выйти из учётной записи?'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Отмена'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Выйти'),
+        ),
+      ],
+    ),
+  );
+  if (confirmed == true) await controller.logout();
 }
 
 final class _Navigation extends StatelessWidget {
   const _Navigation({
     required this.onSelect,
+    required this.onLogout,
     required this.onToggleCompany,
     required this.onSelectCompanySection,
     required this.companySection,
@@ -257,6 +322,7 @@ final class _Navigation extends StatelessWidget {
     this.onToggleSidebar,
   });
   final ValueChanged<int> onSelect;
+  final VoidCallback onLogout;
 
   final VoidCallback onToggleCompany;
   final ValueChanged<CompanySection> onSelectCompanySection;
@@ -419,6 +485,13 @@ final class _Navigation extends StatelessWidget {
           ),
         ),
       ),
+      _NavigationItem(
+        iconsOnly: iconsOnly,
+        icon: Icons.logout,
+        label: 'Выйти',
+        selected: false,
+        onTap: onLogout,
+      ),
       if (iconsOnly)
         const Padding(
           padding: EdgeInsets.only(bottom: 18),
@@ -543,6 +616,9 @@ final class _NavigationItem extends StatelessWidget {
           ),
           child: ListTile(
             dense: true,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+            minLeadingWidth: 20,
+            horizontalTitleGap: 8,
             visualDensity: compact ? const VisualDensity(vertical: -2) : null,
             selected: selected,
             selectedTileColor: const Color(0xFF17345A),
@@ -550,7 +626,12 @@ final class _NavigationItem extends StatelessWidget {
               borderRadius: BorderRadius.circular(10),
             ),
             leading: Icon(icon, size: 20),
-            title: Text(label, style: const TextStyle(fontSize: 13)),
+            title: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 13),
+            ),
             trailing: trailing,
             onTap: onTap,
           ),
@@ -587,16 +668,18 @@ final class _SessionsPage extends StatelessWidget {
                         ),
                       ),
                     ),
-                    IconButton(
-                      tooltip: 'Выйти',
-                      onPressed: controller.busy ? null : controller.logout,
+                    TextButton.icon(
+                      label: const Text('Выйти'),
+                      onPressed: controller.busy
+                          ? null
+                          : () => _confirmLogout(context, controller),
                       icon: const Icon(Icons.logout),
                     ),
                   ],
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'Управление действующими refresh-сессиями учётной записи.',
+                  'Управление входами на устройствах.',
                   style: TextStyle(color: Color(0xFF8FA4C2)),
                 ),
               ],
@@ -612,7 +695,11 @@ final class _SessionsPage extends StatelessWidget {
                       'Неизвестное устройство',
                 ),
                 subtitle: Text(
-                  (session['ipAddress'] as String?) ?? 'IP не определён',
+                  (session['ipAddress'] as String?)?.replaceFirst(
+                        RegExp(r'^::ffff:', caseSensitive: false),
+                        '',
+                      ) ??
+                      'IP не определён',
                 ),
                 trailing: session['isCurrent'] == true
                     ? const Chip(label: Text('Текущее'))

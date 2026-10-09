@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:sklad_komforta_app/core/widgets/collapse_toggle.dart';
 import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
@@ -26,11 +27,37 @@ class _CatalogPageState extends State<CatalogPage> {
   String? editingItemId;
   bool mobileControlsExpanded = false;
   bool mobileFiltersExpanded = false;
+  bool? _listView;
+  bool _viewChosen = false;
+  static const _viewStorage = FlutterSecureStorage();
+  Future<void> _restoreView() async {
+    try {
+      final value = await _viewStorage.read(key: 'catalog.list_view.v1');
+      if (mounted && !_viewChosen && value != null) {
+        setState(() => _listView = value == 'true');
+      }
+    } catch (_) {
+      /* Недоступность локальных настроек не блокирует каталог. */
+    }
+  }
+
+  Future<void> _selectView(bool value) async {
+    setState(() {
+      _viewChosen = true;
+      _listView = value;
+    });
+    try {
+      await _viewStorage.write(key: 'catalog.list_view.v1', value: '$value');
+    } catch (_) {
+      /* Сохраняем выбор до закрытия экрана. */
+    }
+  }
 
   @override
   void initState() {
     super.initState();
     _searchController = TextEditingController(text: widget.controller.search);
+    unawaited(_restoreView());
   }
 
   @override
@@ -248,6 +275,25 @@ class _CatalogPageState extends State<CatalogPage> {
               ],
             ),
           ],
+          Align(
+            alignment: Alignment.centerRight,
+            child: SegmentedButton<bool>(
+              segments: const [
+                ButtonSegment(
+                  value: false,
+                  icon: Icon(Icons.grid_view),
+                  label: Text('Плитка'),
+                ),
+                ButtonSegment(
+                  value: true,
+                  icon: Icon(Icons.view_list),
+                  label: Text('Список'),
+                ),
+              ],
+              selected: {_listView ?? mobile},
+              onSelectionChanged: (values) => _selectView(values.first),
+            ),
+          ),
           if (controller.hasSelection) ...[
             const SizedBox(height: 12),
             _BulkToolbar(
@@ -280,6 +326,49 @@ class _CatalogPageState extends State<CatalogPage> {
                   )
                 : LayoutBuilder(
                     builder: (context, constraints) {
+                      if (_listView ?? mobile) {
+                        return ListView.builder(
+                          key: const PageStorageKey('catalog-list'),
+                          itemCount: controller.items.length,
+                          itemBuilder: (context, index) {
+                            final item = controller.items[index];
+                            return Card(
+                              child: ListTile(
+                                leading: SizedBox(
+                                  width: 40,
+                                  height: 40,
+                                  child: Icon(Icons.inventory_2_outlined),
+                                ),
+                                trailing: SizedBox(
+                                  width: 40,
+                                  child: Checkbox(
+                                    value: controller.selectedIds.contains(
+                                      item.id,
+                                    ),
+                                    onChanged: (_) =>
+                                        controller.toggleSelection(item.id),
+                                  ),
+                                ),
+                                title: Text(
+                                  item.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                subtitle: Text(
+                                  '${item.marking}\n${_ProductCard._price(item.values['base_price'])} · ${item.status == 'approved' ? 'Согласовано' : 'Не согласовано'}',
+                                ),
+                                onTap: () => controller.selectedIds.length > 1
+                                    ? _openBulkEditor(persistentEditor)
+                                    : _openEditor(
+                                        CatalogItemDraft.fromItem(item),
+                                        item.id,
+                                        persistentEditor,
+                                      ),
+                              ),
+                            );
+                          },
+                        );
+                      }
                       final columns = switch (constraints.maxWidth) {
                         >= 1500 => 6,
                         >= 1250 => 5,

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/features/catalog/catalog_editor.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sklad_komforta_app/app/app.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
@@ -848,6 +849,20 @@ void main() {
     expect(find.text('Вентилятор канальный'), findsOneWidget);
     expect(find.byKey(const Key('catalog-create')), findsOneWidget);
 
+    for (final width in [375.0, 1024.0, 1440.0]) {
+      tester.view.physicalSize = Size(width, 812);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      if (width == 375) {
+        expect(
+          find.byKey(const PageStorageKey('catalog-list')),
+          findsOneWidget,
+        );
+      }
+    }
+    tester.view.physicalSize = const Size(1400, 900);
+    await tester.pumpAndSettle();
+
     await tester.tap(find.text('Вентилятор канальный'));
     await tester.pumpAndSettle();
 
@@ -859,6 +874,19 @@ void main() {
     expect(find.text('Цены'), findsOneWidget);
     expect(find.text('Остатки'), findsOneWidget);
     expect(find.text('Изображения'), findsOneWidget);
+
+    final editor = tester.widget<CatalogEditor>(find.byType(CatalogEditor));
+    for (final width in [375.0, 1024.0]) {
+      tester.view.physicalSize = Size(width, 812);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildAppTheme(),
+          home: Scaffold(body: editor),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    }
 
     await tester.tap(find.text('Остатки'));
     await tester.pumpAndSettle();

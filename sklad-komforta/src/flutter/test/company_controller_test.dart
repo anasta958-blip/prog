@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/core/network/api_exception.dart';
@@ -18,6 +19,46 @@ void main() {
   const config = AppConfig(
     apiBaseUrl: 'https://api.example.test/api/v1',
     environment: 'test',
+  );
+
+  testWidgets(
+    'роль директора показывает полный доступ на узкой и широкой раскладке',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final auth = AuthController(
+        config,
+        api: _NoopAuthGateway(),
+        tokens: _MemoryTokenRepository(),
+      )..accessToken = 'access-token';
+      final controller = CompanyController(
+        config,
+        auth,
+        api: _MemoryCompanyGateway(),
+        workspaceApi: _PartialWorkspaceGateway(),
+      );
+      await controller.initialize();
+      for (final width in [375.0, 1024.0]) {
+        tester.view.physicalSize = Size(width, 812);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: CompanyPage(
+                controller: controller,
+                section: CompanySection.access,
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.textContaining('Полный доступ'), findsWidgets);
+        expect(find.textContaining('1 прав'), findsNothing);
+        expect(tester.takeException(), isNull);
+      }
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+      auth.dispose();
+    },
   );
 
   testWidgets('смена пароля проверяет подтверждение и отправляет запрос', (
@@ -177,17 +218,30 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
 
-      expect(find.text('Настройки организации'), findsOneWidget);
+      expect(find.text('Настройки организации'), findsNothing);
       expect(find.text('Клиенты'), findsNothing);
       expect(find.text('Сотрудники и структура'), findsNothing);
       expect(find.text('Права доступа'), findsNothing);
       expect(find.text('Юридические лица'), findsOneWidget);
-      expect(find.text('Рабочая конфигурация'), findsOneWidget);
-
+      await tester.tap(find.text('Юридические лица'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Рабочая конфигурация'));
       await tester.pumpAndSettle();
       expect(find.text('Канбаны'), findsWidgets);
+      await tester.tap(
+        find.byWidgetPredicate(
+          (widget) => widget is AppSelectField<int> && widget.label == 'Раздел',
+        ),
+      );
+      await tester.pumpAndSettle();
       expect(find.text('Каталог'), findsOneWidget);
+      await tester.tap(find.widgetWithText(MenuItemButton, 'Канбаны'));
+      await tester.pumpAndSettle();
+      for (final width in [375.0, 1024.0, 1440.0]) {
+        tester.view.physicalSize = Size(width, 812);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      }
 
       controller.dispose();
       auth.dispose();
@@ -435,6 +489,13 @@ void main() {
     );
 
     expect(find.text('Подчинённый сотрудник'), findsOneWidget);
+    for (final width in [375.0, 1024.0]) {
+      tester.view.physicalSize = Size(width, 812);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    }
+    tester.view.physicalSize = const Size(1400, 900);
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Свернуть ветку'));
     await tester.pumpAndSettle();
     expect(find.text('Подчинённый сотрудник'), findsNothing);
@@ -574,6 +635,15 @@ void main() {
         ),
       );
       await tester.tap(find.text('Добавить юридическое лицо'));
+      await tester.pumpAndSettle();
+      for (final width in [375.0, 1024.0]) {
+        tester.view.physicalSize = Size(width, 900);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        final inn = find.widgetWithText(TextFormField, 'ИНН *');
+        expect(tester.getSize(inn).width, greaterThan(150));
+      }
+      tester.view.physicalSize = const Size(1400, 900);
       await tester.pumpAndSettle();
 
       await tester.enterText(
@@ -776,7 +846,7 @@ final class _PartialWorkspaceGateway implements CompanyWorkspaceGateway {
       id: 'director-role',
       name: 'Директор',
       isSystem: true,
-      permissionCodes: [],
+      permissionCodes: ['system.full_access'],
       subordinateRoleIds: ['employee-role'],
     ),
   ];

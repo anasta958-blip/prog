@@ -15,8 +15,12 @@ class AppNumberField extends StatefulWidget {
     this.validator,
     this.focusNode,
     this.onSubmitted,
+    this.groupThousands = false,
   });
   final String value;
+
+  /// Разделители тысяч только для отображения; обработчики получают исходное число.
+  final bool groupThousands;
   final ValueChanged<String> onChanged;
   final double? minimum;
   final bool minimumExclusive;
@@ -35,15 +39,27 @@ class AppNumberField extends StatefulWidget {
 }
 
 class _AppNumberFieldState extends State<AppNumberField> {
-  late final input = TextEditingController(text: widget.value);
-  double? parse(String text) => double.tryParse(text.replaceAll(',', '.'));
+  String raw(String text) =>
+      widget.groupThousands ? text.replaceAll(RegExp(r'\s'), '') : text;
+  String display(String text) {
+    if (!widget.groupThousands) return text;
+    final parts = raw(text).split(RegExp('[.,]'));
+    final integer = parts.first.replaceAllMapped(
+      RegExp(r'\B(?=(\d{3})+(?!\d))'),
+      (_) => ' ',
+    );
+    return parts.length == 1 ? integer : '$integer,${parts[1]}';
+  }
+
+  late final input = TextEditingController(text: display(widget.value));
+  double? parse(String text) => double.tryParse(raw(text).replaceAll(',', '.'));
   @override
   void didUpdateWidget(covariant AppNumberField oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.value != widget.value &&
         !(parse(input.text) != null &&
             parse(input.text) == parse(widget.value))) {
-      input.text = widget.value;
+      input.text = display(widget.value);
     }
   }
 
@@ -67,8 +83,8 @@ class _AppNumberFieldState extends State<AppNumberField> {
         ? next.toInt().toString()
         : next.toString();
     input.value = TextEditingValue(
-      text: text,
-      selection: TextSelection.collapsed(offset: text.length),
+      text: display(text),
+      selection: TextSelection.collapsed(offset: display(text).length),
     );
     widget.onChanged(text);
   }
@@ -80,7 +96,7 @@ class _AppNumberFieldState extends State<AppNumberField> {
     enabled: widget.enabled,
     style: widget.style,
     textInputAction: widget.onSubmitted == null ? null : TextInputAction.next,
-    onFieldSubmitted: widget.onSubmitted,
+    onFieldSubmitted: (text) => widget.onSubmitted?.call(raw(text)),
     keyboardType: TextInputType.numberWithOptions(
       decimal: true,
       signed: widget.minimum == null || widget.minimum! < 0,
@@ -90,7 +106,22 @@ class _AppNumberFieldState extends State<AppNumberField> {
         final pattern = widget.minimum != null && widget.minimum! >= 0
             ? RegExp(r'^\d*[.,]?\d*$')
             : RegExp(r'^-?\d*[.,]?\d*$');
-        return pattern.hasMatch(next.text) ? next : oldValue;
+        if (!pattern.hasMatch(raw(next.text))) return oldValue;
+        if (!widget.groupThousands) return next;
+        final formatted = display(next.text);
+        final offset = next.selection.baseOffset.clamp(0, next.text.length);
+        final rawBefore = raw(next.text.substring(0, offset)).length;
+        var caret = 0;
+        var digits = 0;
+        while (caret < formatted.length && digits < rawBefore) {
+          if (formatted[caret] != ' ') digits++;
+          caret++;
+        }
+        return next.copyWith(
+          text: formatted,
+          selection: TextSelection.collapsed(offset: caret),
+          composing: TextRange.empty,
+        );
       }),
     ],
     decoration: widget.decoration.copyWith(
@@ -120,7 +151,7 @@ class _AppNumberFieldState extends State<AppNumberField> {
         ],
       ),
     ),
-    onChanged: widget.onChanged,
+    onChanged: (text) => widget.onChanged(raw(text)),
     validator: (text) {
       final value = parse(text ?? '');
       if ((text ?? '').isNotEmpty && (value == null || !value.isFinite)) {
@@ -132,7 +163,7 @@ class _AppNumberFieldState extends State<AppNumberField> {
       if (value != null && widget.minimumExclusive && value == widget.minimum) {
         return 'Значение должно быть больше ${widget.minimum}';
       }
-      return widget.validator?.call(text);
+      return widget.validator?.call(text == null ? null : raw(text));
     },
   );
 }

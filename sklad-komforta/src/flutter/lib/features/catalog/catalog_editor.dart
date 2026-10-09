@@ -162,8 +162,8 @@ class _CatalogEditorState extends State<CatalogEditor> {
                   children: [
                     Form(key: mainFormKey, child: _scroll(_mainFields())),
                     Form(key: priceFormKey, child: _scroll(_priceFields())),
-                      _scroll([const _StockPlaceholder()]),
-                      _scroll([_imagesEditor()]),
+                    _scroll([const _StockPlaceholder()]),
+                    _scroll([_imagesEditor()]),
                     _scroll([_relationsEditor()]),
                   ],
                 ),
@@ -189,7 +189,10 @@ class _CatalogEditorState extends State<CatalogEditor> {
         if (!widget.isBulk)
           Padding(
             padding: const EdgeInsets.all(16),
-            child: Row(
+            child: Wrap(
+              alignment: WrapAlignment.end,
+              spacing: 10,
+              runSpacing: 8,
               children: [
                 if (widget.onDelete != null)
                   IconButton(
@@ -198,12 +201,10 @@ class _CatalogEditorState extends State<CatalogEditor> {
                     color: const Color(0xFFFF7180),
                     icon: const Icon(Icons.delete_outline),
                   ),
-                const Spacer(),
                 OutlinedButton(
                   onPressed: widget.saving ? null : widget.onClose,
                   child: const Text('Отмена'),
                 ),
-                const SizedBox(width: 10),
                 FilledButton(
                   key: const Key('catalog-save'),
                   onPressed: widget.saving
@@ -689,14 +690,17 @@ final class _EditorTabs extends StatelessWidget {
     height: 58,
     child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: Row(
-        children: [
-          Expanded(child: _tab(0, Icons.tune, 'Основное')),
-          Expanded(child: _tab(1, Icons.payments_outlined, 'Цены')),
-          Expanded(child: _tab(2, Icons.warehouse_outlined, 'Остатки')),
-          Expanded(child: _tab(3, Icons.photo_library_outlined, 'Изображения')),
-          Expanded(child: _tab(4, Icons.account_tree_outlined, 'Связи')),
-        ],
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            _tab(0, Icons.tune, 'Основное'),
+            _tab(1, Icons.payments_outlined, 'Цены'),
+            _tab(2, Icons.warehouse_outlined, 'Остатки'),
+            _tab(3, Icons.photo_library_outlined, 'Изображения'),
+            _tab(4, Icons.account_tree_outlined, 'Связи'),
+          ],
+        ),
       ),
     ),
   );
@@ -718,10 +722,7 @@ final class _EditorTabs extends StatelessWidget {
       children: [
         Icon(icon, size: 17),
         const SizedBox(height: 3),
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Text(label, style: const TextStyle(fontSize: 11)),
-        ),
+        Text(label, style: const TextStyle(fontSize: 11)),
       ],
     ),
   );
@@ -1125,6 +1126,7 @@ final class _DynamicField extends StatelessWidget {
     if (_numeric) {
       return AppNumberField(
         value: value?.toString() ?? '',
+        groupThousands: field.fieldType == 'money',
         enabled: enabled,
         minimum: field.fieldType == 'money' ? 0 : null,
         decoration: InputDecoration(labelText: _label),

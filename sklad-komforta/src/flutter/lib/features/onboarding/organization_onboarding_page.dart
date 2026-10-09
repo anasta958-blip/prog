@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:sklad_komforta_app/core/widgets/collapse_toggle.dart';
 import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
 import 'package:sklad_komforta_app/core/models/workflow_specialization.dart';
-import 'package:sklad_komforta_app/core/widgets/mobile_collapsible_navigation.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
@@ -31,6 +30,7 @@ final class OrganizationOnboardingPage extends StatefulWidget {
     this.configurationEditGuard,
     this.outboundGateway,
     this.outboundRevision = 0,
+    this.settingsNavigationLeading,
     super.key,
   });
 
@@ -40,6 +40,9 @@ final class OrganizationOnboardingPage extends StatefulWidget {
   /// Растёт, когда настройки внешней отправки изменил другой пользователь:
   /// раздел перечитывает их, если в нём нет несохранённых правок.
   final int outboundRevision;
+
+  /// Переключатель юридических лиц и конфигурации в общей компактной строке.
+  final Widget? settingsNavigationLeading;
 
   /// Общий auth controller, владеющий tenant JWT и сетевым состоянием.
   final AuthController controller;
@@ -553,7 +556,26 @@ final class _OrganizationOnboardingPageState
                 if (!_settingsMode)
                   _Header(wide: wide, settingsMode: _settingsMode),
                 _settingsMode
-                    ? _SettingsTabs(step: step, onSelect: _selectStep)
+                    ? Row(
+                        children: [
+                          if (widget.settingsNavigationLeading != null)
+                            Expanded(
+                              child: Padding(
+                                padding: const EdgeInsets.only(
+                                  left: 12,
+                                  top: 2,
+                                ),
+                                child: widget.settingsNavigationLeading,
+                              ),
+                            ),
+                          Expanded(
+                            child: _SettingsTabs(
+                              step: step,
+                              onSelect: _selectStep,
+                            ),
+                          ),
+                        ],
+                      )
                     : _Progress(step: step, wide: wide, onSelect: _selectStep),
                 Expanded(
                   child: SingleChildScrollView(
@@ -855,7 +877,7 @@ final class _OrganizationOnboardingPageState
         key: ValueKey('${column.clientId}-${column.color}'),
         value: column.color,
         label: 'Цвет',
-        options: _workflowColors
+        options: {..._workflowColors, column.color}
             .map(
               (color) => AppSelectOption(
                 value: color,
@@ -871,95 +893,113 @@ final class _OrganizationOnboardingPageState
         },
       ),
     );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Кнопки создания — над полями столбца, с отступом под стрелки
-        // перемещения, чтобы стрелки стояли напротив полей.
-        if (special) ...[
-          Padding(
-            padding: const EdgeInsets.only(left: 96, right: 48),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                Text(
-                  'Кнопки создания:',
-                  style: Theme.of(context).textTheme.labelMedium,
-                ),
-                for (final action in _actionsFor(workflow.specialization))
-                  FilterChip(
-                    label: Text(action.label),
-                    selected: column.creationActions.contains(action),
-                    onSelected: (selected) => setState(() {
-                      for (final item in workflow.columns) {
-                        item.creationActions.remove(action);
-                      }
-                      if (selected) column.creationActions.add(action);
-                    }),
+    return LayoutBuilder(
+      builder: (context, constraints) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Кнопки создания — над полями столбца, с отступом под стрелки
+          // перемещения, чтобы стрелки стояли напротив полей.
+          if (special) ...[
+            Padding(
+              padding: constraints.maxWidth < 520
+                  ? EdgeInsets.zero
+                  : const EdgeInsets.only(left: 96, right: 48),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Text(
+                    'Кнопки создания:',
+                    style: Theme.of(context).textTheme.labelMedium,
                   ),
-                if (workflow.specialization == WorkflowSpecialization.order)
-                  FilterChip(
-                    key: ValueKey('reorder-from-${column.clientId}'),
-                    label: const Text('Дозаказ с этого столбца'),
-                    tooltip:
-                        'Позиции, добавленные в этом столбце и правее, считаются дозаказом',
-                    selected: column.reorderFrom,
-                    onSelected: (selected) => setState(() {
-                      for (final item in workflow.columns) {
-                        item.reorderFrom = false;
-                      }
-                      column.reorderFrom = selected;
-                    }),
-                  ),
-              ],
+                  for (final action in _actionsFor(workflow.specialization))
+                    FilterChip(
+                      label: Text(action.label),
+                      selected: column.creationActions.contains(action),
+                      onSelected: (selected) => setState(() {
+                        for (final item in workflow.columns) {
+                          item.creationActions.remove(action);
+                        }
+                        if (selected) column.creationActions.add(action);
+                      }),
+                    ),
+                  if (workflow.specialization == WorkflowSpecialization.order)
+                    FilterChip(
+                      key: ValueKey('reorder-from-${column.clientId}'),
+                      label: const Text('Дозаказ с этого столбца'),
+                      tooltip:
+                          'Позиции, добавленные в этом столбце и правее, считаются дозаказом',
+                      selected: column.reorderFrom,
+                      onSelected: (selected) => setState(() {
+                        for (final item in workflow.columns) {
+                          item.reorderFrom = false;
+                        }
+                        column.reorderFrom = selected;
+                      }),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+          _OrderedRow(
+            index: columnIndex,
+            length: workflow.columns.length,
+            onMove: (delta) => setState(
+              () => _move(workflow.columns, columnIndex, columnIndex + delta),
+            ),
+            onDelete: () => setState(() {
+              workflow.columns.remove(column);
+              workflow.transitions.removeWhere(
+                (transition) =>
+                    transition.fromClientId == column.clientId ||
+                    transition.toClientId == column.clientId,
+              );
+            }),
+            // Название, цвет и перенос — в один ряд; на узком экране перенос
+            // уходит под название.
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                if (constraints.maxWidth < 520) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      name,
+                      const SizedBox(height: 12),
+                      color.child!,
+                      if (hasTransfer) ...[
+                        const SizedBox(height: 12),
+                        _transferSelector(workflow, column),
+                      ],
+                    ],
+                  );
+                }
+                final nameRow = Row(
+                  children: [
+                    Expanded(child: name),
+                    const SizedBox(width: 8),
+                    color,
+                    if (hasTransfer && constraints.maxWidth >= 720) ...[
+                      const SizedBox(width: 8),
+                      Expanded(child: _transferSelector(workflow, column)),
+                    ],
+                  ],
+                );
+                if (!hasTransfer || constraints.maxWidth >= 720) return nameRow;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    nameRow,
+                    const SizedBox(height: 8),
+                    _transferSelector(workflow, column),
+                  ],
+                );
+              },
             ),
           ),
-          const SizedBox(height: 8),
         ],
-        _OrderedRow(
-          index: columnIndex,
-          length: workflow.columns.length,
-          onMove: (delta) => setState(
-            () => _move(workflow.columns, columnIndex, columnIndex + delta),
-          ),
-          onDelete: () => setState(() {
-            workflow.columns.remove(column);
-            workflow.transitions.removeWhere(
-              (transition) =>
-                  transition.fromClientId == column.clientId ||
-                  transition.toClientId == column.clientId,
-            );
-          }),
-          // Название, цвет и перенос — в один ряд; на узком экране перенос
-          // уходит под название.
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final nameRow = Row(
-                children: [
-                  Expanded(child: name),
-                  const SizedBox(width: 8),
-                  color,
-                  if (hasTransfer && constraints.maxWidth >= 720) ...[
-                    const SizedBox(width: 8),
-                    Expanded(child: _transferSelector(workflow, column)),
-                  ],
-                ],
-              );
-              if (!hasTransfer || constraints.maxWidth >= 720) return nameRow;
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  nameRow,
-                  const SizedBox(height: 8),
-                  _transferSelector(workflow, column),
-                ],
-              );
-            },
-          ),
-        ),
-      ],
+      ),
     );
   }
 
@@ -3323,48 +3363,40 @@ final class _SettingsTabs extends StatelessWidget {
   const _SettingsTabs({required this.step, required this.onSelect});
   final int step;
   final ValueChanged<int> onSelect;
-
   @override
-  Widget build(BuildContext context) => MobileCollapsibleNavigation(
-    title: 'Навигация настроек',
-    summary: _OrganizationOnboardingPageState._steps[step].$1,
-    child: Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(24, 10, 24, 12),
-      decoration: const BoxDecoration(
-        color: Color(0xFF0D151F),
-        border: Border(bottom: BorderSide(color: Color(0xFF25364C))),
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) => SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: ConstrainedBox(
-            constraints: BoxConstraints(minWidth: constraints.maxWidth),
-            child: Center(
-              child: SegmentedButton<int>(
-                segments: [
-                  for (final index
-                      in _OrganizationOnboardingPageState._settingsStepIndexes)
-                    ButtonSegment<int>(
-                      value: index,
-                      icon: Icon(
-                        _OrganizationOnboardingPageState._steps[index].$2,
-                        size: 17,
-                      ),
-                      label: Text(
-                        _OrganizationOnboardingPageState._steps[index].$1,
-                      ),
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final indexes = _OrganizationOnboardingPageState._settingsStepIndexes;
+      final steps = _OrganizationOnboardingPageState._steps;
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+        child: constraints.maxWidth < 1024
+            ? AppSelectField<int>(
+                value: step,
+                label: 'Раздел',
+                isDense: true,
+                options: [
+                  for (final index in indexes)
+                    AppSelectOption(value: index, label: steps[index].$1),
+                ],
+                onChanged: (value) {
+                  if (value != null) onSelect(value);
+                },
+              )
+            : Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final index in indexes)
+                    ChoiceChip(
+                      label: Text(steps[index].$1),
+                      selected: step == index,
+                      onSelected: (_) => onSelect(index),
                     ),
                 ],
-                selected: {step},
-                showSelectedIcon: false,
-                onSelectionChanged: (values) => onSelect(values.first),
               ),
-            ),
-          ),
-        ),
-      ),
-    ),
+      );
+    },
   );
 }
 
@@ -3747,47 +3779,52 @@ final class _OrderedRow extends StatelessWidget {
     required this.onMove,
     required this.onDelete,
   });
-  final int index;
-  final int length;
+  final int index, length;
   final Widget child;
   final ValueChanged<int> onMove;
   final VoidCallback? onDelete;
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: 8),
-    // Кнопки прижаты к первой строке содержимого (поле названия), а не к
-    // середине: у столбцов канбана под названием ещё кнопки и перенос.
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(top: 4),
-          child: IconButton(
-            onPressed: index > 0 ? () => onMove(-1) : null,
-            icon: const Icon(Icons.arrow_upward),
-            tooltip: 'Выше',
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.only(top: 4),
-          child: IconButton(
-            onPressed: index + 1 < length ? () => onMove(1) : null,
-            icon: const Icon(Icons.arrow_downward),
-            tooltip: 'Ниже',
-          ),
-        ),
-        Expanded(child: child),
-        Padding(
-          padding: const EdgeInsets.only(top: 4),
-          child: IconButton(
-            onPressed: onDelete,
-            icon: Icon(onDelete == null ? Icons.lock_outline : Icons.close),
-            tooltip: onDelete == null
-                ? 'Системное поле нельзя удалить'
-                : 'Удалить',
-          ),
-        ),
-      ],
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final up = IconButton(
+          onPressed: index > 0 ? () => onMove(-1) : null,
+          icon: const Icon(Icons.arrow_upward),
+          tooltip: 'Выше',
+        );
+        final down = IconButton(
+          onPressed: index + 1 < length ? () => onMove(1) : null,
+          icon: const Icon(Icons.arrow_downward),
+          tooltip: 'Ниже',
+        );
+        final delete = IconButton(
+          onPressed: onDelete,
+          icon: Icon(onDelete == null ? Icons.lock_outline : Icons.close),
+          tooltip: onDelete == null
+              ? 'Системное поле нельзя удалить'
+              : 'Удалить',
+        );
+        if (constraints.maxWidth < 520) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(children: [up, down, const Spacer(), delete]),
+              const SizedBox(height: 8),
+              child,
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            up,
+            down,
+            Expanded(child: child),
+            delete,
+          ],
+        );
+      },
     ),
   );
 }
