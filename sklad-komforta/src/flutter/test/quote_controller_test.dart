@@ -51,35 +51,86 @@ void main() {
     for (var i = 0; i < 15; i++) {
       controller.addVariant();
     }
-    for (final width in [320.0, 375.0, 600.0, 1024.0, 1440.0]) {
-      tester.view.physicalSize = Size(width, 1000);
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: QuoteEditorPage(
-              config: config,
-              authController: auth,
-              board: _quoteBoard,
-              controller: controller,
-              onBack: () {},
+    controller.activeVariant!.categories.addAll([
+      for (var i = 0; i < 10; i++)
+        QuoteCategoryDraft(id: 'layout-$i', name: 'Категория $i', sections: []),
+    ]);
+    for (final kind in [QuoteKind.quote, QuoteKind.prequote]) {
+      controller.draft!.kind = kind;
+      for (final width in [320.0, 375.0, 600.0, 800.0, 1024.0, 1440.0]) {
+        tester.view.physicalSize = Size(width, 1000);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: QuoteEditorPage(
+                config: config,
+                authController: auth,
+                board: _quoteBoard,
+                controller: controller,
+                onBack: () {},
+              ),
             ),
           ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      final type = tester.widget<AppSelectField<String>>(
-        find.byWidgetPredicate(
+        );
+        await tester.pumpAndSettle();
+        final type = tester.widget<AppSelectField<String>>(
+          find.byWidgetPredicate(
+            (w) => w is AppSelectField<String> && w.label == 'Тип предложения',
+          ),
+        );
+        final variant = tester.widget<AppSelectField<String>>(
+          find.byWidgetPredicate(
+            (w) => w is AppSelectField<String> && w.label == 'Вариант',
+          ),
+        );
+        expect(type.options, hasLength(18));
+        expect(variant.options, hasLength(16));
+        final typeField = find.byWidgetPredicate(
           (w) => w is AppSelectField<String> && w.label == 'Тип предложения',
-        ),
-      );
-      final variant = tester.widget<AppSelectField<String>>(
-        find.byWidgetPredicate(
+        );
+        final variantField = find.byWidgetPredicate(
           (w) => w is AppSelectField<String> && w.label == 'Вариант',
-        ),
-      );
-      expect(type.options, hasLength(18));
-      expect(variant.options, hasLength(16));
-      expect(tester.takeException(), isNull);
+        );
+        if (width >= 1024) {
+          expect(
+            tester.getTopLeft(typeField).dy,
+            tester.getTopLeft(variantField).dy,
+          );
+          final metadata = find.byType(TextFormField).first;
+          final before = tester.getTopLeft(metadata).dy;
+          final scroll = tester.state<ScrollableState>(
+            find
+                .descendant(
+                  of: find.byKey(const Key('quote-page-scroll')),
+                  matching: find.byType(Scrollable),
+                )
+                .first,
+          );
+          scroll.position.jumpTo(80);
+          await tester.pump();
+          expect(tester.getTopLeft(metadata).dy, closeTo(before - 80, 0.1));
+          scroll.position.jumpTo(0);
+          await tester.pump();
+        }
+        final heading = find.byKey(
+          const Key('quote-category-heading-layout-0'),
+        );
+        await tester.ensureVisible(heading);
+        await tester.pumpAndSettle();
+        expect(
+          tester
+              .getCenter(
+                find.descendant(
+                  of: heading,
+                  matching: find.byIcon(Icons.folder_outlined),
+                ),
+              )
+              .dy,
+          closeTo(tester.getCenter(find.text('Категория 0')).dy, 0.1),
+        );
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
     }
     await tester.pumpWidget(const SizedBox.shrink());
     controller.dispose();

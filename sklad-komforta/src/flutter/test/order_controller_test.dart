@@ -237,6 +237,28 @@ void main() {
     expect(find.byKey(const ValueKey('position-reorder-row-2')), findsNothing);
     expect(find.byKey(const Key('order-filter-reset')), findsOneWidget);
 
+    for (final width in [1024.0, 1440.0]) {
+      tester.view.physicalSize = Size(width, 600);
+      await tester.pumpAndSettle();
+      final title = find.byKey(const Key('order-title'));
+      final before = tester.getTopLeft(title).dy;
+      final scroll = tester.state<ScrollableState>(
+        find
+            .descendant(
+              of: find.byKey(const Key('order-page-scroll')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+      expect(scroll.position.maxScrollExtent, greaterThan(80));
+      scroll.position.jumpTo(80);
+      await tester.pump();
+      expect(tester.getTopLeft(title).dy, closeTo(before - 80, 0.1));
+      scroll.position.jumpTo(0);
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+    }
+
     controller.dispose();
     auth.dispose();
   });

@@ -315,13 +315,12 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
   Widget _body({required bool compact, required BoxConstraints constraints}) {
     if (compact) {
       return ListView(
+        key: const Key('quote-page-scroll'),
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
         children: [
           _MetadataPanel(controller: controller, board: widget.board),
           const SizedBox(height: 12),
-          _TypeTabs(controller: controller),
-          const SizedBox(height: 10),
-          _VariantTabs(controller: controller),
+          _ProposalSelectors(controller: controller),
           const SizedBox(height: 10),
           if (controller.activeVariant case final variant?) ...[
             _VariantContent(
@@ -351,73 +350,66 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
         : constraints.maxWidth < 1180
         ? 230.0
         : 270.0;
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(18, 12, 14, 0),
-          child: Column(
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Column(
-                      children: [
-                        _MetadataPanel(
-                          controller: controller,
-                          board: widget.board,
-                        ),
-                        const SizedBox(height: 12),
-                        _TypeTabs(controller: controller),
-                        const SizedBox(height: 10),
-                        _VariantTabs(controller: controller),
-                      ],
-                    ),
-                  ),
-                  if (variant != null) ...[
-                    const SizedBox(width: 12),
-                    SizedBox(
-                      width: summaryWidth,
-                      child: _SummaryColumn(
-                        controller: controller,
-                        variant: variant,
-                        horizontal: horizontalSummaries,
+    return Scrollbar(
+      controller: variantScrollController,
+      thumbVisibility: true,
+      child: ListView(
+        key: const Key('quote-page-scroll'),
+        controller: variantScrollController,
+        padding: const EdgeInsets.fromLTRB(18, 12, 14, 24),
+        children: [
+          Padding(
+            padding: EdgeInsets.zero,
+            child: Column(
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        children: [
+                          _MetadataPanel(
+                            controller: controller,
+                            board: widget.board,
+                          ),
+                        ],
                       ),
                     ),
+                    if (variant != null) ...[
+                      const SizedBox(width: 12),
+                      SizedBox(
+                        width: summaryWidth,
+                        child: _SummaryColumn(
+                          controller: controller,
+                          variant: variant,
+                          horizontal: horizontalSummaries,
+                        ),
+                      ),
+                    ],
                   ],
-                ],
-              ),
-              const SizedBox(height: 10),
-            ],
-          ),
-        ),
-        Expanded(
-          child: Scrollbar(
-            controller: variantScrollController,
-            thumbVisibility: true,
-            child: ListView(
-              controller: variantScrollController,
-              padding: const EdgeInsets.fromLTRB(18, 0, 14, 24),
-              children: [
-                if (variant != null)
-                  _VariantContent(
-                    controller: controller,
-                    board: widget.board,
-                    variant: variant,
-                    expandedCategories: expandedCategories,
-                    expandedSections: expandedSections,
-                    onToggleCategory: _toggleCategory,
-                    onToggleSection: _toggleSection,
-                    onAddCategory: _addCategory,
-                    onAddSection: _addSection,
-                    onAddPosition: _addPosition,
-                    columnWidthStore: columnWidthStore,
-                  ),
+                ),
+                const SizedBox(height: 10),
               ],
             ),
           ),
-        ),
-      ],
+          _ProposalSelectors(controller: controller),
+          const SizedBox(height: 10),
+          if (variant != null)
+            _VariantContent(
+              controller: controller,
+              board: widget.board,
+              variant: variant,
+              expandedCategories: expandedCategories,
+              expandedSections: expandedSections,
+              onToggleCategory: _toggleCategory,
+              onToggleSection: _toggleSection,
+              onAddCategory: _addCategory,
+              onAddSection: _addSection,
+              onAddPosition: _addPosition,
+              columnWidthStore: columnWidthStore,
+            ),
+        ],
+      ),
     );
   }
 
@@ -1611,6 +1603,38 @@ final class _DocumentChoice extends StatelessWidget {
   );
 }
 
+final class _ProposalSelectors extends StatelessWidget {
+  const _ProposalSelectors({required this.controller});
+  final QuoteController controller;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final type = _TypeTabs(controller: controller);
+      final variant = _VariantTabs(controller: controller, inline: true);
+      if (constraints.maxWidth >= 980) {
+        final typeWidth = (constraints.maxWidth - 169) / 2;
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(width: typeWidth, child: type),
+            const SizedBox(width: 12),
+            Expanded(child: variant),
+          ],
+        );
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          type,
+          const SizedBox(height: 10),
+          _VariantTabs(controller: controller),
+        ],
+      );
+    },
+  );
+}
+
 final class _TypeTabs extends StatelessWidget {
   const _TypeTabs({required this.controller});
   final QuoteController controller;
@@ -1661,8 +1685,9 @@ final class _TypeTabs extends StatelessWidget {
 }
 
 final class _VariantTabs extends StatelessWidget {
-  const _VariantTabs({required this.controller});
+  const _VariantTabs({required this.controller, this.inline = false});
   final QuoteController controller;
+  final bool inline;
   @override
   Widget build(BuildContext context) {
     final type = controller.activeType;
@@ -1726,7 +1751,7 @@ final class _VariantTabs extends StatelessWidget {
       },
     );
     return LayoutBuilder(
-      builder: (context, constraints) => constraints.maxWidth >= 620
+      builder: (context, constraints) => inline || constraints.maxWidth >= 620
           ? Row(
               children: [
                 Expanded(child: choice),
@@ -1815,23 +1840,28 @@ final class _VariantContent extends StatelessWidget {
 }
 
 final class _CategoryHeading extends StatelessWidget {
-  const _CategoryHeading({required this.children});
+  const _CategoryHeading({
+    super.key,
+    required this.leading,
+    required this.children,
+  });
+  final List<Widget> leading;
   final List<Widget> children;
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
-      if (constraints.maxWidth >= 600) return Row(children: children);
+      if (constraints.maxWidth >= 670) {
+        return Row(children: [...leading, ...children]);
+      }
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 48),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: (children.first as Flexible).child,
-            ),
+          Row(
+            children: [
+              ...leading,
+              Expanded(child: (children.first as Flexible).child),
+            ],
           ),
-          const SizedBox(height: 6),
           Wrap(
             spacing: 8,
             runSpacing: 6,
@@ -1890,9 +1920,9 @@ final class _CategoryBlock extends StatelessWidget {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(4, 4, 12, 4),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+            child: _CategoryHeading(
+              key: Key('quote-category-heading-${category.id}'),
+              leading: [
                 CollapseToggle(
                   expanded: expanded,
                   expandTooltip: 'Развернуть категорию',
@@ -1901,54 +1931,48 @@ final class _CategoryBlock extends StatelessWidget {
                 ),
                 const Icon(Icons.folder_outlined, size: 18, color: _accent),
                 const SizedBox(width: 8),
-                Expanded(
-                  child: _CategoryHeading(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          category.name,
-                          style: const TextStyle(fontWeight: FontWeight.w800),
-                        ),
-                      ),
-                      if (hasCatalogSections)
-                        IconButton(
-                          tooltip: 'Добавить раздел',
-                          onPressed: onAddSection,
-                          icon: const Icon(Icons.create_new_folder_outlined),
-                        ),
-                      if (canAddDirect)
-                        IconButton(
-                          key: Key(
-                            'quote-category-add-position-${category.id}',
-                          ),
-                          tooltip: 'Добавить позицию',
-                          onPressed: addDirectPosition,
-                          icon: const Icon(Icons.add_circle_outline),
-                        ),
-                      const SizedBox(width: 8),
-                      if (controller.showsMoney) ...[
-                        _MoneyLabel('Закупка', category.purchaseTotal),
-                        const SizedBox(width: 16),
-                        _MoneyLabel('Розница', category.clientTotal),
-                        const SizedBox(width: 8),
-                      ],
-                      IconButton(
-                        tooltip: 'Удалить категорию',
-                        color: const Color(0xFFFF7676),
-                        icon: const Icon(Icons.delete_outline, size: 20),
-                        onPressed: controller.saving
-                            ? null
-                            : () => _confirmTabRemoval(
-                                context,
-                                title: 'Удалить категорию «${category.name}»?',
-                                content:
-                                    'Категория и все её разделы с позициями будут удалены из этого варианта. Связанные автоматические позиции будут пересчитаны. Каталог товаров не изменится.',
-                                onConfirmed: () =>
-                                    controller.removeCategory(category),
-                              ),
-                      ),
-                    ],
+              ],
+              children: [
+                Flexible(
+                  child: Text(
+                    category.name,
+                    style: const TextStyle(fontWeight: FontWeight.w800),
                   ),
+                ),
+                if (hasCatalogSections)
+                  IconButton(
+                    tooltip: 'Добавить раздел',
+                    onPressed: onAddSection,
+                    icon: const Icon(Icons.create_new_folder_outlined),
+                  ),
+                if (canAddDirect)
+                  IconButton(
+                    key: Key('quote-category-add-position-${category.id}'),
+                    tooltip: 'Добавить позицию',
+                    onPressed: addDirectPosition,
+                    icon: const Icon(Icons.add_circle_outline),
+                  ),
+                const SizedBox(width: 8),
+                if (controller.showsMoney) ...[
+                  _MoneyLabel('Закупка', category.purchaseTotal),
+                  const SizedBox(width: 16),
+                  _MoneyLabel('Розница', category.clientTotal),
+                  const SizedBox(width: 8),
+                ],
+                IconButton(
+                  tooltip: 'Удалить категорию',
+                  color: const Color(0xFFFF7676),
+                  icon: const Icon(Icons.delete_outline, size: 20),
+                  onPressed: controller.saving
+                      ? null
+                      : () => _confirmTabRemoval(
+                          context,
+                          title: 'Удалить категорию «${category.name}»?',
+                          content:
+                              'Категория и все её разделы с позициями будут удалены из этого варианта. Связанные автоматические позиции будут пересчитаны. Каталог товаров не изменится.',
+                          onConfirmed: () =>
+                              controller.removeCategory(category),
+                        ),
                 ),
               ],
             ),

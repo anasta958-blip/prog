@@ -257,6 +257,7 @@ final class _OrderEditorPageState extends State<OrderEditorPage> {
                   _MessageBanner(message: message),
                 Expanded(
                   child: ListView(
+                    key: const Key('order-page-scroll'),
                     padding: EdgeInsets.fromLTRB(
                       compact ? 12 : 18,
                       12,

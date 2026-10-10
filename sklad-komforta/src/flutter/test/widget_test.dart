@@ -853,6 +853,28 @@ void main() {
           find.byKey(const PageStorageKey('catalog-list')),
           findsOneWidget,
         );
+      } else {
+        final toolbar = find.byKey(const Key('catalog-toolbar'));
+        expect(tester.getTopLeft(toolbar), Offset.zero);
+        expect(tester.getSize(toolbar).width, width);
+        expect(tester.getSize(toolbar).height, greaterThanOrEqualTo(69));
+        if (width == 1440) {
+          expect(tester.getSize(toolbar).height, 69);
+        }
+        expect(
+          find.text('Карточки и структура текущей организации'),
+          findsNothing,
+        );
+        Finder filter(String label) => find.byWidgetPredicate(
+          (w) => w is AppSelectField<String> && w.label == label,
+        );
+        final categoryY = tester.getTopLeft(filter('Категория')).dy;
+        expect(tester.getTopLeft(filter('Раздел')).dy, categoryY);
+        expect(tester.getTopLeft(filter('Статус')).dy, categoryY);
+        final categorySize = tester.getSize(filter('Категория'));
+        expect(categorySize.width, 230);
+        expect(categorySize.height, tester.getSize(filter('Раздел')).height);
+        expect(categorySize.height, tester.getSize(filter('Статус')).height);
       }
     }
     tester.view.physicalSize = const Size(1400, 900);

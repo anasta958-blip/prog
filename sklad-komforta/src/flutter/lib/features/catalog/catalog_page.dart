@@ -6,6 +6,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:sklad_komforta_app/core/widgets/collapse_toggle.dart';
 import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
+import 'package:sklad_komforta_app/core/widgets/workspace_header.dart';
 import 'package:intl/intl.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_controller.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_bulk_relations_editor.dart';
@@ -82,7 +83,30 @@ class _CatalogPageState extends State<CatalogPage> {
         final persistentEditor = constraints.maxWidth >= 1180;
         return Row(
           children: [
-            Expanded(child: _catalogBody(persistentEditor)),
+            Expanded(
+              child: Column(
+                children: [
+                  if (MediaQuery.sizeOf(context).width >= 600 &&
+                      widget.controller.configuration?.categories.isNotEmpty ==
+                          true)
+                    _Header(
+                      compact: false,
+                      loading: widget.controller.loading,
+                      transferBusy: widget.controller.transferBusy,
+                      onRefresh: widget.controller.reloadConfiguration,
+                      onTemplate: _downloadTemplate,
+                      onImport: _importCatalog,
+                      onExport: _exportCatalog,
+                      onCreate: () => _openEditor(
+                        widget.controller.createDraft(),
+                        null,
+                        persistentEditor,
+                      ),
+                    ),
+                  Expanded(child: _catalogBody(persistentEditor)),
+                ],
+              ),
+            ),
             if (persistentEditor && widget.controller.bulkItems.length > 1)
               SizedBox(width: 400, child: _bulkEditor(_closeBulkEditor))
             else if (persistentEditor && draft != null)
@@ -185,18 +209,22 @@ class _CatalogPageState extends State<CatalogPage> {
             const SizedBox(height: 8),
           ],
           if (!mobile || mobileControlsExpanded) ...[
-            _Header(
-              compact: mobile,
-              loading: controller.loading,
-              transferBusy: controller.transferBusy,
-              onRefresh: controller.reloadConfiguration,
-              onTemplate: _downloadTemplate,
-              onImport: _importCatalog,
-              onExport: _exportCatalog,
-              onCreate: () =>
-                  _openEditor(controller.createDraft(), null, persistentEditor),
-            ),
-            SizedBox(height: mobile ? 10 : 18),
+            if (mobile)
+              _Header(
+                compact: mobile,
+                loading: controller.loading,
+                transferBusy: controller.transferBusy,
+                onRefresh: controller.reloadConfiguration,
+                onTemplate: _downloadTemplate,
+                onImport: _importCatalog,
+                onExport: _exportCatalog,
+                onCreate: () => _openEditor(
+                  controller.createDraft(),
+                  null,
+                  persistentEditor,
+                ),
+              ),
+            if (mobile) const SizedBox(height: 10),
             TextField(
               key: const Key('catalog-search'),
               controller: _searchController,
@@ -207,19 +235,20 @@ class _CatalogPageState extends State<CatalogPage> {
               ),
             ),
             SizedBox(height: mobile ? 10 : 14),
-            AppSelectField<String>(
-              label: 'Категория',
-              value: controller.categoryId,
-              options: [
-                const AppSelectOption<String>(
-                  value: null,
-                  label: 'Все категории',
-                ),
-                for (final category in categories)
-                  AppSelectOption(value: category.id, label: category.name),
-              ],
-              onChanged: controller.selectCategory,
-            ),
+            if (mobile)
+              AppSelectField<String>(
+                label: 'Категория',
+                value: controller.categoryId,
+                options: [
+                  const AppSelectOption<String>(
+                    value: null,
+                    label: 'Все категории',
+                  ),
+                  for (final category in categories)
+                    AppSelectOption(value: category.id, label: category.name),
+                ],
+                onChanged: controller.selectCategory,
+              ),
             SizedBox(height: mobile ? 8 : 12),
             if (mobile) ...[
               Align(
@@ -250,7 +279,7 @@ class _CatalogPageState extends State<CatalogPage> {
                     : const SizedBox.shrink(),
               ),
             ] else
-              _Filters(controller: controller),
+              _Filters(controller: controller, includeCategory: true),
             SizedBox(height: mobile ? 8 : 14),
             Row(
               children: [
@@ -798,107 +827,139 @@ final class _Header extends StatelessWidget {
         ],
       );
     }
-    return Wrap(
-      alignment: WrapAlignment.spaceBetween,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      spacing: 16,
-      runSpacing: 12,
-      children: [
-        const Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Каталог товаров',
-              style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
+    return Container(
+      key: const Key('catalog-toolbar'),
+      width: double.infinity,
+      constraints: const BoxConstraints(minHeight: workspaceHeaderHeight),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: const BoxDecoration(
+        color: Color(0xFF101823),
+        border: Border(bottom: BorderSide(color: Color(0xFF253348))),
+      ),
+      child: Row(
+        children: [
+          const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.inventory_2_outlined, color: Color(0xFF4D8DFF)),
+              SizedBox(width: 10),
+              Text(
+                'Каталог товаров',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ],
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Wrap(
+              alignment: WrapAlignment.end,
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                IconButton(
+                  tooltip: 'Обновить',
+                  onPressed: loading ? null : onRefresh,
+                  icon: const Icon(Icons.refresh),
+                ),
+                OutlinedButton.icon(
+                  onPressed: transferBusy ? null : onTemplate,
+                  icon: const Icon(Icons.description_outlined),
+                  label: const Text('Шаблон'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: transferBusy ? null : onImport,
+                  icon: const Icon(Icons.upload_file_outlined),
+                  label: const Text('Импорт'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: transferBusy ? null : onExport,
+                  icon: const Icon(Icons.download_outlined),
+                  label: const Text('Экспорт'),
+                ),
+                FilledButton.icon(
+                  key: const Key('catalog-create'),
+                  onPressed: onCreate,
+                  icon: const Icon(Icons.add),
+                  label: const Text('Добавить товар'),
+                ),
+              ],
             ),
-            SizedBox(height: 4),
-            Text(
-              'Карточки и структура текущей организации',
-              style: TextStyle(color: Color(0xFF8298B8)),
-            ),
-          ],
-        ),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            IconButton(
-              tooltip: 'Обновить',
-              onPressed: loading ? null : onRefresh,
-              icon: const Icon(Icons.refresh),
-            ),
-            OutlinedButton.icon(
-              onPressed: transferBusy ? null : onTemplate,
-              icon: const Icon(Icons.description_outlined),
-              label: const Text('Шаблон'),
-            ),
-            OutlinedButton.icon(
-              onPressed: transferBusy ? null : onImport,
-              icon: const Icon(Icons.upload_file_outlined),
-              label: const Text('Импорт'),
-            ),
-            OutlinedButton.icon(
-              onPressed: transferBusy ? null : onExport,
-              icon: const Icon(Icons.download_outlined),
-              label: const Text('Экспорт'),
-            ),
-            FilledButton.icon(
-              key: const Key('catalog-create'),
-              onPressed: onCreate,
-              icon: const Icon(Icons.add),
-              label: const Text('Добавить товар'),
-            ),
-          ],
-        ),
-      ],
+          ),
+        ],
+      ),
     );
   }
 }
 
 final class _Filters extends StatelessWidget {
-  const _Filters({required this.controller, this.compact = false});
+  const _Filters({
+    required this.controller,
+    this.compact = false,
+    this.includeCategory = false,
+  });
   final CatalogController controller;
   final bool compact;
+  final bool includeCategory;
   @override
   Widget build(BuildContext context) {
     final category = controller.selectedCategory;
     final fieldWidth = compact ? double.infinity : null;
-    return Wrap(
-      spacing: 10,
-      runSpacing: 10,
-      children: [
-        SizedBox(
-          width: fieldWidth ?? 210,
-          child: AppSelectField<String>(
-            value: controller.sectionId,
-            label: 'Раздел',
-            isDense: true,
-            options: [
-              const AppSelectOption(value: null, label: 'Все разделы'),
-              for (final section
-                  in category?.sections ?? const <CatalogSection>[])
-                AppSelectOption(value: section.id, label: section.name),
-            ],
-            enabled: category != null,
-            onChanged: category == null ? null : controller.selectSection,
+    return LayoutBuilder(
+      builder: (context, constraints) => Wrap(
+        spacing: 10,
+        runSpacing: 10,
+        children: [
+          if (includeCategory)
+            SizedBox(
+              width: constraints.maxWidth >= 650 ? 230 : constraints.maxWidth,
+              child: AppSelectField<String>(
+                label: 'Категория',
+                isDense: true,
+                value: controller.categoryId,
+                options: [
+                  const AppSelectOption<String>(
+                    value: null,
+                    label: 'Все категории',
+                  ),
+                  for (final item in controller.configuration!.categories)
+                    AppSelectOption(value: item.id, label: item.name),
+                ],
+                onChanged: controller.selectCategory,
+              ),
+            ),
+          SizedBox(
+            width: fieldWidth ?? 210,
+            child: AppSelectField<String>(
+              value: controller.sectionId,
+              label: 'Раздел',
+              isDense: true,
+              options: [
+                const AppSelectOption(value: null, label: 'Все разделы'),
+                for (final section
+                    in category?.sections ?? const <CatalogSection>[])
+                  AppSelectOption(value: section.id, label: section.name),
+              ],
+              enabled: category != null,
+              onChanged: category == null ? null : controller.selectSection,
+            ),
           ),
-        ),
-        SizedBox(
-          width: fieldWidth ?? 190,
-          child: AppSelectField<String>(
-            value: controller.status,
-            label: 'Статус',
-            isDense: true,
-            options: const [
-              AppSelectOption(value: null, label: 'Все статусы'),
-              AppSelectOption(value: 'approved', label: 'Согласовано'),
-              AppSelectOption(value: 'pending', label: 'Не согласовано'),
-            ],
-            onChanged: controller.selectStatus,
+          SizedBox(
+            width: fieldWidth ?? 190,
+            child: AppSelectField<String>(
+              value: controller.status,
+              label: 'Статус',
+              isDense: true,
+              options: const [
+                AppSelectOption(value: null, label: 'Все статусы'),
+                AppSelectOption(value: 'approved', label: 'Согласовано'),
+                AppSelectOption(value: 'pending', label: 'Не согласовано'),
+              ],
+              onChanged: controller.selectStatus,
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
