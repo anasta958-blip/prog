@@ -35,7 +35,6 @@ part 'order_editor_page.dart';
 
 const _background = Color(0xFF0B1119);
 const _surface = Color(0xFF111A27);
-const _surfaceRaised = Color(0xFF162131);
 const _border = Color(0xFF293A51);
 const _muted = Color(0xFF8FA4C2);
 
@@ -1554,139 +1553,191 @@ final class _EmployeeField extends StatelessWidget {
   }
 }
 
+final class _DocumentChoice extends StatelessWidget {
+  const _DocumentChoice({
+    required this.field,
+    required this.onAdd,
+    required this.onRename,
+    required this.onDelete,
+    required this.name,
+    this.deleteTooltip,
+  });
+  final String? deleteTooltip;
+  final Widget field;
+  final VoidCallback? onAdd;
+  final VoidCallback? onRename;
+  final VoidCallback? onDelete;
+  final String name;
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final actions = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            tooltip: 'Добавить $name',
+            onPressed: onAdd,
+            icon: const Icon(Icons.add),
+          ),
+          IconButton(
+            tooltip: 'Переименовать $name',
+            onPressed: onRename,
+            icon: const Icon(Icons.edit_outlined),
+          ),
+          IconButton(
+            tooltip: deleteTooltip ?? 'Удалить $name',
+            onPressed: onDelete,
+            icon: const Icon(Icons.delete_outline),
+          ),
+        ],
+      );
+      if (constraints.maxWidth < 400) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            field,
+            Align(alignment: Alignment.centerRight, child: actions),
+          ],
+        );
+      }
+      return Row(
+        children: [
+          Expanded(child: field),
+          const SizedBox(width: 4),
+          actions,
+        ],
+      );
+    },
+  );
+}
+
 final class _TypeTabs extends StatelessWidget {
   const _TypeTabs({required this.controller});
   final QuoteController controller;
-
   @override
-  Widget build(BuildContext context) => SizedBox(
-    height: 42,
-    child: ListView(
-      scrollDirection: Axis.horizontal,
-      children: [
-        for (final type in controller.draft!.proposalTypes)
-          Padding(
-            padding: const EdgeInsets.only(right: 7),
-            child: _TabButton(
-              label: type.name,
-              selected: type.id == controller.activeType?.id,
-              icon: Icons.folder_copy_outlined,
-              badge: type.id == controller.draft!.clientSelectedProposalTypeId
-                  ? 'Выбран клиентом'
-                  : null,
-              onPressed: () => controller.selectType(type.id),
-              deleteTooltip: controller.draft!.proposalTypes.length <= 1
-                  ? 'Нельзя удалить последний тип'
-                  : 'Удалить тип',
-              onDelete:
-                  controller.saving ||
-                      controller.draft!.proposalTypes.length <= 1
-                  ? null
-                  : () => _confirmTabRemoval(
-                      context,
-                      title: 'Удалить тип «${type.name}»?',
-                      content:
-                          'Все варианты и позиции этого типа будут удалены из предложения.',
-                      onConfirmed: () => controller.removeType(type.id),
-                    ),
-              onRename: () => _rename(context, type.name, (value) {
-                type.name = value;
-                controller.positionChanged();
-              }),
+  Widget build(BuildContext context) {
+    final type = controller.activeType;
+    return _DocumentChoice(
+      name: 'тип',
+      deleteTooltip: controller.draft!.proposalTypes.length <= 1
+          ? 'Нельзя удалить последний тип'
+          : 'Удалить тип',
+      field: AppSelectField<String>(
+        label: 'Тип предложения',
+        value: type?.id,
+        options: [
+          for (final item in controller.draft!.proposalTypes)
+            AppSelectOption(
+              value: item.id,
+              label:
+                  '${item.name}${item.id == controller.draft!.clientSelectedProposalTypeId ? ' (Выбран клиентом)' : ''}',
             ),
-          ),
-        OutlinedButton.icon(
-          onPressed: controller.addType,
-          icon: const Icon(Icons.add, size: 18),
-          label: const Text('Добавить тип'),
-        ),
-      ],
-    ),
-  );
+        ],
+        onChanged: (id) {
+          if (id != null) controller.selectType(id);
+        },
+      ),
+      onAdd: controller.saving ? null : controller.addType,
+      onRename: type == null || controller.saving
+          ? null
+          : () => _rename(context, type.name, (value) {
+              type.name = value;
+              controller.positionChanged();
+            }),
+      onDelete:
+          type == null ||
+              controller.saving ||
+              controller.draft!.proposalTypes.length <= 1
+          ? null
+          : () => _confirmTabRemoval(
+              context,
+              title: 'Удалить тип «${type.name}»?',
+              content:
+                  'Все варианты и позиции этого типа будут удалены из предложения.',
+              onConfirmed: () => controller.removeType(type.id),
+            ),
+    );
+  }
 }
 
 final class _VariantTabs extends StatelessWidget {
   const _VariantTabs({required this.controller});
   final QuoteController controller;
-
   @override
   Widget build(BuildContext context) {
     final type = controller.activeType;
+    final variant = controller.activeVariant;
     if (type == null) return const SizedBox.shrink();
-    final vatRates = controller.availableVatRates;
-    final numericVatRates = vatRates.whereType<double>().toSet().toList()
-      ..sort();
-    return Row(
-      children: [
-        Expanded(
-          child: SizedBox(
-            height: 40,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              children: [
-                for (final variant in type.variants)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: _TabButton(
-                      label: variant.name,
-                      selected: variant.id == controller.activeVariant?.id,
-                      badge:
-                          type.selectedByClient &&
-                              variant.id == type.selectedVariantId
-                          ? 'Выбран клиентом'
-                          : null,
-                      onPressed: () => controller.selectVariant(variant.id),
-                      deleteTooltip: type.variants.length <= 1
-                          ? 'Нельзя удалить последний вариант'
-                          : 'Удалить вариант',
-                      onDelete: controller.saving || type.variants.length <= 1
-                          ? null
-                          : () => _confirmTabRemoval(
-                              context,
-                              title: 'Удалить вариант «${variant.name}»?',
-                              content:
-                                  'Все категории, разделы и позиции этого варианта будут удалены из предложения.',
-                              onConfirmed: () =>
-                                  controller.removeVariant(type.id, variant.id),
-                            ),
-                      onRename: () => _rename(context, variant.name, (value) {
-                        variant.name = value;
-                        controller.positionChanged();
-                      }),
-                    ),
-                  ),
-                OutlinedButton.icon(
-                  onPressed: controller.addVariant,
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Добавить вариант'),
-                ),
-              ],
+    final rates = controller.availableVatRates;
+    final numericRates = rates.whereType<double>().toSet().toList()..sort();
+    final choice = _DocumentChoice(
+      name: 'вариант',
+      deleteTooltip: type.variants.length <= 1
+          ? 'Нельзя удалить последний вариант'
+          : 'Удалить вариант',
+      field: AppSelectField<String>(
+        label: 'Вариант',
+        value: variant?.id,
+        options: [
+          for (final item in type.variants)
+            AppSelectOption(
+              value: item.id,
+              label:
+                  '${item.name}${type.selectedByClient && item.id == type.selectedVariantId ? ' (Выбран клиентом)' : ''}',
             ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        SizedBox(
-          width: 145,
-          child: AppSelectField<double>(
-            value: controller.activeVariant?.vatRate,
-            label: 'НДС',
-            isDense: true,
-            options: [
-              if (vatRates.contains(null))
-                const AppSelectOption<double>(value: null, label: 'Без НДС'),
-              for (final rate in numericVatRates)
-                AppSelectOption(value: rate, label: '${_formatVatRate(rate)}%'),
-            ],
-            onChanged: (value) {
-              final variant = controller.activeVariant;
-              if (variant != null) {
-                variant.vatRate = value;
-                controller.positionChanged();
-              }
-            },
-          ),
-        ),
+        ],
+        onChanged: (id) {
+          if (id != null) controller.selectVariant(id);
+        },
+      ),
+      onAdd: controller.saving ? null : controller.addVariant,
+      onRename: variant == null || controller.saving
+          ? null
+          : () => _rename(context, variant.name, (value) {
+              variant.name = value;
+              controller.positionChanged();
+            }),
+      onDelete:
+          variant == null || controller.saving || type.variants.length <= 1
+          ? null
+          : () => _confirmTabRemoval(
+              context,
+              title: 'Удалить вариант «${variant.name}»?',
+              content:
+                  'Все категории, разделы и позиции этого варианта будут удалены из предложения.',
+              onConfirmed: () => controller.removeVariant(type.id, variant.id),
+            ),
+    );
+    final vat = AppSelectField<double>(
+      value: variant?.vatRate,
+      label: 'НДС',
+      isDense: true,
+      options: [
+        if (rates.contains(null))
+          const AppSelectOption<double>(value: null, label: 'Без НДС'),
+        for (final rate in numericRates)
+          AppSelectOption(value: rate, label: '${_formatVatRate(rate)}%'),
       ],
+      onChanged: (value) {
+        if (variant != null) {
+          variant.vatRate = value;
+          controller.positionChanged();
+        }
+      },
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) => constraints.maxWidth >= 620
+          ? Row(
+              children: [
+                Expanded(child: choice),
+                const SizedBox(width: 12),
+                SizedBox(width: 145, child: vat),
+              ],
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [choice, const SizedBox(height: 8), vat],
+            ),
     );
   }
 
@@ -1773,7 +1824,13 @@ final class _CategoryHeading extends StatelessWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          (children.first as Flexible).child,
+          ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 48),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: (children.first as Flexible).child,
+            ),
+          ),
           const SizedBox(height: 6),
           Wrap(
             spacing: 8,
@@ -1834,6 +1891,7 @@ final class _CategoryBlock extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(4, 4, 12, 4),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 CollapseToggle(
                   expanded: expanded,
@@ -3467,86 +3525,6 @@ final class _Panel extends StatelessWidget {
       border: Border.all(color: _border),
     ),
     child: Padding(padding: padding, child: child),
-  );
-}
-
-final class _TabButton extends StatelessWidget {
-  const _TabButton({
-    required this.label,
-    required this.selected,
-    required this.onPressed,
-    required this.onRename,
-    required this.onDelete,
-    required this.deleteTooltip,
-    this.icon,
-    this.badge,
-  });
-  final String label;
-  final bool selected;
-  final VoidCallback onPressed;
-  final VoidCallback onRename;
-  final VoidCallback? onDelete;
-  final String deleteTooltip;
-  final IconData? icon;
-  final String? badge;
-
-  @override
-  Widget build(BuildContext context) => Material(
-    color: selected ? const Color(0xFF1D4E89) : _surfaceRaised,
-    borderRadius: BorderRadius.circular(8),
-    child: InkWell(
-      onTap: onPressed,
-      onLongPress: onRename,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14),
-        child: Row(
-          children: [
-            if (icon != null) ...[
-              Icon(icon, size: 17, color: selected ? Colors.white : _muted),
-              const SizedBox(width: 7),
-            ],
-            Text(
-              label,
-              style: TextStyle(
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-              ),
-            ),
-            if (badge case final value?) ...[
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF174D38),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  value,
-                  style: const TextStyle(
-                    color: Color(0xFF71E6AD),
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
-            const SizedBox(width: 5),
-            InkWell(
-              onTap: onRename,
-              child: const Icon(Icons.edit_outlined, size: 14, color: _muted),
-            ),
-            IconButton(
-              onPressed: onDelete,
-              tooltip: deleteTooltip,
-              icon: const Icon(Icons.delete_outline, size: 16),
-              constraints: const BoxConstraints.tightFor(width: 32, height: 32),
-              padding: EdgeInsets.zero,
-              color: _muted,
-            ),
-          ],
-        ),
-      ),
-    ),
   );
 }
 

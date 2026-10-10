@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
@@ -20,6 +21,70 @@ void main() {
     apiBaseUrl: 'https://api.example.test/api/v1',
     environment: 'test',
   );
+
+  testWidgets('типы и варианты доступны списками на всех ширинах', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final auth = AuthController(
+      config,
+      api: _NoopAuthGateway(),
+      tokens: _MemoryTokenRepository(),
+    );
+    final controller = QuoteController(config, auth);
+    final types = [
+      for (var i = 0; i < 18; i++)
+        QuoteProposalTypeDraft.create()..name = 'Тип предложения $i',
+    ];
+    controller
+      ..draft = QuoteDraft(
+        kind: QuoteKind.prequote,
+        title: 'Тест',
+        clientId: '',
+        executorCompanyId: '',
+        selectionMode: 'variant',
+        proposalTypes: types,
+      )
+      ..activeTypeId = types.first.id
+      ..activeVariantId = types.first.variants.first.id;
+    for (var i = 0; i < 15; i++) {
+      controller.addVariant();
+    }
+    for (final width in [320.0, 375.0, 600.0, 1024.0, 1440.0]) {
+      tester.view.physicalSize = Size(width, 1000);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: QuoteEditorPage(
+              config: config,
+              authController: auth,
+              board: _quoteBoard,
+              controller: controller,
+              onBack: () {},
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final type = tester.widget<AppSelectField<String>>(
+        find.byWidgetPredicate(
+          (w) => w is AppSelectField<String> && w.label == 'Тип предложения',
+        ),
+      );
+      final variant = tester.widget<AppSelectField<String>>(
+        find.byWidgetPredicate(
+          (w) => w is AppSelectField<String> && w.label == 'Вариант',
+        ),
+      );
+      expect(type.options, hasLength(18));
+      expect(variant.options, hasLength(16));
+      expect(tester.takeException(), isNull);
+    }
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+    auth.dispose();
+  });
 
   testWidgets('повторный выбор канбанов вызывает штатный выход редактора', (
     tester,
@@ -667,7 +732,7 @@ void main() {
     expect(tester.takeException(), isNull);
 
     final originalType = controller.activeType!;
-    await tester.tap(find.text('Добавить вариант'));
+    await tester.tap(find.byTooltip('Добавить вариант'));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Удалить вариант').last);
     await tester.pumpAndSettle();
@@ -680,7 +745,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(originalType.variants, hasLength(1));
     expect(find.byTooltip('Нельзя удалить последний вариант'), findsOneWidget);
-    await tester.tap(find.text('Добавить тип'));
+    await tester.tap(find.byTooltip('Добавить тип'));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Удалить тип').last);
     await tester.pumpAndSettle();

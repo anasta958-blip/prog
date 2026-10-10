@@ -3,6 +3,7 @@ import 'package:sklad_komforta_app/core/formatters/russian.dart';
 import 'dart:ui' show PointerDeviceKind;
 
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/widgets/workspace_header.dart';
 import 'package:sklad_komforta_app/core/widgets/collapse_toggle.dart';
 import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
 import 'package:intl/intl.dart';
@@ -45,6 +46,7 @@ final class KanbanPage extends StatefulWidget {
 
 final class _KanbanPageState extends State<KanbanPage> {
   final ScrollController _horizontal = ScrollController();
+  final PageStorageBucket _boardStorage = PageStorageBucket();
   final GlobalKey _canvasKey = GlobalKey();
   Timer? _autoScrollTimer;
   double _autoScrollDirection = 0;
@@ -375,7 +377,12 @@ final class _KanbanPageState extends State<KanbanPage> {
                     () => _mobileToolbarExpanded = !_mobileToolbarExpanded,
                   ),
                 ),
-              Expanded(child: _body(compact)),
+              Expanded(
+                child: PageStorage(
+                  bucket: _boardStorage,
+                  child: _body(compact),
+                ),
+              ),
             ],
           ),
         );
@@ -456,6 +463,7 @@ final class _KanbanPageState extends State<KanbanPage> {
           child: MouseRegion(
             cursor: SystemMouseCursors.grab,
             child: SingleChildScrollView(
+              key: PageStorageKey('board:${board.id}'),
               controller: _horizontal,
               scrollDirection: Axis.horizontal,
               padding: EdgeInsets.fromLTRB(compact ? 12 : 22, 16, 22, 22),
@@ -562,9 +570,9 @@ final class _Toolbar extends StatelessWidget {
               children: [
                 Expanded(child: selector),
                 const SizedBox(width: 10),
-                SizedBox(width: 240, child: search),
-                const SizedBox(width: 10),
                 Expanded(child: author),
+                const SizedBox(width: 10),
+                SizedBox(width: 240, child: search),
               ],
             );
           }
@@ -572,25 +580,16 @@ final class _Toolbar extends StatelessWidget {
             children: [
               selector,
               const SizedBox(height: 12),
-              search,
-              const SizedBox(height: 12),
               author,
+              const SizedBox(height: 12),
+              search,
             ],
           );
         },
       );
-      final heading = Row(
+      final trailing = Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.view_kanban_outlined, color: Color(0xFF4D8DFF)),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              narrow ? controller.board?.name ?? 'Канбаны' : 'Канбаны',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w800),
-            ),
-          ),
           if (controller.board case final board?)
             Text(
               russianCount(
@@ -605,6 +604,20 @@ final class _Toolbar extends StatelessWidget {
             onPressed: controller.loading ? null : controller.reload,
             icon: const Icon(Icons.refresh),
           ),
+        ],
+      );
+      final heading = Row(
+        children: [
+          const Icon(Icons.view_kanban_outlined, color: Color(0xFF4D8DFF)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              narrow ? controller.board?.name ?? 'Канбаны' : 'Канбаны',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+          ),
           if (narrow)
             CollapseToggle(
               expanded: expanded,
@@ -614,7 +627,9 @@ final class _Toolbar extends StatelessWidget {
         ],
       );
       return Container(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+        key: const Key('kanban-toolbar'),
+        constraints: const BoxConstraints(minHeight: workspaceHeaderHeight),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: const BoxDecoration(
           color: Color(0xFF101823),
           border: Border(bottom: BorderSide(color: Color(0xFF253348))),
@@ -622,9 +637,11 @@ final class _Toolbar extends StatelessWidget {
         child: constraints.maxWidth >= 1150
             ? Row(
                 children: [
-                  SizedBox(width: 290, child: heading),
+                  SizedBox(width: 150, child: heading),
                   const SizedBox(width: 16),
                   Expanded(child: fields),
+                  const SizedBox(width: 12),
+                  trailing,
                 ],
               )
             : Column(
@@ -633,6 +650,7 @@ final class _Toolbar extends StatelessWidget {
                   if (!narrow || expanded) ...[
                     const SizedBox(height: 10),
                     fields,
+                    Align(alignment: Alignment.centerRight, child: trailing),
                   ],
                 ],
               ),
@@ -958,6 +976,7 @@ final class _KanbanColumnPanel extends StatelessWidget {
                     ),
                   )
                 : ListView.builder(
+                    key: PageStorageKey('cards:${board.id}:${column.id}'),
                     padding: const EdgeInsets.all(10),
                     itemCount: page.items.length * 2 + 1,
                     itemBuilder: (context, index) {
@@ -1034,6 +1053,9 @@ final class _KanbanColumnPanel extends StatelessWidget {
                     child: archive == null || archive.items.isEmpty
                         ? const Center(child: Text('Архив пуст'))
                         : ListView.separated(
+                            key: PageStorageKey(
+                              'archive:${board.id}:${column.id}',
+                            ),
                             padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
                             itemCount: archive.items.length,
                             separatorBuilder: (_, _) =>

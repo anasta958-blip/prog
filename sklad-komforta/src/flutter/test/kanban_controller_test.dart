@@ -31,6 +31,107 @@ void main() {
     environment: 'test',
   );
 
+  testWidgets('панель сохраняет порядок полей и высоту бренда', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1440, 900);
+    addTearDown(tester.view.reset);
+    final auth = _authorizedController(config);
+    final controller = KanbanController(
+      config,
+      auth,
+      gateway: _MemoryKanbanGateway(),
+    );
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: KanbanPage(controller: controller)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final board = find.byWidgetPredicate(
+      (w) => w is AppSelectField<String> && w.label == 'Рабочий канбан',
+    );
+    final author = find.byWidgetPredicate(
+      (w) => w is AppSelectField<String> && w.label == 'Карточки пользователя',
+    );
+    final search = find.byType(TextField);
+    expect(tester.getRect(board).right, lessThan(tester.getRect(author).left));
+    expect(tester.getRect(author).right, lessThan(tester.getRect(search).left));
+    expect(
+      tester.getRect(search).right,
+      lessThan(tester.getRect(find.text('2 столбца')).left),
+    );
+    expect(tester.getSize(find.byKey(const Key('kanban-toolbar'))).height, 69);
+    for (final width in [320.0, 375.0, 800.0, 1024.0]) {
+      tester.view.physicalSize = Size(width, 812);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    }
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+    auth.dispose();
+  });
+
+  testWidgets('выход из документа восстанавливает обе оси канбана', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(500, 812);
+    addTearDown(tester.view.reset);
+    final auth = _authorizedController(config);
+    final gateway = _MemoryKanbanGateway()
+      ..specialization = WorkflowSpecialization.quote;
+    final controller = KanbanController(config, auth, gateway: gateway);
+    await controller.initialize();
+    for (var i = 0; i < 12; i++) {
+      await controller.saveCard(
+        KanbanCardDraft(
+          columnId: 'quote-first',
+          categoryId: 'equipment',
+          title: 'Карточка $i',
+        ),
+      );
+    }
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: KanbanPage(
+            controller: controller,
+            config: config,
+            authController: auth,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    ScrollPosition position(String key) => tester
+        .state<ScrollableState>(
+          find
+              .descendant(
+                of: find.byKey(PageStorageKey(key)),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        )
+        .position;
+    position('board:board-quotes').jumpTo(80);
+    position('cards:board-quotes:quote-first').jumpTo(240);
+    await tester.pumpAndSettle();
+    final horizontal = position('board:board-quotes').pixels;
+    final vertical = position('cards:board-quotes:quote-first').pixels;
+    await tester.tap(find.textContaining('Карточка ').hitTestable().first);
+    await tester.pump();
+    final editor = tester.widget<QuoteEditorPage>(find.byType(QuoteEditorPage));
+    editor.onBack();
+    await tester.pumpAndSettle();
+    expect(position('board:board-quotes').pixels, horizontal);
+    expect(position('cards:board-quotes:quote-first').pixels, vertical);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+    auth.dispose();
+  });
+
   testWidgets('карточка комплектации: сводка, дозаказ и связь с КП', (
     tester,
   ) async {

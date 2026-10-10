@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/widgets/reorderable_token_wrap.dart';
 import 'package:sklad_komforta_app/core/widgets/collapse_toggle.dart';
 import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
 import 'package:sklad_komforta_app/core/models/workflow_specialization.dart';
@@ -2760,76 +2761,53 @@ final class _OrganizationOnboardingPageState
               ),
               child: formula.tokens.isEmpty
                   ? const Text('Добавьте поле, число, операцию или скобку.')
-                  : SizedBox(
-                      height: 48,
-                      child: ReorderableListView(
-                        scrollDirection: Axis.horizontal,
-                        buildDefaultDragHandles: false,
-                        onReorder: (oldIndex, newIndex) => setState(() {
-                          if (newIndex > oldIndex) newIndex--;
-                          final token = formula.tokens.removeAt(oldIndex);
-                          formula.tokens.insert(newIndex, token);
-                        }),
-                        children: [
-                          for (
-                            var index = 0;
-                            index < formula.tokens.length;
-                            index++
-                          )
-                            ReorderableDragStartListener(
-                              key: ObjectKey(formula.tokens[index]),
-                              index: index,
-                              child: Padding(
-                                padding: const EdgeInsets.only(right: 6),
-                                child: Center(
-                                  child: Material(
-                                    color: const Color(0xFF162131),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(8),
-                                      side: const BorderSide(
-                                        color: Color(0xFF8FA4C2),
-                                      ),
-                                    ),
-                                    child: Padding(
-                                      padding: const EdgeInsets.only(left: 8),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Icon(
-                                            Icons.drag_indicator,
-                                            size: 16,
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Text(
-                                            _formulaTokenLabel(
-                                              formula.tokens[index],
-                                              category,
-                                            ),
-                                          ),
-                                          IconButton(
-                                            tooltip:
-                                                'Удалить компонент формулы',
-                                            visualDensity:
-                                                VisualDensity.compact,
-                                            icon: const Icon(
-                                              Icons.close,
-                                              size: 16,
-                                            ),
-                                            onPressed: () => setState(
-                                              () => formula.tokens.removeAt(
-                                                index,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
+                  : ReorderableTokenWrap(
+                      onReorder: (oldIndex, newIndex) => setState(() {
+                        if (newIndex > oldIndex) newIndex--;
+                        final token = formula.tokens.removeAt(oldIndex);
+                        formula.tokens.insert(newIndex, token);
+                      }),
+                      children: [
+                        for (
+                          var index = 0;
+                          index < formula.tokens.length;
+                          index++
+                        )
+                          Material(
+                            key: ObjectKey(formula.tokens[index]),
+                            color: const Color(0xFF162131),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              side: const BorderSide(color: Color(0xFF8FA4C2)),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.only(left: 8),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.drag_indicator, size: 16),
+                                  const SizedBox(width: 8),
+                                  Flexible(
+                                    child: Text(
+                                      _formulaTokenLabel(
+                                        formula.tokens[index],
+                                        category,
                                       ),
                                     ),
                                   ),
-                                ),
+                                  IconButton(
+                                    tooltip: 'Удалить компонент формулы',
+                                    visualDensity: VisualDensity.compact,
+                                    icon: const Icon(Icons.close, size: 16),
+                                    onPressed: () => setState(
+                                      () => formula.tokens.removeAt(index),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                        ],
-                      ),
+                          ),
+                      ],
                     ),
             ),
             const SizedBox(height: 10),
@@ -3844,8 +3822,12 @@ final class _DraggableOrderedRow extends StatelessWidget {
   final VoidCallback? onDelete;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 8),
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.only(bottom: 12),
+    padding: const EdgeInsets.symmetric(vertical: 12),
+    decoration: const BoxDecoration(
+      border: Border(bottom: BorderSide(color: Color(0xFF2A405A))),
+    ),
     child: Row(
       children: [
         ReorderableDragStartListener(

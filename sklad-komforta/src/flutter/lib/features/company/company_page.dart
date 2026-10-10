@@ -524,7 +524,24 @@ final class _AccessSection extends StatelessWidget {
                         ),
                         trailing: role.isSystem
                             ? const Icon(Icons.lock_outline, size: 18)
-                            : null,
+                            : Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    onPressed: () =>
+                                        _editRole(context, controller, role),
+                                    icon: const Icon(Icons.edit_outlined),
+                                    tooltip: 'Редактировать',
+                                  ),
+                                  IconButton(
+                                    onPressed: () =>
+                                        controller.deleteRole(role.id),
+                                    icon: const Icon(Icons.delete_outline),
+                                    tooltip: 'Удалить',
+                                    color: const Color(0xFFFF6F86),
+                                  ),
+                                ],
+                              ),
                         child: Padding(
                           padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
                           child: Row(
@@ -556,21 +573,6 @@ final class _AccessSection extends StatelessWidget {
                                   ],
                                 ),
                               ),
-                              if (!role.isSystem) ...[
-                                IconButton(
-                                  onPressed: () =>
-                                      _editRole(context, controller, role),
-                                  icon: const Icon(Icons.edit_outlined),
-                                  tooltip: 'Редактировать',
-                                ),
-                                IconButton(
-                                  onPressed: () =>
-                                      controller.deleteRole(role.id),
-                                  icon: const Icon(Icons.delete_outline),
-                                  color: const Color(0xFFFF6F86),
-                                  tooltip: 'Удалить',
-                                ),
-                              ],
                             ],
                           ),
                         ),
@@ -803,6 +805,19 @@ final class _EntityCard extends StatelessWidget {
                         ),
                       ),
               ),
+              if (onEdit != null)
+                IconButton(
+                  onPressed: onEdit,
+                  tooltip: 'Редактировать',
+                  icon: const Icon(Icons.edit_outlined),
+                ),
+              if (onDelete != null)
+                IconButton(
+                  onPressed: onDelete,
+                  tooltip: 'Удалить',
+                  color: const Color(0xFFFF6F86),
+                  icon: const Icon(Icons.delete_outline),
+                ),
             ],
           ),
           Align(
@@ -816,25 +831,6 @@ final class _EntityCard extends StatelessWidget {
                 .join(' · '),
             style: const TextStyle(color: Color(0xFF91A6C2), fontSize: 12),
           ),
-          if (onEdit != null || onDelete != null)
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                if (onEdit != null)
-                  IconButton(
-                    onPressed: onEdit,
-                    tooltip: 'Редактировать',
-                    icon: const Icon(Icons.edit_outlined),
-                  ),
-                if (onDelete != null)
-                  IconButton(
-                    onPressed: onDelete,
-                    tooltip: 'Удалить',
-                    icon: const Icon(Icons.delete_outline),
-                    color: const Color(0xFFFF6F86),
-                  ),
-              ],
-            ),
         ],
       ),
     ),

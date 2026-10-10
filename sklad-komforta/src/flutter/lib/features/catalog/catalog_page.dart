@@ -207,24 +207,18 @@ class _CatalogPageState extends State<CatalogPage> {
               ),
             ),
             SizedBox(height: mobile ? 10 : 14),
-            SizedBox(
-              height: mobile ? 36 : 40,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                children: [
-                  _CategoryChip(
-                    label: 'Все категории',
-                    selected: controller.categoryId == null,
-                    onTap: () => controller.selectCategory(null),
-                  ),
-                  for (final category in categories)
-                    _CategoryChip(
-                      label: category.name,
-                      selected: controller.categoryId == category.id,
-                      onTap: () => controller.selectCategory(category.id),
-                    ),
-                ],
-              ),
+            AppSelectField<String>(
+              label: 'Категория',
+              value: controller.categoryId,
+              options: [
+                const AppSelectOption<String>(
+                  value: null,
+                  label: 'Все категории',
+                ),
+                for (final category in categories)
+                  AppSelectOption(value: category.id, label: category.name),
+              ],
+              onChanged: controller.selectCategory,
             ),
             SizedBox(height: mobile ? 8 : 12),
             if (mobile) ...[
@@ -860,26 +854,6 @@ final class _Header extends StatelessWidget {
       ],
     );
   }
-}
-
-final class _CategoryChip extends StatelessWidget {
-  const _CategoryChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(right: 8),
-    child: ChoiceChip(
-      label: Text(label),
-      selected: selected,
-      onSelected: (_) => onTap(),
-    ),
-  );
 }
 
 final class _Filters extends StatelessWidget {

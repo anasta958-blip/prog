@@ -191,22 +191,32 @@ class _CatalogEditorState extends State<CatalogEditor> {
             padding: const EdgeInsets.all(16),
             child: Wrap(
               alignment: WrapAlignment.end,
+              crossAxisAlignment: WrapCrossAlignment.center,
               spacing: 10,
               runSpacing: 8,
               children: [
                 if (widget.onDelete != null)
                   IconButton(
                     tooltip: 'Удалить товар',
+                    style: IconButton.styleFrom(fixedSize: const Size(40, 40)),
                     onPressed: widget.saving ? null : widget.onDelete,
                     color: const Color(0xFFFF7180),
                     icon: const Icon(Icons.delete_outline),
                   ),
                 OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(120, 40),
+                    fixedSize: const Size(120, 40),
+                  ),
                   onPressed: widget.saving ? null : widget.onClose,
                   child: const Text('Отмена'),
                 ),
                 FilledButton(
                   key: const Key('catalog-save'),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(120, 40),
+                    fixedSize: const Size(120, 40),
+                  ),
                   onPressed: widget.saving
                       ? null
                       : () async {

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/widgets/reorderable_token_wrap.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_editor.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sklad_komforta_app/app/app.dart';
@@ -470,11 +471,7 @@ void main() {
     await tester.ensureVisible(find.text('Формула для проверки').first);
     await tester.tap(find.bySemanticsLabel('Развернуть блок').last);
     await tester.pumpAndSettle();
-    final list = find.byWidgetPredicate(
-      (widget) =>
-          widget is ReorderableListView &&
-          widget.scrollDirection == Axis.horizontal,
-    );
+    final list = find.byType(ReorderableTokenWrap);
     expect(list, findsOneWidget);
     final handles = find.descendant(
       of: list,
@@ -485,9 +482,7 @@ void main() {
     final gesture = await tester.startGesture(tester.getCenter(handles.first));
     await gesture.moveBy(const Offset(20, 0));
     await tester.pump();
-    await gesture.moveBy(const Offset(230, 0));
-    await tester.pump(const Duration(milliseconds: 300));
-    await gesture.moveBy(const Offset(100, 0));
+    await gesture.moveTo(tester.getCenter(handles.last));
     await tester.pump(const Duration(milliseconds: 300));
     await gesture.up();
     await tester.pumpAndSettle();
@@ -885,6 +880,17 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      final save = find.byKey(const Key('catalog-save'));
+      final cancel = find.widgetWithText(OutlinedButton, 'Отмена');
+      expect(tester.getSize(save), tester.getSize(cancel));
+      for (final button in [save, cancel]) {
+        expect(
+          tester.getSize(
+            find.descendant(of: button, matching: find.byType(Material)).first,
+          ),
+          const Size(120, 40),
+        );
+      }
       expect(tester.takeException(), isNull);
     }
 
