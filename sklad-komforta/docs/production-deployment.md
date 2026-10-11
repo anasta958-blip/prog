@@ -1,5 +1,9 @@
 # Развёртывание в production
 
+Для **одной ВМ с локальными PostgreSQL, Redis, MinIO и Cloudflare Tunnel**
+используется другой профиль: [серверный комплект](iteration-08/server-deployment.md).
+Ниже описан вариант с внешними хранилищами и собственным TLS на Nginx.
+
 Production использует отдельный файл `compose.production.yaml` и не изменяет
 среду разработки из `compose.yaml`. Единственной публичной точкой входа является
 Nginx: он отдаёт Flutter Web и перенаправляет `/api/*` во внутренний контейнер

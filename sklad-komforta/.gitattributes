@@ -1,0 +1,2 @@
+deploy/server/*.sh text eol=lf
+scripts/server.py text eol=lf

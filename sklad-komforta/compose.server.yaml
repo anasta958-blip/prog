@@ -1,0 +1,189 @@
+name: sklad-komforta-server
+
+x-service: &service
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-storage: &storage
+  Database__ConnectionString: Host=postgres;Database=sklad_komforta;Username=sklad;Password=${APP_DATABASE_PASSWORD:?Run server.py init}
+  Redis__ConnectionString: redis:6379,password=${REDIS_PASSWORD:?Run server.py init},abortConnect=false
+  ObjectStorage__ServiceUrl: http://minio:9000
+  ObjectStorage__PublicUrl: https://${FILES_DOMAIN:?Set FILES_DOMAIN}
+  ObjectStorage__Region: us-east-1
+  ObjectStorage__Bucket: sklad-komforta
+  ObjectStorage__AccessKey: sklad-app
+  ObjectStorage__SecretKey: ${S3_SECRET_KEY:?Run server.py init}
+  ObjectStorage__ForcePathStyle: "true"
+
+services:
+  postgres:
+    <<: *service
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: sklad_komforta
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run server.py init}
+      APP_DATABASE_PASSWORD: ${APP_DATABASE_PASSWORD:?Run server.py init}
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ./deploy/server/init-postgres.sh:/docker-entrypoint-initdb.d/10-application.sh:ro
+      - ./migrations/public:/migrations/public:ro
+    networks: [data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U postgres -d sklad_komforta"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  redis:
+    <<: *service
+    image: redis:8-alpine
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Run server.py init}
+    command: [sh, -c, 'exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"']
+    volumes: [redis-data:/data]
+    networks: [data]
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -q PONG']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  minio:
+    <<: *service
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: sklad-root
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Run server.py init}
+      MINIO_API_CORS_ALLOW_ORIGIN: https://${APP_DOMAIN:?Set APP_DOMAIN}
+    volumes: [minio-data:/data]
+    networks: [data]
+    healthcheck:
+      test: [CMD, mc, ready, local]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    entrypoint: [/bin/sh, /setup/init-minio.sh]
+    environment:
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Run server.py init}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?Run server.py init}
+    volumes: [./deploy/server:/setup:ro]
+    networks: [data]
+    depends_on:
+      minio: {condition: service_healthy}
+    restart: "no"
+
+  api:
+    <<: *service
+    build:
+      context: .
+      dockerfile: src/backend/SkladKomforta.Api/Dockerfile
+    environment:
+      <<: *storage
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      Jwt__Issuer: https://${APP_DOMAIN:?Set APP_DOMAIN}
+      Jwt__Audience: sklad-komforta-clients
+      Jwt__SigningKey: ${JWT_SIGNING_KEY:?Run server.py init}
+      Security__TotpEncryptionKey: ${TOTP_ENCRYPTION_KEY:?Run server.py init}
+      Security__BootstrapToken: ${BOOTSTRAP_TOKEN:?Run server.py init}
+      Cors__AllowedOrigins__0: https://${APP_DOMAIN:?Set APP_DOMAIN}
+      ReverseProxy__TrustForwardedHeaders: "true"
+      Outbound__AllowPrivateSmtpHosts: "false"
+      Logging__LogLevel__Microsoft.AspNetCore.Hosting.Diagnostics: Warning
+    networks: [data, application, outbound]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      minio-init: {condition: service_completed_successfully}
+
+  worker:
+    <<: *service
+    build:
+      context: .
+      dockerfile: src/backend/SkladKomforta.Worker/Dockerfile
+    environment:
+      <<: *storage
+      DOTNET_ENVIRONMENT: Production
+    networks: [data, outbound]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      minio-init: {condition: service_completed_successfully}
+
+  web:
+    <<: *service
+    build:
+      context: src/flutter
+      dockerfile: Dockerfile.web
+      args:
+        API_BASE_URL: /api/v1
+        APP_ENVIRONMENT: production
+        NGINX_TEMPLATE: docker/nginx/server.conf.template
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?Set APP_DOMAIN}
+      FILES_DOMAIN: ${FILES_DOMAIN:?Set FILES_DOMAIN}
+      NGINX_ENVSUBST_FILTER: ^(APP_DOMAIN|FILES_DOMAIN)$$
+    networks: [application, data, tunnel]
+    depends_on:
+      api: {condition: service_started}
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q -O /dev/null --header="Host: $$APP_DOMAIN" http://127.0.0.1/health/ready']
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  cloudflared:
+    <<: *service
+    image: cloudflare/cloudflared:2026.10.0
+    profiles: [public]
+    command: [tunnel, --no-autoupdate, run, --token-file, /run/secrets/tunnel-token]
+    # Root читает файл 0600; capabilities и запись в файловую систему запрещены.
+    user: "0:0"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    secrets: [tunnel-token]
+    networks: [tunnel, internet]
+    depends_on:
+      web: {condition: service_healthy}
+
+  admin:
+    image: curlimages/curl:8.14.1
+    profiles: [tools]
+    networks: [application]
+    entrypoint: [curl, --silent, --show-error, --fail-with-body]
+
+  volume-tools:
+    image: alpine:3.22
+    profiles: [tools]
+    network_mode: none
+    volumes:
+      - minio-data:/minio
+      - redis-data:/redis
+    entrypoint: [/bin/sh]
+
+networks:
+  data: {internal: true}
+  application: {internal: true}
+  tunnel: {internal: true}
+  outbound: {}
+  internet: {}
+
+volumes:
+  postgres-data: {}
+  redis-data: {}
+  minio-data: {}
+
+secrets:
+  tunnel-token:
+    file: ${TUNNEL_TOKEN_FILE:-./.env.server.secrets/tunnel-token}

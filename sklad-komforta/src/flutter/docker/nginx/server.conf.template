@@ -1,0 +1,96 @@
+# Доступ только из приватной Docker-сети Tunnel, без host ports.
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    '' close;
+}
+map $http_cf_connecting_ip $client_ip {
+    default $http_cf_connecting_ip;
+    '' $remote_addr;
+}
+# Не записываем query string: в ссылках встречаются токены и S3-подписи.
+log_format private '$client_ip $request_method $uri $status $body_bytes_sent';
+limit_req_zone $client_ip zone=auth:10m rate=10r/m;
+
+server {
+    listen 80 default_server;
+    server_name _;
+    return 404;
+}
+
+server {
+    listen 80;
+    server_name ${APP_DOMAIN};
+    root /usr/share/nginx/html;
+    index index.html;
+    access_log /var/log/nginx/access.log private;
+    client_max_body_size 50m;
+    if ($http_x_forwarded_proto = http) { return 308 https://$host$request_uri; }
+
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy no-referrer always;
+    add_header X-Frame-Options SAMEORIGIN always;
+
+    # Bootstrap разрешён только административному контейнеру напрямую к API.
+    location ~* ^/api/v1/auth/bootstrap { return 404; }
+    location /api/v1/auth/ {
+        limit_req zone=auth burst=20 nodelay;
+        limit_req_status 429;
+        proxy_pass http://api:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $client_ip;
+        proxy_set_header X-Forwarded-Proto https;
+        add_header Cache-Control "no-store" always;
+    }
+    location = /api/v1/realtime {
+        proxy_pass http://api:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $client_ip;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+    }
+    location /api/ {
+        proxy_pass http://api:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $client_ip;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 120s;
+        add_header Cache-Control "no-store" always;
+    }
+    location /health/ {
+        proxy_pass http://api:8080;
+        proxy_set_header X-Forwarded-Proto https;
+        add_header Cache-Control "no-store" always;
+    }
+    location / {
+        try_files $uri $uri/ /index.html;
+        add_header Cache-Control "no-cache" always;
+    }
+}
+
+server {
+    listen 80;
+    server_name ${FILES_DOMAIN};
+    access_log /var/log/nginx/access.log private;
+    client_max_body_size 50m;
+    if ($http_x_forwarded_proto = http) { return 308 https://$host$request_uri; }
+
+    # Только объекты одного bucket. Консоль, admin API и список bucket не проксируются.
+    location /sklad-komforta/ {
+        limit_except GET HEAD PUT OPTIONS { deny all; }
+        proxy_pass http://minio:9000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header Connection "";
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_read_timeout 120s;
+        add_header Cache-Control "private, no-store" always;
+        add_header X-Content-Type-Options nosniff always;
+    }
+    location / { return 404; }
+}

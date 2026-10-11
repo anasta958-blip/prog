@@ -1,6 +1,11 @@
 .dotnet-home/
 .env
 .env.production
+.env.server
+.env.server.secrets/
+.server-operation.lock
+backups/
+**/__pycache__/
 **/bin/
 **/obj/
 **/.dart_tool/

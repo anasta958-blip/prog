@@ -2,6 +2,10 @@
 .gitignore
 .dotnet-home
 .env
+.env.*
+.env.server.secrets
+.server-operation.lock
+backups
 **/bin
 **/obj
 **/.dart_tool
