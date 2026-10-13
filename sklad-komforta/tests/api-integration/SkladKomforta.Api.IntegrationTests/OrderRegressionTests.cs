@@ -226,7 +226,7 @@ public sealed partial class DatabaseRegressionTests
     /// со столбцом дозаказа «Монтаж» и обратным триггером «Вернуть в КП».
     /// </summary>
     private static OrganizationOnboardingDraft OrderDraft() => new(
-        9, new CompanyProfileDraft("Проверка комплектации", "ООО", null, null, null, null, null, null, null),
+        9, new CompanyProfileDraft("Проверка комплектации"),
         [
             new WorkflowDraft("sales", "Предложения", [
                 new WorkflowColumnDraft("start", "Подготовка", "#4D8DFF", ["quote"]),

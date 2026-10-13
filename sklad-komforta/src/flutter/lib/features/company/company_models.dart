@@ -1,81 +1,53 @@
-/// Реквизиты организации, общие для первичной настройки и рабочего пространства.
+/// Название рабочего пространства и реквизиты первого юрлица до активации.
 final class CompanyProfileDraft {
   CompanyProfileDraft({required this.organizationName});
-
   String organizationName;
   LegalEntityModel? legalEntity;
 
-  LegalEntityModel ensureLegalEntity() => legalEntity ??=
-      LegalEntityModel(
-          id: '',
-          name: organizationName,
-          companyType: const {'ип', 'ip'}.contains(companyType?.toLowerCase())
-              ? 'ip'
-              : 'ooo',
-        )
-        ..legalName = legalName
-        ..inn = inn
-        ..kpp = kpp
-        ..ogrn = ogrn
-        ..address = address
-        ..phone = phone
-        ..email = email
-        ..isDefault = true;
+  LegalEntityModel ensureLegalEntity() => legalEntity ??= (LegalEntityModel(
+    id: '',
+    name: organizationName,
+    companyType: 'ooo',
+  )..isDefault = true);
 
-  void syncLegalEntity() {
-    final item = legalEntity;
-    if (item == null) return;
-    companyType = item.companyType;
-    legalName = item.legalName;
-    inn = item.inn;
-    kpp = item.kpp;
-    ogrn = item.ogrn;
-    address = item.address;
-    phone = item.phone;
-    email = item.email;
+  factory CompanyProfileDraft.fromJson(Map<String, dynamic> json) {
+    final profile = CompanyProfileDraft(
+      organizationName: json['organizationName'] as String,
+    );
+    final entity = json['legalEntity'];
+    if (entity is Map<String, dynamic>) {
+      profile.legalEntity = LegalEntityModel.fromJson({...entity, 'id': ''});
+    } else if (const [
+      'legalName',
+      'inn',
+      'kpp',
+      'ogrn',
+      'address',
+      'phone',
+      'email',
+    ].any((key) => (json[key] as String? ?? '').trim().isNotEmpty)) {
+      // Однократное чтение старого формата. Обратно плоские реквизиты не пишем.
+      profile.legalEntity = LegalEntityModel.fromJson({
+        ...json,
+        'id': '',
+        'name': profile.organizationName,
+        'companyType':
+            const {
+              'ип',
+              'ip',
+            }.contains((json['companyType'] as String? ?? '').toLowerCase())
+            ? 'ip'
+            : 'ooo',
+        'isDefault': true,
+      });
+    }
+    return profile;
   }
 
-  String? companyType;
-  String? legalName;
-  String? inn;
-  String? kpp;
-  String? ogrn;
-  String? address;
-  String? phone;
-  String? email;
-
-  factory CompanyProfileDraft.fromJson(Map<String, dynamic> json) =>
-      CompanyProfileDraft(organizationName: json['organizationName'] as String)
-        ..companyType = json['companyType'] as String?
-        ..legalName = json['legalName'] as String?
-        ..inn = json['inn'] as String?
-        ..kpp = json['kpp'] as String?
-        ..ogrn = json['ogrn'] as String?
-        ..address = json['address'] as String?
-        ..phone = json['phone'] as String?
-        ..email = json['email'] as String?
-        ..legalEntity = json['legalEntity'] == null
-            ? null
-            : LegalEntityModel.fromJson({
-                ...json['legalEntity'] as Map<String, dynamic>,
-                'id': '',
-              });
-
-  Map<String, dynamic> toJson() {
-    syncLegalEntity();
-    return {
-      'organizationName': organizationName,
-      'legalEntity': legalEntity?.toJson(),
-      'companyType': companyType,
-      'legalName': legalName,
-      'inn': inn,
-      'kpp': kpp,
-      'ogrn': ogrn,
-      'address': address,
-      'phone': phone,
-      'email': email,
-    };
-  }
+  Map<String, dynamic> toJson() => {
+    'organizationName': organizationName,
+    if (legalEntity != null) 'legalEntity': legalEntity!.toJson(),
+  };
 }
 
 /// Общий срок активности tenant-организации.

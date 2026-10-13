@@ -1,16 +1,9 @@
 namespace SkladKomforta.Application.Onboarding;
 
-/// <summary>Реквизиты и контакты организации, вводимые директором на первом шаге.</summary>
+/// <summary>Название рабочего пространства и черновик его первого юрлица.</summary>
+[System.Text.Json.Serialization.JsonConverter(typeof(CompanyProfileDraftJsonConverter))]
 public sealed record CompanyProfileDraft(
     string OrganizationName,
-    string? CompanyType,
-    string? LegalName,
-    string? Inn,
-    string? Kpp,
-    string? Ogrn,
-    string? Address,
-    string? Phone,
-    string? Email,
     SkladKomforta.Application.Company.SaveLegalEntityRequest? LegalEntity = null);
 
 /// <summary>

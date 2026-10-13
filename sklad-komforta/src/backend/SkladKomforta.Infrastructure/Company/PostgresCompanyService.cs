@@ -11,7 +11,7 @@ using SkladKomforta.Application.Onboarding;
 
 namespace SkladKomforta.Infrastructure.Company;
 
-/// <summary>Работает с единственным профилем организации в текущей tenant-схеме.</summary>
+/// <summary>Работает с названием пространства и его конфигурацией, без реквизитов юрлиц.</summary>
 internal sealed class PostgresCompanyService(
     IDatabaseConnectionFactory connectionFactory,
     ITenantContext tenantContext,
@@ -40,12 +40,13 @@ internal sealed class PostgresCompanyService(
         IReadOnlyList<string> deleteCategoryData,
         CancellationToken cancellationToken)
     {
-        var normalized = draft with { CurrentStep = 10 };
+        await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
+        var profile = await ReadAsync(connection, cancellationToken);
+        var normalized = draft with { CurrentStep = 10, Company = ToDraft(profile) };
         // Рабочая конфигурация уже активирована. При её редактировании проверяем
         // структуру и ссылки, но не требования мастера первичной активации:
         // удаление категории может временно оставить канбан без категорий.
         OnboardingValidator.Validate(normalized, false);
-        await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
         var previous = await ReadDraftAsync(connection, cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         var objectKeysToDelete = new List<string>();
@@ -74,7 +75,6 @@ internal sealed class PostgresCompanyService(
                         relationCount = deletion.Impact.RelationCount
                     }, JsonOptions)));
             }
-            await UpdateProfileAsync(connection, transaction, userId, normalized.Company, cancellationToken);
             await SyncDictionariesAsync(connection, transaction, normalized.Dictionaries, cancellationToken);
             // Keep unchanged dependency identities: deleting them cascades to product links.
             await ExecuteAsync(connection, transaction, """
@@ -175,28 +175,11 @@ internal sealed class PostgresCompanyService(
         CompanyProfile profile,
         CancellationToken cancellationToken)
     {
-        OnboardingValidator.ValidateCompany(new CompanyProfileDraft(
-            profile.OrganizationName, profile.CompanyType, profile.LegalName,
-            profile.Inn, profile.Kpp, profile.Ogrn, profile.Address,
-            profile.Phone, profile.Email));
+        OnboardingValidator.ValidateCompany(new CompanyProfileDraft(profile.OrganizationName));
 
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         var before = await ReadAsync(connection, cancellationToken, transaction);
-
-        await ExecuteAsync(connection, transaction, """
-            UPDATE organization_profile SET
-                organization_name = @name, company_type = @type, legal_name = @legal,
-                inn = @inn, kpp = @kpp, ogrn = @ogrn, address = @address,
-                phone = @phone, email = @email,
-                updated_by = @user_id, updated_at = now()
-            WHERE singleton
-            """, cancellationToken,
-            ("name", profile.OrganizationName.Trim()), ("type", Db(profile.CompanyType)),
-            ("legal", Db(profile.LegalName)), ("inn", Db(profile.Inn)),
-            ("kpp", Db(profile.Kpp)), ("ogrn", Db(profile.Ogrn)),
-            ("address", Db(profile.Address)), ("phone", Db(profile.Phone)),
-            ("email", Db(profile.Email)), ("user_id", userId));
 
         await ExecuteAsync(connection, transaction,
             "UPDATE public.organizations SET name = @name, updated_at = now() WHERE id = @organization_id",
@@ -340,31 +323,6 @@ internal sealed class PostgresCompanyService(
         await using var reader = await command.ExecuteReaderAsync(token);
         while (await reader.ReadAsync(token)) result.Add(reader.GetString(0));
         return result;
-    }
-
-    private async Task UpdateProfileAsync(
-        DbConnection connection,
-        DbTransaction transaction,
-        Guid userId,
-        CompanyProfileDraft profile,
-        CancellationToken token)
-    {
-        await ExecuteAsync(connection, transaction, """
-            UPDATE organization_profile SET
-                organization_name = @name, company_type = @type, legal_name = @legal,
-                inn = @inn, kpp = @kpp, ogrn = @ogrn, address = @address,
-                phone = @phone, email = @email,
-                updated_by = @user_id, updated_at = now()
-            WHERE singleton
-            """, token,
-            ("name", profile.OrganizationName.Trim()), ("type", Db(profile.CompanyType)),
-            ("legal", Db(profile.LegalName)), ("inn", Db(profile.Inn)), ("kpp", Db(profile.Kpp)),
-            ("ogrn", Db(profile.Ogrn)), ("address", Db(profile.Address)),
-            ("phone", Db(profile.Phone)), ("email", Db(profile.Email)),
-            ("user_id", userId));
-        await ExecuteAsync(connection, transaction,
-            "UPDATE public.organizations SET name = @name, updated_at = now() WHERE id = @organization_id",
-            token, ("name", profile.OrganizationName.Trim()), ("organization_id", tenantContext.OrganizationId));
     }
 
     private static async Task SyncDictionariesAsync(
@@ -768,9 +726,7 @@ internal sealed class PostgresCompanyService(
         command.Parameters.Add(parameter);
     }
 
-    private static CompanyProfileDraft ToDraft(CompanyProfile profile) => new(
-        profile.OrganizationName, profile.CompanyType, profile.LegalName, profile.Inn,
-        profile.Kpp, profile.Ogrn, profile.Address, profile.Phone, profile.Email);
+    private static CompanyProfileDraft ToDraft(CompanyProfile profile) => new(profile.OrganizationName);
 
     private sealed record ExistingRow(Guid Id, string Key);
     private sealed record CategoryDeletionPlan(
@@ -778,7 +734,7 @@ internal sealed class PostgresCompanyService(
         CategoryDeletionImpact Impact,
         IReadOnlyList<string> ObjectKeys);
 
-    private static async Task<CompanyProfile> ReadAsync(
+    private async Task<CompanyProfile> ReadAsync(
         DbConnection connection,
         CancellationToken token,
         DbTransaction? transaction = null)
@@ -786,22 +742,15 @@ internal sealed class PostgresCompanyService(
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            SELECT organization_name, company_type, legal_name, inn, kpp, ogrn,
-                   address, phone, email
-            FROM organization_profile
-            WHERE singleton
+            SELECT name FROM public.organizations
+            WHERE id = @organization_id AND deleted_at IS NULL
             """;
+        Add(command, "organization_id", tenantContext.OrganizationId);
         await using var reader = await command.ExecuteReaderAsync(token);
         if (!await reader.ReadAsync(token))
             throw new IdentityException(404, "company_profile_not_found", "Данные компании не найдены.");
-        return new CompanyProfile(
-            reader.GetString(0), NullableString(reader, 1), NullableString(reader, 2),
-            NullableString(reader, 3), NullableString(reader, 4), NullableString(reader, 5),
-            NullableString(reader, 6), NullableString(reader, 7), NullableString(reader, 8));
+        return new CompanyProfile(reader.GetString(0));
     }
-
-    private static string? NullableString(DbDataReader reader, int index) =>
-        reader.IsDBNull(index) ? null : reader.GetString(index);
 
     private static object Db(string? value) =>
         string.IsNullOrWhiteSpace(value) ? DBNull.Value : value.Trim();

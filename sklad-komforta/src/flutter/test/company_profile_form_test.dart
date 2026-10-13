@@ -4,6 +4,20 @@ import 'package:sklad_komforta_app/features/company/company_models.dart';
 import 'package:sklad_komforta_app/features/company/company_profile_form.dart';
 
 void main() {
+  test('старые плоские реквизиты читаются только в юрлицо', () {
+    final profile = CompanyProfileDraft.fromJson({
+      'organizationName': 'Склад',
+      'companyType': 'ИП',
+      'inn': '772994700534',
+      'legalName': 'Иванов Иван',
+    });
+    expect(profile.legalEntity!.companyType, 'ip');
+    expect(profile.legalEntity!.inn, '772994700534');
+    expect(profile.toJson().keys, ['organizationName', 'legalEntity']);
+    expect(CompanyProfileDraft(organizationName: 'Склад').toJson(), {
+      'organizationName': 'Склад',
+    });
+  });
   test('черновик сохраняет реквизиты, банк и НДС первого юрлица', () {
     final profile = CompanyProfileDraft(organizationName: 'Склад');
     profile.ensureLegalEntity()
@@ -14,7 +28,8 @@ void main() {
       ..corrAccount = '30101810000000000225'
       ..vatRates = [null, 20];
     final restored = CompanyProfileDraft.fromJson(profile.toJson());
-    expect(restored.inn, '7707083893');
+    expect(restored.legalEntity!.inn, '7707083893');
+    expect(profile.toJson().containsKey('inn'), isFalse);
     expect(restored.legalEntity!.bankName, 'Банк');
     expect(restored.legalEntity!.bankBik, '044525225');
     expect(restored.legalEntity!.bankAccount, '40702810000000000001');

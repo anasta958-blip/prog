@@ -201,11 +201,12 @@ public static class OnboardingValidator
     public static void ValidateCompany(CompanyProfileDraft company)
     {
         RequireText(company.OrganizationName, 2, 200, "Название организации");
-        ValidateDigits(company.Inn, [10, 12], "ИНН должен содержать 10 или 12 цифр.");
-        ValidateDigits(company.Kpp, [9], "КПП должен содержать 9 цифр.");
-        ValidateDigits(company.Ogrn, [13, 15], "ОГРН должен содержать 13 или 15 цифр.");
-        ValidatePhone(company.Phone);
-        ValidateEmail(company.Email);
+        if (company.LegalEntity is not { } legalEntity) return;
+        ValidateDigits(legalEntity.Inn, [10, 12], "ИНН должен содержать 10 или 12 цифр.");
+        ValidateDigits(legalEntity.Kpp, [9], "КПП должен содержать 9 цифр.");
+        ValidateDigits(legalEntity.Ogrn, [13, 15], "ОГРН должен содержать 13 или 15 цифр.");
+        ValidatePhone(legalEntity.Phone);
+        ValidateEmail(legalEntity.Email);
     }
 
     /// <summary>

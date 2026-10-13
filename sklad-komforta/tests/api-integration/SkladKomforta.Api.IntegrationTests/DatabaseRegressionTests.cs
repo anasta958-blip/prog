@@ -68,6 +68,34 @@ public sealed partial class DatabaseRegressionTests
         Assert.Equal(firstCompany.BankAccount, Text(firstCompanies[0]!, "bankAccount"));
         Assert.True(firstCompanies[0]!["isDefault"]!.GetValue<bool>());
         Assert.Equal(3, firstCompanies[0]!["vatRates"]!.AsArray().Count);
+        await using (var schemaConnection = new NpgsqlConnection(database.ConnectionString))
+        {
+            await schemaConnection.OpenAsync();
+            await using var profileTables = new NpgsqlCommand("""
+                SELECT count(*) FROM information_schema.tables
+                WHERE table_schema LIKE 'tenant_%'
+                  AND table_name IN ('organization_profile', 'organization_profile_legacy')
+                """, schemaConnection);
+            Assert.Equal(0L, await profileTables.ExecuteScalarAsync());
+        }
+        var workspaceProfile = await Send(staff, HttpMethod.Get, "/company/profile");
+        Assert.Single(workspaceProfile.AsObject());
+        var initialConfiguration = await Send(staff, HttpMethod.Get, "/company/configuration");
+        Assert.Single(initialConfiguration["company"]!.AsObject());
+        // Старая конфигурация не может перезаписать реквизиты или название пространства.
+        var savedConfiguration = await Send(staff, HttpMethod.Put, "/company/configuration", new
+        {
+            draft = draft with { Company = draft.Company with { OrganizationName = "Устаревшее название" } },
+            deleteCategoryData = Array.Empty<string>(),
+        });
+        Assert.Equal("Проверка проекта", Text(savedConfiguration["company"]!, "organizationName"));
+        Assert.Single(savedConfiguration["company"]!.AsObject());
+        var unchangedCompany = (await Send(staff, HttpMethod.Get, "/company/legal-entities")).AsArray()[0]!;
+        Assert.Equal(firstCompany.BankAccount, Text(unchangedCompany, "bankAccount"));
+        // Переименование рабочего пространства не меняет юрлицо.
+        await Send(staff, HttpMethod.Put, "/company/profile", new { organizationName = "Новое рабочее пространство" });
+        Assert.Equal(firstCompany.Name, Text((await Send(staff, HttpMethod.Get, "/company/legal-entities")).AsArray()[0]!, "name"));
+        await Send(staff, HttpMethod.Put, "/company/profile", new { organizationName = "Проверка проекта" });
         foreach (var path in new[]
         {
             "/company/profile", "/company/configuration", "/company/lifecycle",
@@ -444,7 +472,7 @@ public sealed partial class DatabaseRegressionTests
     }
 
     private static OrganizationOnboardingDraft Draft() => new(
-        9, new CompanyProfileDraft("Проверка проекта", "ООО", null, null, null, null, null, null, null),
+        9, new CompanyProfileDraft("Проверка проекта"),
         [new WorkflowDraft("sales", "Предложения", [
             new WorkflowColumnDraft("start", "Подготовка", "#4D8DFF", ["quote", "prequote"]),
             new WorkflowColumnDraft("finish", "Готово", "#58D68D"),

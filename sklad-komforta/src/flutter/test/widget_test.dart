@@ -215,7 +215,7 @@ void main() {
     },
   );
 
-  testWidgets('onboarding использует выбранный девятишаговый вариант 2', (
+  testWidgets('индикатор мастера совпадает с порядком десяти шагов', (
     tester,
   ) async {
     tester.view.devicePixelRatio = 1;
@@ -241,8 +241,30 @@ void main() {
     expect(find.text('1. Компания'), findsWidgets);
     expect(find.text('Предварительный просмотр'), findsNothing);
     expect(find.text('Сохранить и продолжить'), findsOneWidget);
-    expect(find.text('5. Правила и расчёты'), findsWidgets);
-    expect(find.text('6. Зависимости'), findsOneWidget);
+    expect(find.text('4. Справочники'), findsOneWidget);
+    expect(find.text('6. Правила и расчёты'), findsOneWidget);
+    expect(find.text('7. Зависимости'), findsOneWidget);
+
+    for (final scale in [1.0, 1.3]) {
+      tester.platformDispatcher.textScaleFactorTestValue = scale;
+      for (final width in [1050.0, 1205.0, 1366.0, 1920.0]) {
+        tester.view.physicalSize = Size(width, 1000);
+        await tester.pumpAndSettle();
+        final first = tester.getCenter(
+          find.byKey(const ValueKey('onboarding-step-1')),
+        );
+        for (var step = 2; step <= 10; step++) {
+          final circle = find.byKey(ValueKey('onboarding-step-$step'));
+          expect(tester.getCenter(circle).dy, closeTo(first.dy, 0.01));
+        }
+        expect(tester.takeException(), isNull);
+      }
+    }
+    tester.platformDispatcher.clearTextScaleFactorTestValue();
+    tester.view.physicalSize = const Size(600, 1000);
+    await tester.pumpAndSettle();
+    expect(find.text('1 из 10 · Компания'), findsOneWidget);
+    expect(tester.takeException(), isNull);
 
     controller.dispose();
   });

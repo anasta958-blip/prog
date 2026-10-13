@@ -3,17 +3,8 @@ namespace SkladKomforta.Application.Company;
 using System.Text.Json;
 using SkladKomforta.Application.Onboarding;
 
-/// <summary>Рабочие реквизиты организации после завершения первичной настройки.</summary>
-public sealed record CompanyProfile(
-    string OrganizationName,
-    string? CompanyType,
-    string? LegalName,
-    string? Inn,
-    string? Kpp,
-    string? Ogrn,
-    string? Address,
-    string? Phone,
-    string? Email);
+/// <summary>Общие данные рабочего пространства. Реквизиты принадлежат только юрлицам.</summary>
+public sealed record CompanyProfile(string OrganizationName);
 
 /// <summary>Общий срок действия организации, применяемый ко всем её аккаунтам.</summary>
 public sealed record OrganizationLifecycle(DateTimeOffset ActiveUntil, bool IsFrozen, int EmployeeLimit = 5, int EmployeeCount = 0);

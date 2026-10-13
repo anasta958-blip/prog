@@ -1,9 +1,0 @@
-  SkladKomforta.Domain -> E:\Program Files\XAMPP\htdocs\sklad-komforta\src\backend\SkladKomforta.Domain\bin\Debug\net10.0\SkladKomforta.Domain.dll
-  SkladKomforta.Application -> E:\Program Files\XAMPP\htdocs\sklad-komforta\src\backend\SkladKomforta.Application\bin\Debug\net10.0\SkladKomforta.Application.dll
-  SkladKomforta.Infrastructure -> E:\Program Files\XAMPP\htdocs\sklad-komforta\src\backend\SkladKomforta.Infrastructure\bin\Debug\net10.0\SkladKomforta.Infrastructure.dll
-  SkladKomforta.Api -> E:\Program Files\XAMPP\htdocs\sklad-komforta\src\backend\SkladKomforta.Api\bin\Debug\net10.0\SkladKomforta.Api.dll
-  SkladKomforta.Api.IntegrationTests -> E:\Program Files\XAMPP\htdocs\sklad-komforta\tests\api-integration\SkladKomforta.Api.IntegrationTests\bin\Debug\net10.0\SkladKomforta.Api.IntegrationTests.dll
-Тестовый запуск для E:\Program Files\XAMPP\htdocs\sklad-komforta\tests\api-integration\SkladKomforta.Api.IntegrationTests\bin\Debug\net10.0\SkladKomforta.Api.IntegrationTests.dll (.NETCoreApp,Version=v10.0)
-Общее количество тестовых файлов (1), соответствующих указанному шаблону.
-
-Пройден!   : не пройдено     0, пройдено     5, пропущено     0, всего     5, длительность 31 s. - SkladKomforta.Api.IntegrationTests.dll (net10.0)

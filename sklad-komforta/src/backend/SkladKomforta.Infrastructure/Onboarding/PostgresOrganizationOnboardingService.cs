@@ -39,7 +39,6 @@ internal sealed class PostgresOrganizationOnboardingService(
         OrganizationOnboardingDraft draft,
         CancellationToken cancellationToken)
     {
-        draft = SynchronizeCompany(draft);
         OnboardingValidator.Validate(draft, false);
         if (draft.Company.LegalEntity is { } legalEntity)
             PostgresCompanyWorkspaceService.ValidateLegalEntity(legalEntity);
@@ -78,12 +77,11 @@ internal sealed class PostgresOrganizationOnboardingService(
         var state = await ReadStateAsync(connection, cancellationToken);
         if (state.IsCompleted) return state;
 
-        var draft = SynchronizeCompany(state.Draft) with { CurrentStep = 10 };
+        var draft = state.Draft with { CurrentStep = 10 };
         OnboardingValidator.Validate(draft, true);
         if (draft.Company.LegalEntity is { } legalEntity)
             PostgresCompanyWorkspaceService.ValidateLegalEntity(legalEntity);
         await ClearMaterializedConfigurationAsync(connection, transaction, cancellationToken);
-        await SaveProfileAsync(connection, transaction, userId, draft.Company, cancellationToken);
         if (draft.Company.LegalEntity is { } firstCompany)
         {
             await PostgresCompanyWorkspaceService.InsertLegalEntityAsync(
@@ -91,14 +89,12 @@ internal sealed class PostgresOrganizationOnboardingService(
         }
         else
         {
-            // Совместимость с черновиками старых клиентов, где было только ядро реквизитов.
+            // Старые пустые черновики содержат только название рабочего пространства.
             await ExecuteAsync(connection, transaction, """
-                INSERT INTO companies (name, company_type, legal_name, inn, kpp, ogrn, address, phone, email, is_default, created_by)
-                SELECT organization_name, CASE WHEN lower(company_type) IN ('ip', 'ип') THEN 'ip' ELSE 'ooo' END,
-                    legal_name, inn, kpp, ogrn, address, phone, email, true, @actor
-                FROM organization_profile WHERE singleton
-                  AND NOT EXISTS (SELECT 1 FROM companies WHERE deleted_at IS NULL)
-                """, cancellationToken, ("actor", userId));
+                INSERT INTO companies (name, company_type, is_default, created_by)
+                SELECT @name, 'ooo', true, @actor
+                WHERE NOT EXISTS (SELECT 1 FROM companies)
+                """, cancellationToken, ("name", draft.Company.OrganizationName.Trim()), ("actor", userId));
         }
         var categoryIds = await SaveCatalogAsync(connection, transaction, draft.Categories, cancellationToken);
         await SaveWorkflowsAsync(
@@ -122,8 +118,10 @@ internal sealed class PostgresOrganizationOnboardingService(
             cancellationToken,
             ("name", draft.Company.OrganizationName.Trim()),
             ("organization_id", tenantContext.OrganizationId));
+        // После активации реквизиты живут только в companies, не в конфигурации.
+        draft = draft with { Company = new CompanyProfileDraft(draft.Company.OrganizationName) };
         await ExecuteAsync(connection, transaction,
-            "UPDATE onboarding_draft SET current_step = 9, payload = CAST(@payload AS jsonb), updated_by = @user_id, updated_at = now() WHERE singleton",
+            "UPDATE onboarding_draft SET current_step = 10, payload = CAST(@payload AS jsonb), updated_by = @user_id, updated_at = now() WHERE singleton",
             cancellationToken,
             ("payload", JsonSerializer.Serialize(draft, JsonOptions)),
             ("user_id", userId));
@@ -135,17 +133,6 @@ internal sealed class PostgresOrganizationOnboardingService(
 
         await transaction.CommitAsync(cancellationToken);
         return new OrganizationOnboardingState(draft, true, DateTimeOffset.UtcNow);
-    }
-
-    private static OrganizationOnboardingDraft SynchronizeCompany(OrganizationOnboardingDraft draft)
-    {
-        if (draft.Company.LegalEntity is not { } company) return draft;
-        return draft with { Company = draft.Company with
-        {
-            CompanyType = company.CompanyType, LegalName = company.LegalName,
-            Inn = company.Inn, Kpp = company.Kpp, Ogrn = company.Ogrn,
-            Address = company.Address, Phone = company.Phone, Email = company.Email,
-        } };
     }
 
     /// <summary>Возвращает сохранённый draft либо безопасный стартовый набор.</summary>
@@ -172,6 +159,8 @@ internal sealed class PostgresOrganizationOnboardingService(
             : JsonSerializer.Deserialize<OrganizationOnboardingDraft>(reader.GetString(2), JsonOptions)
               ?? CreateDefaultDraft(name);
         draft = RemoveRetiredFields(draft);
+        if (completedAt.HasValue)
+            draft = draft with { Company = new CompanyProfileDraft(name) };
         return new OrganizationOnboardingState(draft, completedAt.HasValue, completedAt);
     }
 
@@ -241,25 +230,6 @@ internal sealed class PostgresOrganizationOnboardingService(
             await ExecuteAsync(connection, transaction, $"DELETE FROM {table}", token);
         await ExecuteAsync(connection, transaction, "DELETE FROM roles WHERE NOT is_system", token);
     }
-
-    private static Task SaveProfileAsync(DbConnection connection, DbTransaction transaction, Guid userId, CompanyProfileDraft profile, CancellationToken token) =>
-        ExecuteAsync(connection, transaction, """
-            INSERT INTO organization_profile
-                (singleton, organization_name, company_type, legal_name, inn, kpp, ogrn,
-                 address, phone, email, updated_by, updated_at)
-            VALUES (true, @name, @type, @legal, @inn, @kpp, @ogrn, @address, @phone,
-                    @email, @user_id, now())
-            ON CONFLICT (singleton) DO UPDATE SET
-                organization_name = EXCLUDED.organization_name, company_type = EXCLUDED.company_type,
-                legal_name = EXCLUDED.legal_name, inn = EXCLUDED.inn, kpp = EXCLUDED.kpp,
-                ogrn = EXCLUDED.ogrn, address = EXCLUDED.address, phone = EXCLUDED.phone,
-                email = EXCLUDED.email,
-                updated_by = EXCLUDED.updated_by, updated_at = now()
-            """, token,
-            ("name", profile.OrganizationName.Trim()), ("type", Db(profile.CompanyType)),
-            ("legal", Db(profile.LegalName)), ("inn", Db(profile.Inn)), ("kpp", Db(profile.Kpp)),
-            ("ogrn", Db(profile.Ogrn)), ("address", Db(profile.Address)), ("phone", Db(profile.Phone)),
-            ("email", Db(profile.Email)), ("user_id", userId));
 
     private static async Task SaveWorkflowsAsync(
         DbConnection connection,
@@ -502,7 +472,7 @@ internal sealed class PostgresOrganizationOnboardingService(
 
         return new OrganizationOnboardingDraft(
             1,
-            new CompanyProfileDraft(name, null, null, null, null, null, null, null, null),
+            new CompanyProfileDraft(name),
             [
                 Workflow("quote", "Коммерческие предложения", categories, "Составить КП", "Согласовать", "Договор"),
                 Workflow("preliminary_quote", "Предварительные КП", categories, "Составить ПКП", "ПКП согласовано"),

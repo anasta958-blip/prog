@@ -413,13 +413,13 @@ void main() {
 
     // Изменение настроек перечитывает и конфигурацию с профилем.
     gateway.configurationValue = OrganizationOnboardingDraft.initial()
-      ..company.email = 'office@example.test';
+      ..company.organizationName = 'Новое название';
     final previous = controller.configuration;
     realtime.emit('configuration');
     await settle();
     expect(gateway.configurationRequests, configurationRequests + 1);
     expect(identical(controller.configuration, previous), isFalse);
-    expect(controller.profile?.email, 'office@example.test');
+    expect(controller.profile?.organizationName, 'Новое название');
 
     controller.dispose();
     await realtime.close();
@@ -722,8 +722,7 @@ final class _MemoryCompanyGateway implements CompanyGateway {
 
   @override
   Future<CompanyProfileDraft> getProfile(String accessToken) async =>
-      CompanyProfileDraft(organizationName: 'Склад Комфорта')
-        ..companyType = 'ООО';
+      CompanyProfileDraft(organizationName: 'Склад Комфорта');
 
   @override
   Future<OrganizationOnboardingDraft> getConfiguration(
@@ -731,8 +730,9 @@ final class _MemoryCompanyGateway implements CompanyGateway {
   ) async {
     configurationRequests++;
     final draft = configurationValue ?? OrganizationOnboardingDraft.initial();
-    draft.company.organizationName = 'Склад Комфорта';
-    draft.company.companyType = 'ООО';
+    if (draft.company.organizationName.isEmpty) {
+      draft.company.organizationName = 'Склад Комфорта';
+    }
     return OrganizationOnboardingDraft.fromJson(draft.toJson());
   }
 

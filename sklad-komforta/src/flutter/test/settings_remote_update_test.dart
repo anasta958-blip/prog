@@ -59,7 +59,7 @@ void main() {
     expect(find.textContaining(unused), findsOneWidget);
 
     // Другой пользователь сохранил настройки: правка остаётся, есть предупреждение.
-    server.value = _draft(selected: true, email: 'other@example.test');
+    server.value = _draft(selected: true, organizationName: 'Другое название');
     await tester.pumpAndSettle();
     expect(find.textContaining(unused), findsOneWidget);
     expect(
@@ -113,7 +113,7 @@ void main() {
     await expandWorkflow();
 
     // Правок нет: форма сразу показывает версию другого пользователя.
-    server.value = _draft(selected: false, email: 'other@example.test');
+    server.value = _draft(selected: false, organizationName: 'Другое название');
     await tester.pumpAndSettle();
     expect(
       find.textContaining('Настройки изменил другой пользователь'),
@@ -129,7 +129,7 @@ void main() {
   });
 }
 
-OrganizationOnboardingDraft _draft({required bool selected, String? email}) {
+OrganizationOnboardingDraft _draft({required bool selected, String? organizationName}) {
   final draft = OrganizationOnboardingDraft.initial()
     ..categories.add(
       CatalogCategoryDraft(
@@ -160,7 +160,7 @@ OrganizationOnboardingDraft _draft({required bool selected, String? email}) {
         ],
       ),
     );
-  draft.company.email = email;
+  draft.company.organizationName = organizationName ?? 'Склад';
   return draft;
 }
 

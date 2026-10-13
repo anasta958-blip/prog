@@ -3389,23 +3389,15 @@ final class _Progress extends StatelessWidget {
   final int step;
   final bool wide;
   final ValueChanged<int> onSelect;
-  static const labels = [
-    'Компания',
-    'Канбаны',
-    'Каталог',
-    'Поля',
-    'Правила и расчёты',
-    'Зависимости',
-    'Роли',
-    'Справочники',
-    'Внешняя отправка',
-    'Проверка',
-  ];
+  static final labels = _OrganizationOnboardingPageState._steps
+      .map((item) => item.$1)
+      .toList(growable: false);
   @override
   Widget build(BuildContext context) => Padding(
     padding: EdgeInsets.symmetric(horizontal: wide ? 28 : 16, vertical: 12),
     child: wide
         ? Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               for (var index = 0; index < labels.length; index++) ...[
                 Expanded(
@@ -3441,6 +3433,7 @@ final class _Progress extends StatelessWidget {
                         const SizedBox(height: 8),
                         Text(
                           '${index + 1}. ${labels[index]}',
+                          textAlign: TextAlign.center,
                           style: TextStyle(
                             color: index == step
                                 ? const Color(0xFF4D8DFF)
@@ -3460,14 +3453,14 @@ final class _Progress extends StatelessWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  '${step + 1} из 9 · ${labels[step]}',
+                  '${step + 1} из ${labels.length} · ${labels[step]}',
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
               ),
               SizedBox(
                 width: 90,
                 child: LinearProgressIndicator(
-                  value: (step + 1) / 9,
+                  value: (step + 1) / labels.length,
                   minHeight: 5,
                 ),
               ),
@@ -3487,6 +3480,7 @@ final class _StepCircle extends StatelessWidget {
   final bool completed;
   @override
   Widget build(BuildContext context) => Container(
+    key: ValueKey('onboarding-step-${index + 1}'),
     width: 32,
     height: 32,
     alignment: Alignment.center,

@@ -27,7 +27,6 @@ final class _CompanyProfileFormState extends State<CompanyProfileForm> {
   String? error;
 
   void changed() {
-    widget.profile.syncLegalEntity();
     widget.onChanged();
   }
 
@@ -80,7 +79,7 @@ final class _CompanyProfileFormState extends State<CompanyProfileForm> {
         key: ValueKey(revision),
         children: [
           companyTextField(
-            'Название организации',
+            'Название рабочего пространства',
             widget.profile.organizationName,
             (value) {
               widget.profile.organizationName = value;
@@ -88,6 +87,12 @@ final class _CompanyProfileFormState extends State<CompanyProfileForm> {
             },
             required: true,
             maximumLength: 200,
+          ),
+          const SizedBox(height: 14),
+          const Text('Первое юридическое лицо'),
+          const SizedBox(height: 6),
+          const Text(
+            'Реквизиты сохранятся в разделе «Юрлица». Название рабочего пространства может отличаться от названия исполнителя.',
           ),
           const SizedBox(height: 14),
           LegalEntityFields(

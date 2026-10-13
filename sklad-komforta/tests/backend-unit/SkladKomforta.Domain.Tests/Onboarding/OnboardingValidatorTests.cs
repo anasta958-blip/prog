@@ -239,11 +239,7 @@ public sealed class OnboardingValidatorTests
         {
             Company = ValidDraft().Company with
             {
-                Inn = inn,
-                Kpp = kpp,
-                Ogrn = ogrn,
-                Phone = phone,
-                Email = email,
+                LegalEntity = LegalDetails(inn, kpp, ogrn, phone, email),
             },
         };
 
@@ -261,11 +257,8 @@ public sealed class OnboardingValidatorTests
         {
             Company = source.Company with
             {
-                Inn = "772994700534",
-                Kpp = "123456789",
-                Ogrn = "323508100309129",
-                Phone = "+7 (925) 625-91-15",
-                Email = "office@example.ru",
+                LegalEntity = LegalDetails("772994700534", "123456789",
+                    "323508100309129", "+7 (925) 625-91-15", "office@example.ru"),
             },
         };
 
@@ -740,9 +733,14 @@ public sealed class OnboardingValidatorTests
         Assert.Equal("onboarding_rule_target_conflict", exception.Code);
     }
 
+    private static SkladKomforta.Application.Company.SaveLegalEntityRequest LegalDetails(
+        string? inn, string? kpp, string? ogrn, string? phone, string? email) => new(
+            "Склад", "ooo", null, inn, kpp, ogrn, null, phone, email,
+            null, null, null, null, null, null, null, null, null, null, [null], true);
+
     private static OrganizationOnboardingDraft ValidDraft() => new(
         9,
-        new CompanyProfileDraft("Склад Комфорта", "ООО", null, null, null, null, null, null, null),
+        new CompanyProfileDraft("Склад Комфорта"),
         [
             new WorkflowDraft(
                 "quote",
