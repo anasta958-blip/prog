@@ -5,6 +5,9 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Закрытый ключ хранится вне репозитория и передаётся только процессу сборки.
+val releaseSigningDirectory = System.getenv("SKLAD_ANDROID_SIGNING_DIR")?.let { file(it) }
+
 android {
     namespace = "com.skladkomforta.sklad_komforta_app"
     // flutter_secure_storage 11 требует Android API 37 только для компиляции.
@@ -22,7 +25,6 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.skladkomforta.sklad_komforta_app"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
@@ -32,12 +34,30 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (releaseSigningDirectory != null) {
+            create("release") {
+                storeFile = releaseSigningDirectory.resolve("release.p12")
+                storeType = "PKCS12"
+                storePassword = releaseSigningDirectory.resolve("password.txt").readText().trim()
+                keyPassword = storePassword
+                keyAlias = "skladkomforta"
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release")
         }
+    }
+}
+
+gradle.taskGraph.whenReady {
+    if (releaseSigningDirectory == null && allTasks.any {
+        it.project.path == ":app" && it.name.contains("Release")
+    }) {
+        throw GradleException("Для release задайте SKLAD_ANDROID_SIGNING_DIR. См. scripts/build_android_apk.py.")
     }
 }
 

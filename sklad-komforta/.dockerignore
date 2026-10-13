@@ -4,6 +4,10 @@
 .env
 .env.*
 .env.server.secrets
+**/*.p12
+**/*.jks
+**/*.keystore
+.android-signing
 .server-operation.lock
 backups
 **/bin
