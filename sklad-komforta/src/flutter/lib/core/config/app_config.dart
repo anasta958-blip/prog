@@ -39,10 +39,20 @@ final class AppConfig {
 
   /// Использует явный Web-адрес либо безопасно выводит его из адреса API.
   /// Для локального API на 8080 Flutter Web запускается на согласованном 3000.
-  String get resolvedPublicAppBaseUrl {
+  String get resolvedPublicAppBaseUrl => resolvePublicAppBaseUrl(Uri.base);
+
+  /// Относительный Web API использует origin открытой страницы, не пустой host.
+  String resolvePublicAppBaseUrl(Uri pageUri) {
     final configured = publicAppBaseUrl.trim();
     if (configured.isNotEmpty) return configured;
     final api = Uri.parse(apiBaseUrl);
+    if (!api.hasScheme && !api.hasAuthority) {
+      return Uri(
+        scheme: pageUri.scheme,
+        host: pageUri.host,
+        port: pageUri.hasPort ? pageUri.port : null,
+      ).toString();
+    }
     return Uri(
       scheme: api.scheme,
       host: api.host,

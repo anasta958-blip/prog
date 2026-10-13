@@ -1,0 +1,200 @@
+00:00 +0: loading E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/app_config_test.dart
+00:00 +0: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/app_config_test.dart: относительный Web API использует полный origin страницы
+00:00 +1: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/app_config_test.dart: публичный адрес локальной Web-сборки выводится из адреса API
+00:00 +2: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/app_config_test.dart: production API без порта использует тот же публичный хост
+00:00 +3: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/app_config_test.dart: явный публичный адрес имеет приоритет
+00:00 +4: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/app_notice_test.dart: всплывающие уведомления показываются пять секунд
+00:00 +5: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/app_notice_test.dart: уведомление скрывается и новое получает свои пять секунд
+00:00 +6: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/app_number_field_test.dart: денежное поле отображает разделители без изменения значения
+00:00 +7: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/app_number_field_test.dart: денежное поле отображает разделители без изменения значения
+00:00 +8: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/app_number_field_test.dart: денежное поле отображает разделители без изменения значения
+00:00 +9: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/app_number_field_test.dart: денежное поле отображает разделители без изменения значения
+00:00 +10: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/app_number_field_test.dart: денежное поле отображает разделители без изменения значения
+00:00 +11: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/app_number_field_test.dart: денежное поле отображает разделители без изменения значения
+00:01 +12: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/app_select_field_test.dart: ширина меню совпадает с полем 375.0
+00:01 +13: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/app_select_field_test.dart: ширина меню совпадает с полем 375.0
+00:01 +14: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/catalog_controller_test.dart: catalog search survives leaving and returning and can be cleared
+00:01 +15: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/catalog_controller_test.dart: catalog search survives leaving and returning and can be cleared
+00:01 +16: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/catalog_controller_test.dart: catalog search survives leaving and returning and can be cleared
+00:01 +17: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/catalog_controller_test.dart: catalog search survives leaving and returning and can be cleared
+00:01 +18: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/catalog_controller_test.dart: catalog search survives leaving and returning and can be cleared
+00:01 +19: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/catalog_controller_test.dart: catalog search survives leaving and returning and can be cleared
+00:01 +20: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/catalog_controller_test.dart: catalog search survives leaving and returning and can be cleared
+00:01 +21: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/catalog_controller_test.dart: catalog search survives leaving and returning and can be cleared
+00:01 +22: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/catalog_controller_test.dart: catalog search survives leaving and returning and can be cleared
+00:01 +23: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/catalog_controller_test.dart: catalog search survives leaving and returning and can be cleared
+00:01 +24: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/catalog_controller_test.dart: catalog search survives leaving and returning and can be cleared
+00:01 +25: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_controller_test.dart: роль директора показывает полный доступ на узкой и широкой раскладке
+00:01 +26: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_controller_test.dart: роль директора показывает полный доступ на узкой и широкой раскладке
+00:01 +27: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_controller_test.dart: роль директора показывает полный доступ на узкой и широкой раскладке
+00:01 +28: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_controller_test.dart: роль директора показывает полный доступ на узкой и широкой раскладке
+00:01 +29: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_controller_test.dart: роль директора показывает полный доступ на узкой и широкой раскладке
+00:01 +30: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_controller_test.dart: роль директора показывает полный доступ на узкой и широкой раскладке
+00:02 +31: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_controller_test.dart: роль директора показывает полный доступ на узкой и широкой раскладке
+00:02 +32: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:02 +33: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:02 +34: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:02 +35: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:02 +36: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:02 +37: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:02 +38: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:02 +39: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:02 +40: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:02 +41: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:02 +42: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:02 +43: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:02 +44: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:02 +45: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:02 +46: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:02 +47: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:02 +48: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:02 +49: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:03 +50: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:03 +51: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:03 +52: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:03 +53: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:03 +54: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:03 +55: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:03 +56: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:03 +57: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:03 +58: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:03 +59: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:03 +60: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:03 +61: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:03 +62: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:03 +63: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:03 +64: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:03 +65: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:03 +66: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:03 +67: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:03 +68: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:03 +69: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:03 +70: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:03 +71: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:03 +72: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:03 +73: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:03 +74: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:03 +75: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/kanban_controller_test.dart: панель сохраняет порядок полей и высоту бренда
+00:03 +76: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/kanban_controller_test.dart: панель сохраняет порядок полей и высоту бренда
+00:03 +77: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/kanban_controller_test.dart: панель сохраняет порядок полей и высоту бренда
+00:03 +78: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_controller_test.dart: непустая категория удаляется только после явного подтверждения
+00:03 +79: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_controller_test.dart: непустая категория удаляется только после явного подтверждения
+00:03 +80: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/kanban_controller_test.dart: выход из документа восстанавливает обе оси канбана
+00:03 +81: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/kanban_controller_test.dart: выход из документа восстанавливает обе оси канбана
+00:03 +82: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/kanban_controller_test.dart: выход из документа восстанавливает обе оси канбана
+00:03 +83: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/kanban_controller_test.dart: выход из документа восстанавливает обе оси канбана
+00:03 +84: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/kanban_controller_test.dart: выход из документа восстанавливает обе оси канбана
+00:03 +85: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/kanban_controller_test.dart: выход из документа восстанавливает обе оси канбана
+00:03 +86: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/kanban_controller_test.dart: выход из документа восстанавливает обе оси канбана
+00:03 +87: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/kanban_controller_test.dart: выход из документа восстанавливает обе оси канбана
+00:03 +88: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/kanban_controller_test.dart: выход из документа восстанавливает обе оси канбана
+00:03 +89: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: новая комплектация показывает фильтры и загрузку счетов
+00:04 +90: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: новая комплектация показывает фильтры и загрузку счетов
+00:04 +91: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: новая комплектация показывает фильтры и загрузку счетов
+00:04 +92: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: новая комплектация показывает фильтры и загрузку счетов
+00:04 +93: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: новая комплектация показывает фильтры и загрузку счетов
+00:04 +94: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: новая комплектация показывает фильтры и загрузку счетов
+00:04 +95: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: новая комплектация показывает фильтры и загрузку счетов
+00:04 +96: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/outbound_test.dart: раздел «Внешняя отправка»: топики, сохранение и проверка
+00:04 +97: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/outbound_test.dart: раздел «Внешняя отправка»: топики, сохранение и проверка
+00:04 +98: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/outbound_test.dart: раздел «Внешняя отправка»: топики, сохранение и проверка
+00:05 +99: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/outbound_test.dart: раздел «Внешняя отправка»: топики, сохранение и проверка
+00:05 +100: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/outbound_test.dart: раздел «Внешняя отправка»: топики, сохранение и проверка
+00:05 +101: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/outbound_test.dart: раздел «Внешняя отправка»: топики, сохранение и проверка
+00:05 +102: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/outbound_test.dart: раздел «Внешняя отправка»: топики, сохранение и проверка
+00:05 +103: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/outbound_test.dart: раздел «Внешняя отправка»: топики, сохранение и проверка
+00:05 +104: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/outbound_test.dart: раздел «Внешняя отправка»: топики, сохранение и проверка
+00:05 +105: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/outbound_test.dart: раздел «Внешняя отправка»: топики, сохранение и проверка
+00:05 +106: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/outbound_test.dart: раздел «Внешняя отправка»: топики, сохранение и проверка
+00:05 +107: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/outbound_test.dart: раздел «Внешняя отправка»: топики, сохранение и проверка
+00:05 +108: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/outbound_test.dart: раздел «Внешняя отправка»: топики, сохранение и проверка
+00:05 +109: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/outbound_test.dart: раздел «Внешняя отправка»: топики, сохранение и проверка
+00:05 +110: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/outbound_test.dart: раздел «Внешняя отправка»: топики, сохранение и проверка
+00:05 +111: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/outbound_test.dart: раздел «Внешняя отправка»: топики, сохранение и проверка
+00:05 +112: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/outbound_test.dart: раздел «Внешняя отправка»: топики, сохранение и проверка
+00:05 +113: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/outbound_test.dart: раздел «Внешняя отправка»: топики, сохранение и проверка
+00:05 +114: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/outbound_test.dart: раздел «Внешняя отправка»: топики, сохранение и проверка
+00:05 +115: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/outbound_test.dart: раздел «Внешняя отправка»: топики, сохранение и проверка
+00:05 +116: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/outbound_test.dart: раздел «Внешняя отправка»: топики, сохранение и проверка
+00:05 +117: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: редактор комплектации: шапка, фильтры, счета и таблица
+00:05 +118: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: редактор комплектации: шапка, фильтры, счета и таблица
+00:05 +119: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: редактор комплектации: шапка, фильтры, счета и таблица
+00:05 +120: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: редактор комплектации: шапка, фильтры, счета и таблица
+00:05 +121: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: редактор комплектации: шапка, фильтры, счета и таблица
+00:05 +122: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: редактор комплектации: шапка, фильтры, счета и таблица
+00:05 +123: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: редактор комплектации: шапка, фильтры, счета и таблица
+00:05 +124: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: редактор комплектации: шапка, фильтры, счета и таблица
+00:05 +125: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: редактор комплектации: шапка, фильтры, счета и таблица
+00:05 +126: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: редактор комплектации: шапка, фильтры, счета и таблица
+00:05 +127: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: редактор комплектации: шапка, фильтры, счета и таблица
+00:05 +128: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: редактор комплектации: шапка, фильтры, счета и таблица
+00:05 +129: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:05 +130: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:06 +131: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:06 +132: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:06 +133: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:06 +134: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:06 +135: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:06 +136: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:06 +137: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:06 +138: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:06 +139: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:06 +140: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:06 +141: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:06 +142: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:06 +143: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:06 +144: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:06 +145: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:06 +146: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:07 +147: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:07 +148: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:07 +149: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:07 +150: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:07 +151: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:07 +152: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:07 +153: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:07 +154: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:07 +155: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:07 +156: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:07 +157: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:07 +158: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:07 +159: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:08 +160: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:08 +161: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:08 +162: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:08 +163: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:08 +164: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:08 +165: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:09 +166: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:09 +167: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:09 +168: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:09 +169: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:09 +170: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:09 +171: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: типы и варианты доступны списками на всех ширинах
+00:09 +172: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/workflow_transfer_settings_test.dart: столбец-триггер переноса и дозаказ настраиваются в канбанах
+00:09 +173: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/workflow_transfer_settings_test.dart: столбец-триггер переноса и дозаказ настраиваются в канбанах
+00:09 +174: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/workflow_transfer_settings_test.dart: столбец-триггер переноса и дозаказ настраиваются в канбанах
+00:09 +175: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/workflow_transfer_settings_test.dart: столбец-триггер переноса и дозаказ настраиваются в канбанах
+00:09 +176: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/workflow_transfer_settings_test.dart: столбец-триггер переноса и дозаказ настраиваются в канбанах
+00:09 +177: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/workflow_transfer_settings_test.dart: столбец-триггер переноса и дозаказ настраиваются в канбанах
+00:09 +178: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/workflow_transfer_settings_test.dart: столбец-триггер переноса и дозаказ настраиваются в канбанах
+00:09 +179: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/workflow_transfer_settings_test.dart: столбец-триггер переноса и дозаказ настраиваются в канбанах
+00:09 +180: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/workflow_transfer_settings_test.dart: столбец-триггер переноса и дозаказ настраиваются в канбанах
+00:09 +181: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/workflow_transfer_settings_test.dart: столбец-триггер переноса и дозаказ настраиваются в канбанах
+00:09 +182: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/workflow_transfer_settings_test.dart: столбец-триггер переноса и дозаказ настраиваются в канбанах
+00:10 +183: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/workflow_transfer_settings_test.dart: столбец-триггер переноса и дозаказ настраиваются в канбанах
+00:10 +184: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/workflow_transfer_settings_test.dart: столбец-триггер переноса и дозаказ настраиваются в канбанах
+00:10 +185: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/workflow_transfer_settings_test.dart: столбец-триггер переноса и дозаказ настраиваются в канбанах
+00:10 +186: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: ПКП использует поля канбана и раскрывает загруженный вариант
+00:10 +187: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: ПКП использует поля канбана и раскрывает загруженный вариант
+00:10 +188: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: ПКП использует поля канбана и раскрывает загруженный вариант
+00:11 +189: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: ПКП использует поля канбана и раскрывает загруженный вариант
+00:11 +190: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: ПКП использует поля канбана и раскрывает загруженный вариант
+00:11 +191: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/widget_test.dart: каталог использует карточный вариант и постоянный редактор
+00:11 +192: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/widget_test.dart: каталог использует карточный вариант и постоянный редактор
+00:11 +193: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/widget_test.dart: каталог использует карточный вариант и постоянный редактор
+00:11 +194: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/widget_test.dart: каталог использует карточный вариант и постоянный редактор
+00:12 +195: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: позиция вводится в строке: автопоиск, Enter и новая строка
+00:12 +196: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: предпросмотр и печать спрашивают: вариант, тип или всё
+00:12 +197: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/quote_controller_test.dart: PDF доступен только для сохранённой версии предложения
+00:12 +198: All tests passed!

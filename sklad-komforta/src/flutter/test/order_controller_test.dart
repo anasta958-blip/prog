@@ -124,6 +124,53 @@ void main() {
     },
   );
 
+  testWidgets('новая комплектация показывает фильтры и загрузку счетов', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1500, 1100);
+    addTearDown(tester.view.reset);
+    final auth = authorized();
+    final gateway = _MemoryOrderGateway();
+    final controller = OrderController(
+      config,
+      auth,
+      orderGateway: gateway,
+      catalogGateway: _CatalogGateway(),
+      companyGateway: _CompanyGateway(),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: OrderEditorPage(
+            config: config,
+            authController: auth,
+            board: _orderBoard,
+            controller: controller,
+            onBack: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('order-filter-supplier')), findsOneWidget);
+    expect(find.byKey(const Key('order-filter-shipment')), findsOneWidget);
+    final upload = find.byKey(const Key('order-invoice-upload'));
+    expect(upload, findsOneWidget);
+    await tester.ensureVisible(upload);
+    await tester.tap(upload);
+    await tester.pumpAndSettle();
+    expect(find.text('Сохранить комплектацию?'), findsOneWidget);
+    await tester.tap(find.text('Отмена'));
+    await tester.pumpAndSettle();
+    expect(controller.persistedCardId, isNull);
+    expect(gateway.saved, isNull);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+    auth.dispose();
+  });
+
   testWidgets('редактор комплектации: шапка, фильтры, счета и таблица', (
     tester,
   ) async {

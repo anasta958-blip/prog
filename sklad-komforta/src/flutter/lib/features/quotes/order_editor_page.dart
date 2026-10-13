@@ -270,7 +270,7 @@ final class _OrderEditorPageState extends State<OrderEditorPage> {
                         board: widget.board,
                       ),
                       const SizedBox(height: 12),
-                      if (controller.persistedCardId != null) ...[
+                      ...[
                         _OrderInvoicesPanel(
                           controller: controller,
                           expanded: invoicesExpanded,
@@ -290,8 +290,7 @@ final class _OrderEditorPageState extends State<OrderEditorPage> {
                         ),
                         const SizedBox(height: 12),
                       ],
-                      if (controller.hasSupplierField ||
-                          controller.hasShipmentField) ...[
+                      ...[
                         _OrderFiltersBar(controller: controller),
                         const SizedBox(height: 10),
                       ],
@@ -380,6 +379,42 @@ final class _OrderEditorPageState extends State<OrderEditorPage> {
   }
 
   Future<void> _uploadInvoice() async {
+    if (controller.persistedCardId == null) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Сохранить комплектацию?'),
+          content: const Text(
+            'Для загрузки счёта сначала нужно сохранить комплектацию. Заполните адрес объекта, заказчика и исполнителя.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Сохранить и продолжить'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+      if (!await controller.saveOrder(
+            creationColumnId: widget.creationColumnId,
+          ) ||
+          !mounted) {
+        return;
+      }
+    }
+    if (!(controller.order?.canManageInvoices ?? false)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const AppSnackBar(
+          content: Text('Нет права загружать счета комплектации.'),
+        ),
+      );
+      return;
+    }
     final file = await FilePicker.pickFile(
       type: FileType.custom,
       allowedExtensions: const ['pdf'],
@@ -767,22 +802,20 @@ final class _OrderFiltersBar extends StatelessWidget {
     crossAxisAlignment: WrapCrossAlignment.center,
     children: [
       const Icon(Icons.filter_list, size: 18, color: _muted),
-      if (controller.hasSupplierField)
-        _MultiSelectFilter(
-          key: const Key('order-filter-supplier'),
-          label: 'Поставщик',
-          options: controller.supplierOptions,
-          selected: controller.supplierFilter,
-          onToggle: controller.toggleSupplierFilter,
-        ),
-      if (controller.hasShipmentField)
-        _MultiSelectFilter(
-          key: const Key('order-filter-shipment'),
-          label: 'Статус отгрузки',
-          options: controller.shipmentOptions,
-          selected: controller.shipmentFilter,
-          onToggle: controller.toggleShipmentFilter,
-        ),
+      _MultiSelectFilter(
+        key: const Key('order-filter-supplier'),
+        label: 'Поставщик',
+        options: controller.supplierOptions,
+        selected: controller.supplierFilter,
+        onToggle: controller.toggleSupplierFilter,
+      ),
+      _MultiSelectFilter(
+        key: const Key('order-filter-shipment'),
+        label: 'Статус отгрузки',
+        options: controller.shipmentOptions,
+        selected: controller.shipmentFilter,
+        onToggle: controller.toggleShipmentFilter,
+      ),
       if (controller.positionFiltersActive)
         TextButton.icon(
           key: const Key('order-filter-reset'),
@@ -869,7 +902,9 @@ final class _OrderInvoicesPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final canManage = controller.order?.canManageInvoices ?? false;
+    final canManage =
+        controller.persistedCardId == null ||
+        (controller.order?.canManageInvoices ?? false);
     final dateFormat = DateFormat('dd.MM.yyyy HH:mm', 'ru');
     final invoices = controller.invoices;
     final chosen = invoices
@@ -922,7 +957,9 @@ final class _OrderInvoicesPanel extends StatelessWidget {
               if (canManage)
                 OutlinedButton.icon(
                   key: const Key('order-invoice-upload'),
-                  onPressed: controller.invoiceBusy ? null : onUpload,
+                  onPressed: controller.invoiceBusy || controller.saving
+                      ? null
+                      : onUpload,
                   icon: const Icon(Icons.upload_file_outlined, size: 17),
                   label: const Text('Загрузить PDF'),
                 ),

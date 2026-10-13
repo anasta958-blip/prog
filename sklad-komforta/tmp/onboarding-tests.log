@@ -1,0 +1,28 @@
+00:00 +0: loading E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart
+00:00 +0: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: черновик сохраняет реквизиты, банк и НДС первого юрлица
+00:00 +1: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:00 +2: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:00 +3: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:01 +4: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/company_profile_form_test.dart: мастер проверяет обязательные поля и заполняет ИНН из реестра
+00:01 +5: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: новая комплектация показывает фильтры и загрузку счетов
+00:01 +6: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/widget_test.dart: кнопка смены пароля реагирует на совпадение полей
+00:01 +7: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: редактор комплектации: шапка, фильтры, счета и таблица
+00:01 +8: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: редактор комплектации: шапка, фильтры, счета и таблица
+00:01 +9: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: редактор комплектации: шапка, фильтры, счета и таблица
+00:01 +10: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: редактор комплектации: шапка, фильтры, счета и таблица
+00:01 +11: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: редактор комплектации: шапка, фильтры, счета и таблица
+00:01 +12: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: редактор комплектации: шапка, фильтры, счета и таблица
+00:01 +13: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: редактор комплектации: шапка, фильтры, счета и таблица
+00:01 +14: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: редактор комплектации: шапка, фильтры, счета и таблица
+00:02 +15: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: редактор комплектации: шапка, фильтры, счета и таблица
+00:02 +16: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: редактор комплектации: шапка, фильтры, счета и таблица
+00:02 +17: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/widget_test.dart: правило не предлагает результат занятого конвейером поля
+00:02 +18: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: значение, удалённое из справочника, видно с пометкой
+00:02 +19: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/widget_test.dart: компоненты формулы меняют порядок без пересоздания
+00:02 +20: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/order_controller_test.dart: отправка комплектации: несохранённые правки сначала сохраняются
+00:02 +21: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/widget_test.dart: настроенный канбан сворачивается без показа технического кода
+00:02 +22: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/widget_test.dart: настроенная категория каталога сворачивается без потери данных
+00:02 +23: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/widget_test.dart: поля связывают категорию с конкретным канбаном
+00:03 +24: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/widget_test.dart: код нового справочника генерируется и не показывается
+00:03 +25: E:/Program Files/XAMPP/htdocs/sklad-komforta/src/flutter/test/widget_test.dart: каталог использует карточный вариант и постоянный редактор
+00:04 +26: All tests passed!

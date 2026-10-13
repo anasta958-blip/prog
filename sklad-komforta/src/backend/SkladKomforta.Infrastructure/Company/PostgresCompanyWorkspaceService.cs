@@ -83,6 +83,15 @@ internal sealed class PostgresCompanyWorkspaceService(
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         if (request.IsDefault) await ClearDefaultCompanyAsync(connection, transaction, cancellationToken);
+        await InsertLegalEntityAsync(connection, transaction, id, actorUserId, request, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return (await ReadLegalEntitiesAsync(connection, id, cancellationToken)).Single();
+    }
+
+    /// <summary>Создание юрлица в общей транзакции, в том числе при активации мастера.</summary>
+    internal static async Task InsertLegalEntityAsync(DbConnection connection, DbTransaction transaction,
+        Guid id, Guid actorUserId, SaveLegalEntityRequest request, CancellationToken cancellationToken)
+    {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
@@ -96,8 +105,6 @@ internal sealed class PostgresCompanyWorkspaceService(
         BindLegalEntity(command, id, actorUserId, request);
         await command.ExecuteNonQueryAsync(cancellationToken);
         await WriteAuditAsync(connection, transaction, actorUserId, "legal_entity", id, "created", null, request, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-        return (await ReadLegalEntitiesAsync(connection, id, cancellationToken)).Single();
     }
 
     /// <inheritdoc />
@@ -547,7 +554,7 @@ internal sealed class PostgresCompanyWorkspaceService(
         await command.ExecuteNonQueryAsync(token);
     }
 
-    private static void ValidateLegalEntity(SaveLegalEntityRequest request)
+    internal static void ValidateLegalEntity(SaveLegalEntityRequest request)
     {
         Required(request.Name, 2, 200, "legal_entity_name_invalid", "Название должно содержать от 2 до 200 символов.");
         var companyType = Required(request.CompanyType, 2, 20, "company_type_invalid", "Выберите тип компании.").ToLowerInvariant();

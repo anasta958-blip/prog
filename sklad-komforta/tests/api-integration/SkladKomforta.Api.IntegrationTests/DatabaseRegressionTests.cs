@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Npgsql;
+using SkladKomforta.Application.Company;
 using SkladKomforta.Application.Onboarding;
 
 namespace SkladKomforta.Api.IntegrationTests;
@@ -51,9 +52,22 @@ public sealed partial class DatabaseRegressionTests
         var organization = await Send(staff, HttpMethod.Post, "/identity/organization", new { name = "Проверка проекта" });
         staff.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", Text(organization, "accessToken"));
 
+        var firstCompany = new SaveLegalEntityRequest(
+            "Первое юрлицо", "ooo", "ООО Первое юрлицо", "7707083893", "773601001",
+            "1027700132195", "Москва", "+79991234567", null, null,
+            "Иванов Иван", "Иванов Иван", "Директор", "Тестовый банк", "044525225",
+            "40702810900000000001", "30101810400000000225", null, null, [null, 0, 20], true);
         var draft = Draft();
+        draft = draft with { Company = draft.Company with { LegalEntity = firstCompany } };
         await Send(staff, HttpMethod.Post, "/onboarding/draft", draft);
         await Send(staff, HttpMethod.Post, "/onboarding/activate");
+        await Send(staff, HttpMethod.Post, "/onboarding/activate");
+        var firstCompanies = (await Send(staff, HttpMethod.Get, "/company/legal-entities")).AsArray();
+        Assert.Single(firstCompanies);
+        Assert.Equal(firstCompany.Name, Text(firstCompanies[0]!, "name"));
+        Assert.Equal(firstCompany.BankAccount, Text(firstCompanies[0]!, "bankAccount"));
+        Assert.True(firstCompanies[0]!["isDefault"]!.GetValue<bool>());
+        Assert.Equal(3, firstCompanies[0]!["vatRates"]!.AsArray().Count);
         foreach (var path in new[]
         {
             "/company/profile", "/company/configuration", "/company/lifecycle",

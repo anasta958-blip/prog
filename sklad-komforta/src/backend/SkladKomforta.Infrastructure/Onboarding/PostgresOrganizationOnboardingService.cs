@@ -4,6 +4,7 @@ using SkladKomforta.Application.Abstractions.Persistence;
 using SkladKomforta.Application.Abstractions.Tenancy;
 using SkladKomforta.Application.Identity;
 using SkladKomforta.Application.Onboarding;
+using SkladKomforta.Infrastructure.Company;
 
 namespace SkladKomforta.Infrastructure.Onboarding;
 
@@ -38,7 +39,10 @@ internal sealed class PostgresOrganizationOnboardingService(
         OrganizationOnboardingDraft draft,
         CancellationToken cancellationToken)
     {
+        draft = SynchronizeCompany(draft);
         OnboardingValidator.Validate(draft, false);
+        if (draft.Company.LegalEntity is { } legalEntity)
+            PostgresCompanyWorkspaceService.ValidateLegalEntity(legalEntity);
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
         await EnsureDirectorAsync(connection, userId, cancellationToken);
         if (await IsCompletedAsync(connection, cancellationToken))
@@ -66,15 +70,36 @@ internal sealed class PostgresOrganizationOnboardingService(
     {
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
         await EnsureDirectorAsync(connection, userId, cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        // Повторные одновременные запросы не должны создавать второе первое юрлицо.
+        await ExecuteAsync(connection, transaction,
+            "SELECT id FROM public.organizations WHERE id = @organization_id FOR UPDATE",
+            cancellationToken, ("organization_id", tenantContext.OrganizationId));
         var state = await ReadStateAsync(connection, cancellationToken);
         if (state.IsCompleted) return state;
 
-        var draft = state.Draft with { CurrentStep = 10 };
+        var draft = SynchronizeCompany(state.Draft) with { CurrentStep = 10 };
         OnboardingValidator.Validate(draft, true);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-
+        if (draft.Company.LegalEntity is { } legalEntity)
+            PostgresCompanyWorkspaceService.ValidateLegalEntity(legalEntity);
         await ClearMaterializedConfigurationAsync(connection, transaction, cancellationToken);
         await SaveProfileAsync(connection, transaction, userId, draft.Company, cancellationToken);
+        if (draft.Company.LegalEntity is { } firstCompany)
+        {
+            await PostgresCompanyWorkspaceService.InsertLegalEntityAsync(
+                connection, transaction, Guid.NewGuid(), userId, firstCompany, cancellationToken);
+        }
+        else
+        {
+            // Совместимость с черновиками старых клиентов, где было только ядро реквизитов.
+            await ExecuteAsync(connection, transaction, """
+                INSERT INTO companies (name, company_type, legal_name, inn, kpp, ogrn, address, phone, email, is_default, created_by)
+                SELECT organization_name, CASE WHEN lower(company_type) IN ('ip', 'ип') THEN 'ip' ELSE 'ooo' END,
+                    legal_name, inn, kpp, ogrn, address, phone, email, true, @actor
+                FROM organization_profile WHERE singleton
+                  AND NOT EXISTS (SELECT 1 FROM companies WHERE deleted_at IS NULL)
+                """, cancellationToken, ("actor", userId));
+        }
         var categoryIds = await SaveCatalogAsync(connection, transaction, draft.Categories, cancellationToken);
         await SaveWorkflowsAsync(
             connection,
@@ -110,6 +135,17 @@ internal sealed class PostgresOrganizationOnboardingService(
 
         await transaction.CommitAsync(cancellationToken);
         return new OrganizationOnboardingState(draft, true, DateTimeOffset.UtcNow);
+    }
+
+    private static OrganizationOnboardingDraft SynchronizeCompany(OrganizationOnboardingDraft draft)
+    {
+        if (draft.Company.LegalEntity is not { } company) return draft;
+        return draft with { Company = draft.Company with
+        {
+            CompanyType = company.CompanyType, LegalName = company.LegalName,
+            Inn = company.Inn, Kpp = company.Kpp, Ogrn = company.Ogrn,
+            Address = company.Address, Phone = company.Phone, Email = company.Email,
+        } };
     }
 
     /// <summary>Возвращает сохранённый draft либо безопасный стартовый набор.</summary>

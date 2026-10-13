@@ -1,0 +1,24 @@
+  SkladKomforta.Domain -> E:\Program Files\XAMPP\htdocs\sklad-komforta\src\backend\SkladKomforta.Domain\bin\Debug\net10.0\SkladKomforta.Domain.dll
+  SkladKomforta.Application -> E:\Program Files\XAMPP\htdocs\sklad-komforta\src\backend\SkladKomforta.Application\bin\Debug\net10.0\SkladKomforta.Application.dll
+  SkladKomforta.Domain.Tests -> E:\Program Files\XAMPP\htdocs\sklad-komforta\tests\backend-unit\SkladKomforta.Domain.Tests\bin\Debug\net10.0\SkladKomforta.Domain.Tests.dll
+Тестовый запуск для E:\Program Files\XAMPP\htdocs\sklad-komforta\tests\backend-unit\SkladKomforta.Domain.Tests\bin\Debug\net10.0\SkladKomforta.Domain.Tests.dll (.NETCoreApp,Version=v10.0)
+Общее количество тестовых файлов (1), соответствующих указанному шаблону.
+  SkladKomforta.Infrastructure -> E:\Program Files\XAMPP\htdocs\sklad-komforta\src\backend\SkladKomforta.Infrastructure\bin\Debug\net10.0\SkladKomforta.Infrastructure.dll
+  SkladKomforta.Api -> E:\Program Files\XAMPP\htdocs\sklad-komforta\src\backend\SkladKomforta.Api\bin\Debug\net10.0\SkladKomforta.Api.dll
+  SkladKomforta.Api.IntegrationTests -> E:\Program Files\XAMPP\htdocs\sklad-komforta\tests\api-integration\SkladKomforta.Api.IntegrationTests\bin\Debug\net10.0\SkladKomforta.Api.IntegrationTests.dll
+Тестовый запуск для E:\Program Files\XAMPP\htdocs\sklad-komforta\tests\api-integration\SkladKomforta.Api.IntegrationTests\bin\Debug\net10.0\SkladKomforta.Api.IntegrationTests.dll (.NETCoreApp,Version=v10.0)
+
+Пройден!   : не пройдено     0, пройдено   110, пропущено     0, всего   110, длительность 180 ms. - SkladKomforta.Domain.Tests.dll (net10.0)
+Общее количество тестовых файлов (1), соответствующих указанному шаблону.
+[xUnit.net 00:00:00.66]     SkladKomforta.Api.IntegrationTests.DatabaseRegressionTests.SeveralDirectorsCreateIsolatedOrganizations [SKIP]
+[xUnit.net 00:00:00.67]     SkladKomforta.Api.IntegrationTests.DatabaseRegressionTests.OrganizationCatalogKanbanAndClientQuoteWorkAgainstRealDatabase [SKIP]
+[xUnit.net 00:00:00.67]     SkladKomforta.Api.IntegrationTests.DatabaseRegressionTests.OutboundDeliveryAgainstRealDatabase [SKIP]
+[xUnit.net 00:00:00.67]     SkladKomforta.Api.IntegrationTests.DatabaseRegressionTests.ReplacedRefreshTokenIsAcceptedShortlyAfterRotation [SKIP]
+[xUnit.net 00:00:00.67]     SkladKomforta.Api.IntegrationTests.DatabaseRegressionTests.OrdersTransferFromQuoteAgainstRealDatabase [SKIP]
+  Пропущен SkladKomforta.Api.IntegrationTests.DatabaseRegressionTests.SeveralDirectorsCreateIsolatedOrganizations [1 ms]
+  Пропущен SkladKomforta.Api.IntegrationTests.DatabaseRegressionTests.OrganizationCatalogKanbanAndClientQuoteWorkAgainstRealDatabase [1 ms]
+  Пропущен SkladKomforta.Api.IntegrationTests.DatabaseRegressionTests.OutboundDeliveryAgainstRealDatabase [1 ms]
+  Пропущен SkladKomforta.Api.IntegrationTests.DatabaseRegressionTests.ReplacedRefreshTokenIsAcceptedShortlyAfterRotation [1 ms]
+  Пропущен SkladKomforta.Api.IntegrationTests.DatabaseRegressionTests.OrdersTransferFromQuoteAgainstRealDatabase [1 ms]
+
+Пройден!   : не пройдено     0, пройдено   118, пропущено     5, всего   123, длительность 12 s. - SkladKomforta.Api.IntegrationTests.dll (net10.0)

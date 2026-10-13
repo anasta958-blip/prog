@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'employee_password_dialog.dart';
-import 'vat_rates_field.dart';
+import 'company_form_fields.dart';
+import 'legal_entity_fields.dart';
 import 'package:sklad_komforta_app/core/widgets/collapse_toggle.dart';
 import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
-import 'package:flutter/services.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
 import 'package:sklad_komforta_app/core/widgets/mobile_collapsible_navigation.dart';
 import 'package:sklad_komforta_app/features/company/company_api.dart';
@@ -1080,13 +1080,11 @@ final class _LegalEntityDialogState extends State<_LegalEntityDialog>
   final key = GlobalKey<FormState>();
   bool submitting = false;
   String? submitError;
-  late List<double?> vatRates;
 
   @override
   void initState() {
     super.initState();
     widget.item.companyType = _normalizeLegalType(widget.item.companyType);
-    vatRates = List.of(widget.item.vatRates);
   }
 
   @override
@@ -1110,215 +1108,18 @@ final class _LegalEntityDialogState extends State<_LegalEntityDialog>
             key: ValueKey(formRevision),
             mainAxisSize: MainAxisSize.min,
             children: [
-              _formField(
-                'Короткое название',
-                widget.item.name,
-                (value) => widget.item.name = value,
-                required: true,
-              ),
-              const SizedBox(height: 12),
-              AppSelectField<String>(
-                value: widget.item.companyType,
-                label: 'Тип компании',
-                options: const [
-                  AppSelectOption(value: 'ooo', label: 'ООО'),
-                  AppSelectOption(value: 'ip', label: 'ИП'),
-                ],
-                onChanged: (value) => setState(() {
-                  widget.item.companyType = value ?? 'ooo';
-                  if (widget.item.companyType == 'ip') widget.item.kpp = null;
-                }),
-              ),
-              const SizedBox(height: 12),
-              _formField(
-                widget.item.companyType == 'ip'
-                    ? 'ФИО индивидуального предпринимателя'
-                    : 'Юридическое название',
-                widget.item.legalName ?? '',
-                (value) => widget.item.legalName = value,
-                required: true,
-              ),
-              const SizedBox(height: 12),
-              _DialogFieldRow(
-                children: [
-                  Expanded(
-                    child: _digitsField(
-                      'ИНН',
-                      widget.item.inn ?? '',
-                      (value) => widget.item.inn = value,
-                      required: true,
-                      lengths: widget.item.companyType == 'ip'
-                          ? const [12]
-                          : const [10],
-                      suffix: registryLookupButton(
-                        () => lookupRegistry(
-                          controller: widget.controller,
-                          inn: widget.item.inn,
-                          scope: CompanyRegistryScope.legalEntity,
-                          apply: (record) =>
-                              record.applyToLegalEntity(widget.item),
-                        ),
-                      ),
-                    ),
+              LegalEntityFields(
+                item: widget.item,
+                onChanged: () => setState(() {}),
+                lookupButton: registryLookupButton(
+                  () => lookupRegistry(
+                    controller: widget.controller,
+                    inn: widget.item.inn,
+                    scope: CompanyRegistryScope.legalEntity,
+                    apply: (record) => record.applyToLegalEntity(widget.item),
                   ),
-                  if (widget.item.companyType != 'ip') ...[
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _digitsField(
-                        'КПП',
-                        widget.item.kpp ?? '',
-                        (value) => widget.item.kpp = value,
-                        required: true,
-                        lengths: const [9],
-                      ),
-                    ),
-                  ],
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _digitsField(
-                      widget.item.companyType == 'ip' ? 'ОГРНИП' : 'ОГРН',
-                      widget.item.ogrn ?? '',
-                      (value) => widget.item.ogrn = value,
-                      required: true,
-                      lengths: widget.item.companyType == 'ip'
-                          ? const [15]
-                          : const [13],
-                    ),
-                  ),
-                ],
-              ),
-              ...registryLookupMessages(),
-              const SizedBox(height: 12),
-              _formField(
-                'Адрес',
-                widget.item.address ?? '',
-                (value) => widget.item.address = value,
-              ),
-              const SizedBox(height: 12),
-              _DialogFieldRow(
-                children: [
-                  Expanded(
-                    child: _phoneField(
-                      'Телефон',
-                      widget.item.phone ?? '',
-                      (value) => widget.item.phone = value,
-                      required: true,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _emailField(
-                      'Email',
-                      widget.item.email ?? '',
-                      (value) => widget.item.email = value,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              _formField(
-                'Сайт',
-                widget.item.website ?? '',
-                (value) => widget.item.website = value,
-                validator: _websiteValidator,
-              ),
-              const SizedBox(height: 12),
-              _DialogFieldRow(
-                children: [
-                  Expanded(
-                    child: _formField(
-                      'Директор',
-                      widget.item.directorName ?? '',
-                      (value) => widget.item.directorName = value,
-                      required: true,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _formField(
-                      'Подписант',
-                      widget.item.signatoryName ?? '',
-                      (value) => widget.item.signatoryName = value,
-                      required: true,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _formField(
-                      'Должность подписанта',
-                      widget.item.signatoryTitle ?? '',
-                      (value) => widget.item.signatoryTitle = value,
-                      required: true,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              _formField(
-                'Банк',
-                widget.item.bankName ?? '',
-                (value) => widget.item.bankName = value,
-                required: true,
-              ),
-              const SizedBox(height: 12),
-              _DialogFieldRow(
-                children: [
-                  Expanded(
-                    child: _digitsField(
-                      'БИК',
-                      widget.item.bankBik ?? '',
-                      (value) => widget.item.bankBik = value,
-                      required: true,
-                      lengths: const [9],
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _digitsField(
-                      'Расчётный счёт',
-                      widget.item.bankAccount ?? '',
-                      (value) => widget.item.bankAccount = value,
-                      required: true,
-                      lengths: const [20],
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _digitsField(
-                      'Корреспондентский счёт',
-                      widget.item.corrAccount ?? '',
-                      (value) => widget.item.corrAccount = value,
-                      required: true,
-                      lengths: const [20],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              _formField(
-                'Вводный текст по умолчанию',
-                widget.item.introDefault ?? '',
-                (value) => widget.item.introDefault = value,
-                maximumLength: 2000,
-              ),
-              const SizedBox(height: 12),
-              _formField(
-                'Дополнительный текст по умолчанию',
-                widget.item.footerDefault ?? '',
-                (value) => widget.item.footerDefault = value,
-                maximumLength: 2000,
-              ),
-              const SizedBox(height: 12),
-              VatRatesField(
-                initialValue: vatRates,
-                onChanged: (value) => vatRates = value,
-              ),
-              CheckboxListTile(
-                value: widget.item.isDefault,
-                onChanged: (value) =>
-                    setState(() => widget.item.isDefault = value ?? false),
-                title: const Text('Исполнитель по умолчанию'),
-                contentPadding: EdgeInsets.zero,
+                ),
+                lookupMessages: registryLookupMessages(),
               ),
               if (submitError != null) ...[
                 const SizedBox(height: 10),
@@ -1348,7 +1149,6 @@ final class _LegalEntityDialogState extends State<_LegalEntityDialog>
 
   Future<void> _submit() async {
     if (key.currentState?.validate() != true) return;
-    widget.item.vatRates = List.of(vatRates);
     setState(() {
       submitting = true;
       submitError = null;
@@ -1421,7 +1221,7 @@ final class _ClientDialogState extends State<_ClientDialog>
                   }),
                 ),
                 const SizedBox(height: 12),
-                _formField(
+                companyTextField(
                   item.companyType == 'person'
                       ? 'ФИО'
                       : item.companyType == 'ip'
@@ -1437,16 +1237,16 @@ final class _ClientDialogState extends State<_ClientDialog>
                 ),
                 if (item.companyType == 'person') ...[
                   const SizedBox(height: 12),
-                  _DialogFieldGrid(
+                  CompanyFieldGrid(
                     columns: 2,
                     children: [
-                      _phoneField(
+                      companyPhoneField(
                         'Телефон',
                         item.phone ?? '',
                         (value) => item.phone = value,
                         required: true,
                       ),
-                      _emailField(
+                      companyEmailField(
                         'Email',
                         item.email ?? '',
                         (value) => item.email = value,
@@ -1454,24 +1254,24 @@ final class _ClientDialogState extends State<_ClientDialog>
                     ],
                   ),
                   const SizedBox(height: 12),
-                  _DialogFieldGrid(
+                  CompanyFieldGrid(
                     columns: 3,
                     children: [
-                      _digitsField(
+                      companyDigitsField(
                         'Серия паспорта',
                         item.passportSeries ?? '',
                         (value) => item.passportSeries = value,
                         lengths: const [4],
                         required: true,
                       ),
-                      _digitsField(
+                      companyDigitsField(
                         'Номер паспорта',
                         item.passportNumber ?? '',
                         (value) => item.passportNumber = value,
                         lengths: const [6],
                         required: true,
                       ),
-                      _formField(
+                      companyTextField(
                         'Кем выдан',
                         item.passportIssuedBy ?? '',
                         (value) => item.passportIssuedBy = value,
@@ -1480,7 +1280,7 @@ final class _ClientDialogState extends State<_ClientDialog>
                     ],
                   ),
                   const SizedBox(height: 12),
-                  _formField(
+                  companyTextField(
                     'Адрес регистрации',
                     item.address ?? '',
                     (value) => item.address = value,
@@ -1489,10 +1289,10 @@ final class _ClientDialogState extends State<_ClientDialog>
                   ),
                 ] else ...[
                   const SizedBox(height: 12),
-                  _DialogFieldGrid(
+                  CompanyFieldGrid(
                     columns: item.companyType == 'ip' ? 2 : 3,
                     children: [
-                      _digitsField(
+                      companyDigitsField(
                         'ИНН',
                         item.inn ?? '',
                         (value) => item.inn = value,
@@ -1510,14 +1310,14 @@ final class _ClientDialogState extends State<_ClientDialog>
                         ),
                       ),
                       if (item.companyType != 'ip')
-                        _digitsField(
+                        companyDigitsField(
                           'КПП',
                           item.kpp ?? '',
                           (value) => item.kpp = value,
                           lengths: const [9],
                           required: true,
                         ),
-                      _digitsField(
+                      companyDigitsField(
                         item.companyType == 'ip' ? 'ОГРНИП' : 'ОГРН',
                         item.ogrn ?? '',
                         (value) => item.ogrn = value,
@@ -1530,21 +1330,21 @@ final class _ClientDialogState extends State<_ClientDialog>
                   ),
                   ...registryLookupMessages(),
                   const SizedBox(height: 12),
-                  _DialogFieldGrid(
+                  CompanyFieldGrid(
                     columns: 3,
                     children: [
-                      _phoneField(
+                      companyPhoneField(
                         'Телефон',
                         item.phone ?? '',
                         (value) => item.phone = value,
                         required: true,
                       ),
-                      _emailField(
+                      companyEmailField(
                         'Email',
                         item.email ?? '',
                         (value) => item.email = value,
                       ),
-                      _formField(
+                      companyTextField(
                         'Банк',
                         item.bankName ?? '',
                         (value) => item.bankName = value,
@@ -1553,7 +1353,7 @@ final class _ClientDialogState extends State<_ClientDialog>
                     ],
                   ),
                   const SizedBox(height: 12),
-                  _digitsField(
+                  companyDigitsField(
                     'БИК',
                     item.bankBik ?? '',
                     (value) => item.bankBik = value,
@@ -1561,7 +1361,7 @@ final class _ClientDialogState extends State<_ClientDialog>
                     required: true,
                   ),
                   const SizedBox(height: 12),
-                  _formField(
+                  companyTextField(
                     'Юридический адрес',
                     item.address ?? '',
                     (value) => item.address = value,
@@ -1569,17 +1369,17 @@ final class _ClientDialogState extends State<_ClientDialog>
                     maxLines: 3,
                   ),
                   const SizedBox(height: 12),
-                  _DialogFieldGrid(
+                  CompanyFieldGrid(
                     columns: 2,
                     children: [
-                      _digitsField(
+                      companyDigitsField(
                         'Расчётный счёт',
                         item.bankAccount ?? '',
                         (value) => item.bankAccount = value,
                         lengths: const [20],
                         required: true,
                       ),
-                      _digitsField(
+                      companyDigitsField(
                         'Корреспондентский счёт',
                         item.corrAccount ?? '',
                         (value) => item.corrAccount = value,
@@ -1690,7 +1490,7 @@ final class _EmployeeDialogState extends State<_EmployeeDialog> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _formField(
+                companyTextField(
                   'ФИО',
                   name,
                   (value) => name = value,
@@ -1700,7 +1500,7 @@ final class _EmployeeDialogState extends State<_EmployeeDialog> {
                 Row(
                   children: [
                     Expanded(
-                      child: _formField(
+                      child: companyTextField(
                         'Логин',
                         login,
                         (value) => login = value,
@@ -1709,7 +1509,7 @@ final class _EmployeeDialogState extends State<_EmployeeDialog> {
                     ),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: _formField(
+                      child: companyTextField(
                         'Одноразовый пароль',
                         password,
                         (value) => password = value,
@@ -1754,7 +1554,7 @@ final class _EmployeeDialogState extends State<_EmployeeDialog> {
                 Row(
                   children: [
                     Expanded(
-                      child: _emailField(
+                      child: companyEmailField(
                         'Email',
                         email,
                         (value) => email = value,
@@ -1762,7 +1562,7 @@ final class _EmployeeDialogState extends State<_EmployeeDialog> {
                     ),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: _phoneField(
+                      child: companyPhoneField(
                         'Телефон',
                         phone,
                         (value) => phone = value,
@@ -1771,7 +1571,11 @@ final class _EmployeeDialogState extends State<_EmployeeDialog> {
                   ],
                 ),
                 const SizedBox(height: 12),
-                _formField('Telegram', telegram, (value) => telegram = value),
+                companyTextField(
+                  'Telegram',
+                  telegram,
+                  (value) => telegram = value,
+                ),
                 if (submitError != null) ...[
                   const SizedBox(height: 10),
                   _DialogError(message: submitError!),
@@ -1896,7 +1700,7 @@ final class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _formField(
+                companyTextField(
                   'ФИО',
                   name,
                   (value) => name = value,
@@ -1944,7 +1748,7 @@ final class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
                 Row(
                   children: [
                     Expanded(
-                      child: _emailField(
+                      child: companyEmailField(
                         'Email',
                         email,
                         (value) => email = value,
@@ -1952,7 +1756,7 @@ final class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
                     ),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: _phoneField(
+                      child: companyPhoneField(
                         'Телефон',
                         phone,
                         (value) => phone = value,
@@ -1961,7 +1765,11 @@ final class _EditEmployeeDialogState extends State<_EditEmployeeDialog> {
                   ],
                 ),
                 const SizedBox(height: 12),
-                _formField('Telegram', telegram, (value) => telegram = value),
+                companyTextField(
+                  'Telegram',
+                  telegram,
+                  (value) => telegram = value,
+                ),
                 if (!widget.source.isDirector) ...[
                   const SizedBox(height: 12),
                   OutlinedButton.icon(
@@ -2099,7 +1907,7 @@ final class _RoleDialogState extends State<_RoleDialog> {
         height: 620,
         child: Column(
           children: [
-            _formField(
+            companyTextField(
               'Название роли',
               name,
               (value) => setState(() => name = value),
@@ -2473,7 +2281,7 @@ mixin _RegistryLookupMixin<T extends StatefulWidget> on State<T> {
     required void Function(CompanyRegistryRecord record) apply,
   }) async {
     if (lookingUp) return;
-    final digits = _onlyDigits(inn ?? '');
+    final digits = companyOnlyDigits(inn ?? '');
     if (digits.length != 10 && digits.length != 12) {
       setState(() {
         lookupNotice = null;
@@ -2564,202 +2372,6 @@ final class _DialogInfo extends StatelessWidget {
       ],
     ),
   );
-}
-
-Widget _formField(
-  String label,
-  String value,
-  ValueChanged<String> changed, {
-  bool required = false,
-  int maximumLength = 500,
-  int maxLines = 1,
-  String? Function(String?)? validator,
-}) => TextFormField(
-  key: ValueKey(label),
-  initialValue: value,
-  onChanged: changed,
-  enableInteractiveSelection: true,
-  inputFormatters: [LengthLimitingTextInputFormatter(maximumLength)],
-  maxLines: maxLines,
-  validator: (value) {
-    final normalized = value?.trim() ?? '';
-    if (required && normalized.length < 2) {
-      return 'Введите не менее двух символов';
-    }
-    return validator?.call(value);
-  },
-  decoration: InputDecoration(labelText: required ? '$label *' : label),
-);
-
-Widget _digitsField(
-  String label,
-  String value,
-  ValueChanged<String> changed, {
-  List<int> lengths = const [],
-  bool required = false,
-  Widget? suffix,
-}) => TextFormField(
-  key: ValueKey(label),
-  initialValue: value,
-  onChanged: changed,
-  enableInteractiveSelection: true,
-  keyboardType: TextInputType.number,
-  inputFormatters: [
-    FilteringTextInputFormatter.digitsOnly,
-    if (lengths.isNotEmpty)
-      LengthLimitingTextInputFormatter(lengths.reduce((a, b) => a > b ? a : b)),
-  ],
-  validator: (value) {
-    final normalized = value?.trim() ?? '';
-    if (required && normalized.isEmpty) return 'Заполните поле «$label»';
-    if (normalized.isEmpty ||
-        lengths.isEmpty ||
-        lengths.contains(normalized.length)) {
-      return null;
-    }
-    return lengths.length == 1
-        ? '$label должен содержать ${lengths.first} цифр'
-        : '$label имеет неверную длину';
-  },
-  decoration: InputDecoration(
-    labelText: required ? '$label *' : label,
-    suffixIcon: suffix,
-  ),
-);
-
-Widget _emailField(String label, String value, ValueChanged<String> changed) =>
-    TextFormField(
-      key: ValueKey(label),
-      initialValue: value,
-      onChanged: changed,
-      enableInteractiveSelection: true,
-      keyboardType: TextInputType.emailAddress,
-      validator: (value) {
-        final normalized = value?.trim() ?? '';
-        if (normalized.isEmpty) return null;
-        return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(normalized)
-            ? null
-            : 'Введите корректный email';
-      },
-      decoration: InputDecoration(labelText: label),
-    );
-
-Widget _phoneField(
-  String label,
-  String value,
-  ValueChanged<String> changed, {
-  bool required = false,
-}) => TextFormField(
-  key: ValueKey(label),
-  initialValue: _formatRussianPhone(value),
-  onChanged: changed,
-  enableInteractiveSelection: true,
-  keyboardType: TextInputType.phone,
-  inputFormatters: const [_RussianPhoneInputFormatter()],
-  validator: (value) {
-    final digits = _onlyDigits(value ?? '');
-    if (digits.isEmpty) return required ? 'Укажите телефон' : null;
-    return digits.length == 11 && digits.startsWith('7')
-        ? null
-        : 'Введите телефон в формате +7 (999) 123-45-67';
-  },
-  decoration: InputDecoration(
-    labelText: required ? '$label *' : label,
-    hintText: '+7 (___) ___-__-__',
-  ),
-);
-
-/// Адаптивная сетка полей сохраняет широкую форму на desktop и не создаёт
-/// горизонтального переполнения на небольших окнах.
-final class _DialogFieldRow extends StatelessWidget {
-  const _DialogFieldRow({required this.children});
-  final List<Widget> children;
-  @override
-  Widget build(BuildContext context) => _DialogFieldGrid(
-    columns: children.whereType<Expanded>().length,
-    children: [for (final child in children.whereType<Expanded>()) child.child],
-  );
-}
-
-final class _DialogFieldGrid extends StatelessWidget {
-  const _DialogFieldGrid({required this.children, required this.columns});
-
-  final List<Widget> children;
-  final int columns;
-
-  @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      final actualColumns = constraints.maxWidth < 520
-          ? 1
-          : constraints.maxWidth < 760
-          ? columns.clamp(1, 2)
-          : columns;
-      const gap = 10.0;
-      final width =
-          (constraints.maxWidth - gap * (actualColumns - 1)) / actualColumns;
-      return Wrap(
-        spacing: gap,
-        runSpacing: 12,
-        children: [
-          for (final child in children) SizedBox(width: width, child: child),
-        ],
-      );
-    },
-  );
-}
-
-String? _websiteValidator(String? value) {
-  final normalized = value?.trim() ?? '';
-  if (normalized.isEmpty) return null;
-  final uri = Uri.tryParse(normalized);
-  return uri != null &&
-          (uri.scheme == 'http' || uri.scheme == 'https') &&
-          uri.host.contains('.')
-      ? null
-      : 'Введите адрес сайта с http:// или https://';
-}
-
-String _onlyDigits(String value) => value.replaceAll(RegExp(r'\D'), '');
-
-String _formatRussianPhone(String value) {
-  var digits = _onlyDigits(value);
-  if (digits.isEmpty) return '';
-  if (digits.startsWith('8')) digits = '7${digits.substring(1)}';
-  if (!digits.startsWith('7')) digits = '7$digits';
-  digits = digits.substring(0, digits.length.clamp(0, 11));
-
-  final buffer = StringBuffer('+7');
-  if (digits.length > 1) {
-    buffer.write(' (${digits.substring(1, digits.length.clamp(1, 4))}');
-  }
-  if (digits.length >= 4) buffer.write(')');
-  if (digits.length > 4) {
-    buffer.write(' ${digits.substring(4, digits.length.clamp(4, 7))}');
-  }
-  if (digits.length > 7) {
-    buffer.write('-${digits.substring(7, digits.length.clamp(7, 9))}');
-  }
-  if (digits.length > 9) buffer.write('-${digits.substring(9)}');
-  return buffer.toString();
-}
-
-/// Приводит ввод российского номера к единому виду и не допускает лишние
-/// символы или цифры сверх полной маски.
-final class _RussianPhoneInputFormatter extends TextInputFormatter {
-  const _RussianPhoneInputFormatter();
-
-  @override
-  TextEditingValue formatEditUpdate(
-    TextEditingValue oldValue,
-    TextEditingValue newValue,
-  ) {
-    final formatted = _formatRussianPhone(newValue.text);
-    return TextEditingValue(
-      text: formatted,
-      selection: TextSelection.collapsed(offset: formatted.length),
-    );
-  }
 }
 
 String _normalizeLegalType(String value) =>

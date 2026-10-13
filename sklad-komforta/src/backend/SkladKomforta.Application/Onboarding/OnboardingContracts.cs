@@ -10,7 +10,8 @@ public sealed record CompanyProfileDraft(
     string? Ogrn,
     string? Address,
     string? Phone,
-    string? Email);
+    string? Email,
+    SkladKomforta.Application.Company.SaveLegalEntityRequest? LegalEntity = null);
 
 /// <summary>
 /// Цель переноса из столбца-триггера: канбан (по коду) и его столбец (по

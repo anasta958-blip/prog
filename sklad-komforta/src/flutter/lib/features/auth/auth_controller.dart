@@ -39,6 +39,18 @@ final class AuthController extends ChangeNotifier {
   OrganizationOnboardingDraft? onboardingDraft;
   Future<void>? _refreshInFlight;
 
+  Future<CompanyRegistryRecord> lookupOrganizationByInn(
+    String inn,
+  ) async => CompanyRegistryRecord.fromJson(
+    await _withValidAccessToken(
+          (token) => _api.get(
+            '/identity/registry-lookup?inn=${Uri.encodeQueryComponent(inn)}',
+            token,
+          ),
+        )
+        as Map<String, dynamic>,
+  );
+
   /// Восстанавливает нативную сессию из secure storage или Web-сессию из cookie.
   Future<void> initialize() async {
     try {

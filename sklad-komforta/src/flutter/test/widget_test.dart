@@ -280,7 +280,7 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('пятый шаг открывает правила и фиксированный денежный порядок', (
+  testWidgets('шестой шаг открывает правила и фиксированный денежный порядок', (
     tester,
   ) async {
     tester.view.devicePixelRatio = 1;
@@ -293,7 +293,7 @@ void main() {
     );
     controller.stage = AuthStage.organization;
     controller.onboardingDraft = OrganizationOnboardingDraft.initial()
-      ..currentStep = 5;
+      ..currentStep = 6;
 
     await tester.pumpWidget(
       SkladKomfortaApp(
@@ -304,7 +304,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('5. Правила и расчёты'), findsWidgets);
+    expect(find.text('6. Правила и расчёты'), findsWidgets);
     expect(find.text('Денежные конвейеры'), findsOneWidget);
     expect(find.textContaining('базовая цена → ручная цена'), findsOneWidget);
     expect(find.text('Добавить правило'), findsOneWidget);
@@ -324,7 +324,7 @@ void main() {
       tokens: _MemoryTokenRepository(),
     );
     controller.stage = AuthStage.organization;
-    final draft = OrganizationOnboardingDraft.initial()..currentStep = 5;
+    final draft = OrganizationOnboardingDraft.initial()..currentStep = 6;
     controller.onboardingDraft = draft;
     draft.categories.add(
       CatalogCategoryDraft(
@@ -426,7 +426,7 @@ void main() {
     );
     controller.stage = AuthStage.organization;
     controller.onboardingDraft = OrganizationOnboardingDraft.initial()
-      ..currentStep = 5;
+      ..currentStep = 6;
     controller.onboardingDraft!.categories.add(
       CatalogCategoryDraft(
         clientId: 'equipment',
@@ -653,7 +653,7 @@ void main() {
     );
     controller.stage = AuthStage.organization;
     controller.onboardingDraft = OrganizationOnboardingDraft.initial()
-      ..currentStep = 4
+      ..currentStep = 5
       ..categories.add(category)
       ..workflows.add(workflow);
 
@@ -784,7 +784,7 @@ void main() {
     );
     controller.stage = AuthStage.organization;
     controller.onboardingDraft = OrganizationOnboardingDraft.initial()
-      ..currentStep = 8
+      ..currentStep = 4
       ..dictionaries.add(
         DictionaryDraft(code: 'dictionary_2', name: 'Поставщики', items: []),
       );

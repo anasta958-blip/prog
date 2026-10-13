@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
 using SkladKomforta.Application.Contracts;
 using SkladKomforta.Application.Identity;
+using SkladKomforta.Application.Company;
 using SkladKomforta.Infrastructure.Configuration;
 using SkladKomforta.Domain.Authentication;
 
@@ -28,6 +29,9 @@ internal static class IdentityEndpoints
 
         var identity = endpoints.MapGroup("/api/v1/identity").RequireAuthorization();
         identity.MapPost("/organization", CreateOrganizationAsync);
+        // До первого сохранения мастера у пользователя ещё нет tenant-схемы.
+        identity.MapGet("/registry-lookup", async (string? inn, ICompanyRegistryLookup registry, CancellationToken token) =>
+            Results.Ok(ApiResponse.Success(await registry.FindByInnAsync(inn ?? string.Empty, token))));
         identity.MapGet("/sessions", GetSessionsAsync);
         identity.MapDelete("/sessions/{sessionId:guid}", RevokeSessionAsync);
         identity.MapDelete("/sessions", RevokeOtherSessionsAsync);

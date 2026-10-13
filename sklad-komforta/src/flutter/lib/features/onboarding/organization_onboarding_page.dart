@@ -89,11 +89,11 @@ final class _OrganizationOnboardingPageState
     ('Компания', Icons.business_outlined),
     ('Канбаны', Icons.view_kanban_outlined),
     ('Каталог', Icons.inventory_2_outlined),
+    ('Справочники', Icons.menu_book_outlined),
     ('Поля', Icons.view_column_outlined),
     ('Правила и расчёты', Icons.calculate_outlined),
     ('Зависимости', Icons.account_tree_outlined),
     ('Роли', Icons.admin_panel_settings_outlined),
-    ('Справочники', Icons.menu_book_outlined),
     ('Внешняя отправка', Icons.forward_to_inbox_outlined),
     ('Проверка', Icons.fact_check_outlined),
   ];
@@ -124,7 +124,7 @@ final class _OrganizationOnboardingPageState
   ];
   // Реквизиты юридических лиц редактируются в отдельной вкладке «Компания».
   // Здесь остаётся только рабочая конфигурация без второго источника данных.
-  static const _settingsStepIndexes = [1, 2, 3, 4, 5, 7, _outboundStep];
+  static const _settingsStepIndexes = [1, 2, 3, 4, 5, 6, _outboundStep];
 
   /// Шаг «Внешняя отправка» хранит данные не в черновике конфигурации, а
   /// сохраняет их сразу на сервер (секреты не должны попадать в черновик).
@@ -688,11 +688,11 @@ final class _OrganizationOnboardingPageState
     0 => _companyEditor(),
     1 => _workflowEditor(),
     2 => _catalogEditor(),
-    3 => _fieldsEditor(),
-    4 => _rulesEditor(),
-    5 => _dependenciesEditor(),
-    6 => _rolesEditor(),
-    7 => _dictionariesEditor(),
+    3 => _dictionariesEditor(),
+    4 => _fieldsEditor(),
+    5 => _rulesEditor(),
+    6 => _dependenciesEditor(),
+    7 => _rolesEditor(),
     _outboundStep => OutboundSettingsEditor(controller: _outboundSettings),
     _ => _review(),
   };
@@ -702,6 +702,8 @@ final class _OrganizationOnboardingPageState
       key: _companyFormKey,
       child: CompanyProfileForm(
         profile: draft.company,
+        enabled: !_busy,
+        lookupByInn: widget.controller.lookupOrganizationByInn,
         onChanged: () => setState(() {}),
       ),
     );

@@ -3,6 +3,38 @@ final class CompanyProfileDraft {
   CompanyProfileDraft({required this.organizationName});
 
   String organizationName;
+  LegalEntityModel? legalEntity;
+
+  LegalEntityModel ensureLegalEntity() => legalEntity ??=
+      LegalEntityModel(
+          id: '',
+          name: organizationName,
+          companyType: const {'ип', 'ip'}.contains(companyType?.toLowerCase())
+              ? 'ip'
+              : 'ooo',
+        )
+        ..legalName = legalName
+        ..inn = inn
+        ..kpp = kpp
+        ..ogrn = ogrn
+        ..address = address
+        ..phone = phone
+        ..email = email
+        ..isDefault = true;
+
+  void syncLegalEntity() {
+    final item = legalEntity;
+    if (item == null) return;
+    companyType = item.companyType;
+    legalName = item.legalName;
+    inn = item.inn;
+    kpp = item.kpp;
+    ogrn = item.ogrn;
+    address = item.address;
+    phone = item.phone;
+    email = item.email;
+  }
+
   String? companyType;
   String? legalName;
   String? inn;
@@ -21,19 +53,29 @@ final class CompanyProfileDraft {
         ..ogrn = json['ogrn'] as String?
         ..address = json['address'] as String?
         ..phone = json['phone'] as String?
-        ..email = json['email'] as String?;
+        ..email = json['email'] as String?
+        ..legalEntity = json['legalEntity'] == null
+            ? null
+            : LegalEntityModel.fromJson({
+                ...json['legalEntity'] as Map<String, dynamic>,
+                'id': '',
+              });
 
-  Map<String, dynamic> toJson() => {
-    'organizationName': organizationName,
-    'companyType': companyType,
-    'legalName': legalName,
-    'inn': inn,
-    'kpp': kpp,
-    'ogrn': ogrn,
-    'address': address,
-    'phone': phone,
-    'email': email,
-  };
+  Map<String, dynamic> toJson() {
+    syncLegalEntity();
+    return {
+      'organizationName': organizationName,
+      'legalEntity': legalEntity?.toJson(),
+      'companyType': companyType,
+      'legalName': legalName,
+      'inn': inn,
+      'kpp': kpp,
+      'ogrn': ogrn,
+      'address': address,
+      'phone': phone,
+      'email': email,
+    };
+  }
 }
 
 /// Общий срок активности tenant-организации.

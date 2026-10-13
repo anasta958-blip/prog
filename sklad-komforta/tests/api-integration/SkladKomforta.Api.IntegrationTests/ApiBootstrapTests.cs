@@ -82,6 +82,13 @@ public sealed class ApiBootstrapTests : IClassFixture<ApiFactory>
     }
 
     [Fact]
+    public async Task OnboardingRegistryLookupRequiresAccessToken()
+    {
+        var response = await _client.GetAsync("/api/v1/identity/registry-lookup?inn=7707083893");
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
     public async Task OnboardingEndpointRequiresAccessToken()
     {
         var response = await _client.GetAsync("/api/v1/onboarding/");
