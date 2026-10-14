@@ -4,6 +4,26 @@ import 'package:sklad_komforta_app/features/company/company_models.dart';
 import 'package:sklad_komforta_app/features/company/company_profile_form.dart';
 
 void main() {
+  test('новые юрлица без НДС, сохранённые ставки не меняются', () {
+    expect(LegalEntityModel(id: '', name: '', companyType: 'ooo').vatRates, [
+      null,
+    ]);
+    expect(
+      CompanyProfileDraft(
+        organizationName: 'Склад',
+      ).ensureLegalEntity().vatRates,
+      [null],
+    );
+    expect(
+      LegalEntityModel.fromJson({
+        'id': 'saved',
+        'name': 'Склад',
+        'companyType': 'ooo',
+        'vatRates': [20],
+      }).vatRates,
+      [20],
+    );
+  });
   test('старые плоские реквизиты читаются только в юрлицо', () {
     final profile = CompanyProfileDraft.fromJson({
       'organizationName': 'Склад',

@@ -34,7 +34,7 @@ void main() {
     tokens: _MemoryTokenRepository(),
   )..accessToken = 'access-token';
 
-  test('комплектация читается из API и сохраняется без цен', () {
+  test('комплектация читается из API и сохраняет поля канбана', () {
     final order = OrderDocument.fromJson(_orderJson());
     expect(order.title, 'Лесная, 5');
     expect(order.reorderPositionIds, {'row-2'});
@@ -63,6 +63,34 @@ void main() {
     expect(restored.reorderPositionIds, {'row-2'});
     expect(restored.sourceQuote?.cardNumber, 7);
   });
+
+  test(
+    'цены комплектации сохраняются в values и восстанавливаются после ответа API',
+    () {
+      final order = OrderDocument.fromJson(_orderJson());
+      final row = order.categories.single.sections.single.positions.first;
+      row
+        ..basePrice = 1500.75
+        ..purchasePrice = 900.25
+        ..markupPercent = 12
+        ..discountPercent = 5;
+      final expectedTotal = row.lineTotal;
+      final restored = OrderDocument.fromJson(order.toJson());
+      final result = restored.categories.single.sections.single.positions.first;
+      expect(result.basePrice, 1500.75);
+      expect(result.purchasePrice, 900.25);
+      expect(result.markupPercent, 12);
+      expect(result.discountPercent, 5);
+      expect(result.lineTotal, expectedTotal);
+      result.purchasePrice = 123.45;
+      final second = OrderDocument.fromJson(restored.toSnapshot());
+      expect(
+        second.categories.single.sections.single.positions.first.purchasePrice,
+        123.45,
+      );
+      expect(row.values['supplier'], 'ВентАид');
+    },
+  );
 
   test(
     'фильтры по поставщику и статусу, подсветка дозаказа и сохранение',

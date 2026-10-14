@@ -3,11 +3,17 @@ import 'package:flutter/material.dart';
 /// Одно значение выпадающего поля. `null` используется для пунктов вроде
 /// «Все разделы» или «Не выбрано» и не требует специальных строк-маркеров.
 final class AppSelectOption<T> {
-  const AppSelectOption({required this.value, required this.label, this.color});
+  const AppSelectOption({
+    required this.value,
+    required this.label,
+    this.color,
+    this.highlighted = false,
+  });
 
   final T? value;
   final String label;
   final Color? color;
+  final bool highlighted;
 }
 
 /// Единое выпадающее поле приложения.
@@ -61,6 +67,19 @@ final class AppSelectField<T> extends StatelessWidget {
           menuChildren: [
             for (final option in options)
               MenuItemButton(
+                style: option.highlighted
+                    ? ButtonStyle(
+                        backgroundColor: WidgetStatePropertyAll(
+                          Theme.of(context).colorScheme.primaryContainer,
+                        ),
+                        foregroundColor: WidgetStatePropertyAll(
+                          Theme.of(context).colorScheme.onPrimaryContainer,
+                        ),
+                        textStyle: const WidgetStatePropertyAll(
+                          TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      )
+                    : null,
                 closeOnActivate: true,
                 onPressed: active
                     ? () {

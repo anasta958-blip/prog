@@ -1654,7 +1654,11 @@ final class _TypeTabs extends StatelessWidget {
             AppSelectOption(
               value: item.id,
               label:
-                  '${item.name}${item.id == controller.draft!.clientSelectedProposalTypeId ? ' (Выбран клиентом)' : ''}',
+                  '${item.name}${item.selectedByClient || item.id == controller.draft!.clientSelectedProposalTypeId ? ' (Выбран клиентом)' : ''}',
+              highlighted:
+                  item.id == type?.id ||
+                  item.selectedByClient ||
+                  item.id == controller.draft!.clientSelectedProposalTypeId,
             ),
         ],
         onChanged: (id) {
@@ -1709,6 +1713,9 @@ final class _VariantTabs extends StatelessWidget {
               value: item.id,
               label:
                   '${item.name}${type.selectedByClient && item.id == type.selectedVariantId ? ' (Выбран клиентом)' : ''}',
+              highlighted:
+                  item.id == variant?.id ||
+                  (type.selectedByClient && item.id == type.selectedVariantId),
             ),
         ],
         onChanged: (id) {

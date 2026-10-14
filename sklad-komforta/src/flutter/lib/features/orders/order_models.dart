@@ -4,8 +4,8 @@ import 'package:sklad_komforta_app/features/quotes/quote_models.dart';
 ///
 /// Дерево позиций хранится в моделях редактора КП ([QuoteCategoryDraft] и
 /// ниже), поэтому таблица позиций, автопоиск по каталогу и Enter-навигация
-/// общие с КП. Цен в комплектации нет: сервер принимает только наименование,
-/// маркировку, единицу, количество и значения полей канбана.
+/// общие с КП. Настроенные денежные поля сохраняются в values вместе с
+/// остальными полями канбана, без отдельных ценовых колонок в контракте API.
 final class OrderDocument {
   OrderDocument({
     required this.title,
@@ -80,19 +80,30 @@ final class OrderDocument {
                     if (position['fromQuote'] == true) {
                       fromQuote.add(id);
                     }
-                    return QuotePositionDraft(
-                      id: id,
-                      catalogItemId: position['catalogItemId'] as String?,
-                      name: position['name'] as String? ?? '',
-                      marking: position['marking'] as String? ?? '',
-                      unit: position['unit'] as String? ?? '',
-                      quantity: (position['quantity'] as num?)?.toDouble() ?? 1,
-                      basePrice: 0,
-                      values: Map<String, dynamic>.from(
-                        (position['values'] as Map<String, dynamic>?) ??
-                            const {},
-                      ),
+                    final values = Map<String, dynamic>.from(
+                      (position['values'] as Map<String, dynamic>?) ?? const {},
                     );
+                    return QuotePositionDraft(
+                        id: id,
+                        catalogItemId: position['catalogItemId'] as String?,
+                        name: position['name'] as String? ?? '',
+                        marking: position['marking'] as String? ?? '',
+                        unit: position['unit'] as String? ?? '',
+                        quantity:
+                            (position['quantity'] as num?)?.toDouble() ?? 1,
+                        basePrice:
+                            (values['base_price'] as num?)?.toDouble() ?? 0,
+                        purchasePrice: (values['purchase_price'] as num?)
+                            ?.toDouble(),
+                        markupPercent: (values['markup_value'] as num?)
+                            ?.toDouble(),
+                        discountPercent: (values['discount_value'] as num?)
+                            ?.toDouble(),
+                        excludeFromTotals: values['excluded_from_calc'] == true,
+                        values: values,
+                      )
+                      ..configuredLineTotal = (values['line_total'] as num?)
+                          ?.toDouble();
                   })
                   .toList(),
             );
@@ -153,7 +164,16 @@ final class OrderDocument {
                       'marking': position.marking.trim(),
                       'unit': position.unit.trim(),
                       'quantity': position.quantity,
-                      'values': position.values,
+                      'values': {
+                        ...position.values,
+                        'base_price':
+                            position.manualPrice ?? position.basePrice,
+                        'purchase_price': position.purchasePrice,
+                        'markup_value': position.markupPercent,
+                        'discount_value': position.discountPercent,
+                        'excluded_from_calc': position.excludeFromTotals,
+                        'line_total': position.lineTotal,
+                      },
                     },
                 ],
               },

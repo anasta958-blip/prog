@@ -51,6 +51,12 @@ void main() {
     for (var i = 0; i < 15; i++) {
       controller.addVariant();
     }
+    types.first
+      ..selectedByClient = true
+      ..selectedVariantId = types.first.variants.first.id;
+    types[1]
+      ..selectedByClient = true
+      ..selectedVariantId = types[1].variants.first.id;
     controller.activeVariant!.categories.addAll([
       for (var i = 0; i < 10; i++)
         QuoteCategoryDraft(id: 'layout-$i', name: 'Категория $i', sections: []),
@@ -85,6 +91,13 @@ void main() {
         );
         expect(type.options, hasLength(18));
         expect(variant.options, hasLength(16));
+        expect(type.options.first.highlighted, isTrue);
+        expect(type.options[1].highlighted, isTrue);
+        expect(type.options[1].label, contains('Выбран клиентом'));
+        expect(type.options[2].highlighted, isFalse);
+        expect(variant.options.first.highlighted, isTrue);
+        expect(variant.options.last.highlighted, isTrue);
+        expect(variant.options[1].highlighted, isFalse);
         final typeField = find.byWidgetPredicate(
           (w) => w is AppSelectField<String> && w.label == 'Тип предложения',
         );
