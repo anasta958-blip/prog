@@ -512,9 +512,9 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
   /// Выбор варианта в режиме «один вариант». Повторное нажатие на выбранный
   /// вариант снимает выбор: тип можно оставить без выбора.
   void _selectVariant(QuoteClientProposalType type, String? variantId) {
-    if (loading || variantId == null) return;
+    if (loading) return;
     setState(() {
-      if (selectedVariants[type.id] == variantId) {
+      if (variantId == null || selectedVariants[type.id] == variantId) {
         selectedVariants.remove(type.id);
       } else {
         selectedVariants[type.id] = variantId;

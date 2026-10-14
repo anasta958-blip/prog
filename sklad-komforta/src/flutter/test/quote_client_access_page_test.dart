@@ -14,6 +14,26 @@ const _config = AppConfig(
 );
 
 void main() {
+  testWidgets('кружок радиокнопки выбирает и снимает выбор варианта', (
+    tester,
+  ) async {
+    await _open(tester, (_) async => _ok(_quote(selected: true)));
+    final radio = find.byType(Radio<String>).first;
+
+    await tester.tap(radio);
+    await tester.pumpAndSettle();
+    expect(find.text('Выбран: Оптимальный вариант с монтажом'), findsOneWidget);
+
+    await tester.tap(radio);
+    await tester.pumpAndSettle();
+    expect(find.text('Вариант не выбран'), findsOneWidget);
+
+    await tester.tap(radio);
+    await tester.pumpAndSettle();
+    expect(find.text('Выбран: Оптимальный вариант с монтажом'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('ошибка выбора видна, повторная попытка сохраняет выбор', (
     tester,
   ) async {

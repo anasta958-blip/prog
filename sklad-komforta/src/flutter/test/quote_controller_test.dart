@@ -92,10 +92,11 @@ void main() {
         expect(type.options, hasLength(18));
         expect(variant.options, hasLength(16));
         expect(type.options.first.highlighted, isTrue);
-        expect(type.options[1].highlighted, isTrue);
+        expect(type.options[1].highlighted, isFalse);
         expect(type.options[1].label, contains('Выбран клиентом'));
         expect(type.options[2].highlighted, isFalse);
-        expect(variant.options.first.highlighted, isTrue);
+        expect(variant.options.first.highlighted, isFalse);
+        expect(variant.options.first.label, contains('Выбран клиентом'));
         expect(variant.options.last.highlighted, isTrue);
         expect(variant.options[1].highlighted, isFalse);
         final typeField = find.byWidgetPredicate(
