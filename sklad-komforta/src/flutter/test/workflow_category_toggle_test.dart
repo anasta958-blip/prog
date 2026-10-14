@@ -86,13 +86,14 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Поля').first);
       await tester.pumpAndSettle();
-      final toggle = find.bySemanticsLabel('Развернуть поля канбана');
-      await tester.ensureVisible(toggle);
-      await tester.tap(toggle);
-      await tester.pumpAndSettle();
       final selector = find.byKey(
         const ValueKey('supplier-filter-source-orders-equipment'),
       );
+      expect(selector, findsNothing);
+      await tester.tap(find.text('Канбаны').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.bySemanticsLabel('Развернуть канбан').first);
+      await tester.pumpAndSettle();
       await tester.ensureVisible(selector);
       final field = tester.widget<AppSelectField<String>>(selector);
       expect(field.options.map((item) => item.value), [null, 'custom_vendor']);

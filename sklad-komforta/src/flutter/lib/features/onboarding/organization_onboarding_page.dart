@@ -1081,7 +1081,7 @@ final class _OrganizationOnboardingPageState
           setState(() => workflow.orderSettings.shipmentStatuses = values),
     );
     // Оба справочника в одну строку; на узком экране — друг под другом.
-    return LayoutBuilder(
+    final dictionaries = LayoutBuilder(
       builder: (context, constraints) => constraints.maxWidth < 640
           ? Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1099,6 +1099,25 @@ final class _OrganizationOnboardingPageState
                 Expanded(child: shipmentStatuses),
               ],
             ),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        dictionaries,
+        const SizedBox(height: 16),
+        const Text('Фильтр поставщика по категориям'),
+        if (workflow.categories.isEmpty)
+          const Text('Сначала подключите категории во вкладке «Поля».'),
+        for (final selection in workflow.categories)
+          for (final category in draft.categories.where(
+            (item) => item.clientId == selection.categoryClientId,
+          )) ...[
+            const SizedBox(height: 12),
+            Text(category.name),
+            const SizedBox(height: 4),
+            _supplierFilterSource(workflow, category, selection),
+          ],
+      ],
     );
   }
 
@@ -1861,11 +1880,6 @@ final class _OrganizationOnboardingPageState
                       'Поля на карточке',
                       style: TextStyle(fontWeight: FontWeight.w700),
                     ),
-                    if (workflow.specialization ==
-                        WorkflowSpecialization.order) ...[
-                      const SizedBox(height: 12),
-                      _supplierFilterSource(workflow, category, selection),
-                    ],
                     const SizedBox(height: 8),
                     ReorderableListView.builder(
                       shrinkWrap: true,

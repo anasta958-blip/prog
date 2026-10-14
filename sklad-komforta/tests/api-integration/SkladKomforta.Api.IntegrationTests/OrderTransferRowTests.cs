@@ -46,6 +46,20 @@ public sealed class OrderTransferRowTests
     }
 
     [Fact]
+    public void CustomFieldsIncludingCalculatedTotalsDoNotAffectIdentity()
+    {
+        var first = Row(2);
+        var values = Row(3).Values.ToDictionary(item => item.Key, item => item.Value);
+        values["custom_total"] = JsonSerializer.SerializeToElement(300m);
+        values["custom_supplier"] = JsonSerializer.SerializeToElement("Other supplier");
+        var second = Row(3) with { Values = values };
+        Assert.Equal(OrderTransferHandler.KeyOf(first), OrderTransferHandler.KeyOf(second));
+        Assert.Equal(5m, OrderTransferHandler.MergeRows(first, second).Quantity);
+        values["group"] = JsonSerializer.SerializeToElement("Other group");
+        Assert.NotEqual(OrderTransferHandler.KeyOf(first), OrderTransferHandler.KeyOf(second));
+    }
+
+    [Fact]
     public void OtherFieldDifferencesRemainSeparate()
     {
         var first = Row(2);

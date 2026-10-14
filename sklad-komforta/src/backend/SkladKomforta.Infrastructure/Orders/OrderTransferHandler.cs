@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using SkladKomforta.Application.Identity;
+using SkladKomforta.Application.Onboarding;
 using SkladKomforta.Application.Quotes;
 using SkladKomforta.Infrastructure.Kanban;
 using static SkladKomforta.Infrastructure.Orders.OrderStore;
@@ -381,7 +382,7 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
                 row = row with
                 {
                     Key = KeyOf(row),
-                    LegacyKeys = [KeyOf(row, includeTotal: true), KeyOf(row, legacy: true)],
+                    LegacyKeys = [KeyOf(row, includeTotal: true), KeyOf(row, legacy: true), KeyOf(row, allFields: true)],
                 };
                 if (byKey.TryGetValue(row.Key, out var index))
                     rows[index] = MergeRows(rows[index], row);
@@ -420,7 +421,7 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
     }
 
     /// <summary>Отпечаток строки без количества и зависящей от него суммы.</summary>
-    internal static string KeyOf(TransferRow row, bool includeTotal = false, bool legacy = false)
+    internal static string KeyOf(TransferRow row, bool includeTotal = false, bool legacy = false, bool allFields = false)
     {
         var preserveRepresentation = includeTotal || legacy;
         var canonical = JsonSerializer.Serialize(new object?[]
@@ -428,6 +429,7 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
             row.CatalogCategoryId, row.CatalogSectionId, preserveRepresentation ? row.CatalogItemId : null,
             row.Name.Trim(), row.Marking.Trim(), row.Unit.Trim(),
             row.Values.Where(item => includeTotal || item.Key is not "quantity" and not "line_total")
+                .Where(item => preserveRepresentation || allFields || OnboardingFieldRegistry.IsSystemField(item.Key))
                 .OrderBy(item => item.Key, StringComparer.Ordinal)
                 .ToDictionary(item => item.Key,
                     item => preserveRepresentation ? item.Value : NormalizeKeyValue(item.Value),
