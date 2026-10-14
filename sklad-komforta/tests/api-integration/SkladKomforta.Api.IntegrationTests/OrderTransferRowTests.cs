@@ -1,4 +1,5 @@
 using System.Text.Json;
+using SkladKomforta.Application.Onboarding;
 using SkladKomforta.Infrastructure.Orders;
 
 namespace SkladKomforta.Api.IntegrationTests;
@@ -57,6 +58,36 @@ public sealed class OrderTransferRowTests
         Assert.Equal(5m, OrderTransferHandler.MergeRows(first, second).Quantity);
         values["group"] = JsonSerializer.SerializeToElement("Other group");
         Assert.NotEqual(OrderTransferHandler.KeyOf(first), OrderTransferHandler.KeyOf(second));
+    }
+
+    [Fact]
+    public void MergedQuantityRecalculatesPipelineAndOnlyCalculationRules()
+    {
+        var first = Row(2);
+        var values = first.Values.ToDictionary(item => item.Key, item => item.Value);
+        values["custom_price"] = JsonSerializer.SerializeToElement(5m);
+        values["custom_total"] = JsonSerializer.SerializeToElement(10m);
+        first = first with { CalculationInputs = values };
+        var merged = OrderTransferHandler.MergeRows(first, Row(3));
+        var rules = new[]
+        {
+            new CalculationRuleDraft("calc", "Calculation", "equipment", "row_calculation", true, null, [],
+                [new RuleActionDraft("set_field", "custom_result", SourceFieldCode: "custom_total")]),
+            new CalculationRuleDraft("change", "Change", "equipment", "field_change", true, null, [],
+                [new RuleActionDraft("set_field", "custom_price", ConstantValue: "999")]),
+            new CalculationRuleDraft("save", "Save", "equipment", "card_saving", true, null, [],
+                [new RuleActionDraft("block_save", Message: "Must not run")]),
+        };
+        var result = OrderTransferHandler.RecalculateRow(merged, "equipment", rules,
+            [new MoneyPipelineDraft("equipment", "custom_price", null, null, null, "quantity", "custom_total", 2, true)],
+            null, new HashSet<string> { "custom_total", "custom_result", "line_total" });
+        Assert.Equal(5m, result.Quantity);
+        Assert.Equal(25m, result.Values["custom_total"].GetDecimal());
+        Assert.Equal(25m, result.Values["custom_result"].GetDecimal());
+        Assert.Equal(25m, result.Values["line_total"].GetDecimal());
+        Assert.DoesNotContain("custom_price", result.Values.Keys);
+        Assert.Equal(merged.Key, result.Key);
+        Assert.Equal(10m, values["custom_total"].GetDecimal());
     }
 
     [Fact]

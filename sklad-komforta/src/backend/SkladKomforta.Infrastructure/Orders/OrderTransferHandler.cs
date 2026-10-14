@@ -6,6 +6,7 @@ using SkladKomforta.Application.Identity;
 using SkladKomforta.Application.Onboarding;
 using SkladKomforta.Application.Quotes;
 using SkladKomforta.Infrastructure.Kanban;
+using SkladKomforta.Infrastructure.Quotes;
 using static SkladKomforta.Infrastructure.Orders.OrderStore;
 
 namespace SkladKomforta.Infrastructure.Orders;
@@ -184,12 +185,13 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
         bool reorder,
         CancellationToken token)
     {
-        var existing = new Dictionary<string, (Guid Id, decimal? SourceQuantity)>(StringComparer.Ordinal);
+        var runtime = await PostgresQuoteService.ReadCalculationConfigurationAsync(connection, transaction, token);
+        var existing = new Dictionary<string, (Guid Id, decimal? SourceQuantity, decimal Quantity, IReadOnlyDictionary<string, JsonElement> Values)>(StringComparer.Ordinal);
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
             command.CommandText = """
-                SELECT position.id, position.source_key, position.source_quantity
+                SELECT position.id, position.source_key, position.source_quantity, position.quantity, position.values::text
                   FROM order_positions AS position
                   JOIN order_sections AS section ON section.id = position.order_section_id
                   JOIN order_categories AS category ON category.id = section.order_category_id
@@ -198,7 +200,8 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
             Add(command, "order_id", orderId);
             await using var reader = await command.ExecuteReaderAsync(token);
             while (await reader.ReadAsync(token))
-                existing[reader.GetString(1)] = (reader.GetGuid(0), reader.IsDBNull(2) ? null : reader.GetDecimal(2));
+                existing[reader.GetString(1)] = (reader.GetGuid(0), reader.IsDBNull(2) ? null : reader.GetDecimal(2),
+                    reader.GetDecimal(3), JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(reader.GetString(4), JsonOptions)!);
         }
 
         // Сохраняем поля существующей строки при переходе со старого ключа,
@@ -213,7 +216,7 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
                 ("key", row.Key), ("id", current.Id));
             existing.Remove(legacyKey);
             // Пересчитываем количество и сумму объединённой строки.
-            existing[row.Key] = (current.Id, null);
+            existing[row.Key] = (current.Id, null, current.Quantity, current.Values);
         }
 
         var wanted = rows.Select(row => row.Key).ToHashSet(StringComparer.Ordinal);
@@ -225,16 +228,25 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
         {
             if (existing.TryGetValue(row.Key, out var current))
             {
-                if (current.SourceQuantity != row.Quantity)
-                    await ExecuteAsync(connection, transaction, """
-                        UPDATE order_positions
-                           SET quantity = @quantity, source_quantity = @quantity,
-                               values = values || CAST(@totals AS jsonb),
-                               updated_by = @actor, updated_at = now()
-                         WHERE id = @id
-                        """, token, ("id", current.Id), ("quantity", row.Quantity), ("actor", actorUserId),
-                        ("totals", JsonSerializer.Serialize(row.Values.Where(item => item.Key == "line_total")
-                            .ToDictionary(item => item.Key, item => item.Value), JsonOptions)));
+                var quantity = current.SourceQuantity != row.Quantity ? row.Quantity : current.Quantity;
+                var recalculated = row with { Quantity = quantity };
+                if (runtime.CategoryClientIds.TryGetValue(row.CatalogCategoryId, out var category))
+                {
+                    var inputs = (row.CalculationInputs ?? row.Values).ToDictionary(item => item.Key, item => item.Value);
+                    foreach (var item in current.Values) inputs[item.Key] = item.Value;
+                    recalculated = RecalculateRow(row with { Quantity = quantity, CalculationInputs = inputs }, category,
+                        runtime.Rules, runtime.Pipelines, runtime.PercentFields.GetValueOrDefault(category),
+                        row.Values.Keys.ToHashSet(StringComparer.Ordinal));
+                }
+                await ExecuteAsync(connection, transaction, """
+                    UPDATE order_positions
+                       SET quantity = @quantity, source_quantity = @source_quantity,
+                           values = values || CAST(@totals AS jsonb),
+                           updated_by = @actor, updated_at = now()
+                     WHERE id = @id
+                    """, token, ("id", current.Id), ("quantity", recalculated.Quantity), ("source_quantity", row.Quantity), ("actor", actorUserId),
+                    ("totals", JsonSerializer.Serialize(recalculated.Values.Where(item => recalculated.CalculatedFields.Contains(item.Key))
+                        .ToDictionary(item => item.Key, item => item.Value), JsonOptions)));
                 continue;
             }
 
@@ -368,8 +380,9 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
                 if (reader.IsDBNull(0)) continue;
                 var categoryId = reader.GetGuid(0);
                 if (!boardFields.TryGetValue(categoryId, out var allowed)) continue;
-                var values = (JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(reader.GetString(9), JsonOptions)
-                              ?? new Dictionary<string, JsonElement>())
+                var inputs = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(reader.GetString(9), JsonOptions)
+                             ?? new Dictionary<string, JsonElement>();
+                var values = inputs
                     .Where(item => allowed.Contains(item.Key) && !SystemFieldCodes.Contains(item.Key))
                     .OrderBy(item => item.Key, StringComparer.Ordinal)
                     .ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
@@ -382,6 +395,7 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
                 row = row with
                 {
                     Key = KeyOf(row),
+                    CalculationInputs = inputs,
                     LegacyKeys = [KeyOf(row, includeTotal: true), KeyOf(row, legacy: true), KeyOf(row, allFields: true)],
                 };
                 if (byKey.TryGetValue(row.Key, out var index))
@@ -400,7 +414,41 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
         if (rows.Count == 0)
             throw new IdentityException(409, "order_transfer_empty",
                 "В выбранном в КП нет позиций категорий, доступных канбану комплектации.");
-        return rows;
+        var runtime = await PostgresQuoteService.ReadCalculationConfigurationAsync(connection, transaction, token);
+        return rows.Select(row => runtime.CategoryClientIds.TryGetValue(row.CatalogCategoryId, out var category)
+            ? RecalculateRow(row, category, runtime.Rules, runtime.Pipelines,
+                runtime.PercentFields.GetValueOrDefault(category), boardFields[row.CatalogCategoryId])
+            : row).ToArray();
+    }
+
+    internal static TransferRow RecalculateRow(
+        TransferRow row, string category, IReadOnlyList<CalculationRuleDraft> rules,
+        IReadOnlyList<MoneyPipelineDraft> pipelines, IReadOnlySet<string>? percentFields,
+        IReadOnlySet<string> allowed)
+    {
+        var inputs = row.CalculationInputs ?? row.Values;
+        decimal? Number(string code) => inputs.TryGetValue(code, out var value)
+            && value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out var number) ? number : null;
+        var calculationRules = rules.Where(rule => rule.EventType is "row_calculation" or "variant_calculation").ToArray();
+        var calculatedFields = calculationRules.Where(rule => rule.IsEnabled && rule.CategoryClientId == category)
+            .SelectMany(rule => rule.Actions)
+            .Where(action => action.ActionType is "calculate_field" or "set_field")
+            .Select(action => action.TargetFieldCode!)
+            .Concat(pipelines.Where(pipeline => pipeline.CategoryClientId == category).Select(pipeline => pipeline.ResultFieldCode))
+            .Append("line_total").Append("excluded_from_calc").ToHashSet(StringComparer.Ordinal);
+        var result = QuoteConfiguredCalculationEngine.Calculate(new SaveQuotePositionRequest(
+            null, row.CatalogItemId, row.Name, row.Marking, row.Unit, row.Quantity,
+            Number("purchase_price"), Number("base_price") ?? 0m, null,
+            Number("markup_value"), Number("discount_value"),
+            inputs.TryGetValue("excluded_from_calc", out var excluded) && excluded.ValueKind == JsonValueKind.True,
+            inputs), category, calculationRules, pipelines, percentFields);
+        return row with
+        {
+            Quantity = result.Quantity,
+            Values = result.Values.Where(item => allowed.Contains(item.Key) && !SystemFieldCodes.Contains(item.Key))
+                .ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal),
+            CalculatedFields = calculatedFields,
+        };
     }
 
     private static async Task<bool> ChosenExistsAsync(
@@ -590,5 +638,7 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
         string Key)
     {
         public IReadOnlyList<string> LegacyKeys { get; init; } = [];
+        public IReadOnlyDictionary<string, JsonElement>? CalculationInputs { get; init; }
+        public IReadOnlySet<string> CalculatedFields { get; init; } = new HashSet<string> { "line_total" };
     }
 }

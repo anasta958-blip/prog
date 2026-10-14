@@ -693,7 +693,7 @@ internal sealed class PostgresQuoteService(
             ("selected_at", selectedAt ?? DateTimeOffset.UtcNow));
     }
 
-    private static async Task<QuoteCalculationConfiguration> ReadCalculationConfigurationAsync(
+    internal static async Task<QuoteCalculationConfiguration> ReadCalculationConfigurationAsync(
         DbConnection connection,
         DbTransaction transaction,
         CancellationToken token)
@@ -734,7 +734,7 @@ internal sealed class PostgresQuoteService(
                 ?? new Dictionary<string, IReadOnlyDictionary<string, string>>());
     }
 
-    private sealed record QuoteCalculationConfiguration(
+    internal sealed record QuoteCalculationConfiguration(
         IReadOnlyDictionary<Guid, string> CategoryClientIds,
         IReadOnlyList<CalculationRuleDraft> Rules,
         IReadOnlyList<MoneyPipelineDraft> Pipelines,
