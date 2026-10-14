@@ -30,6 +30,22 @@ public sealed class OrderTransferRowTests
     }
 
     [Fact]
+    public void CatalogIdentityAndNumericScaleDoNotSplitIdenticalProducts()
+    {
+        var first = Row(2) with { CatalogItemId = Guid.NewGuid() };
+        var values = Row(3).Values.ToDictionary(item => item.Key, item => item.Value);
+        values["base_price"] = JsonSerializer.Deserialize<JsonElement>("100.00");
+        var second = Row(3) with { CatalogItemId = Guid.NewGuid(), Values = values };
+
+        Assert.Equal(OrderTransferHandler.KeyOf(first), OrderTransferHandler.KeyOf(second));
+        Assert.NotEqual(OrderTransferHandler.KeyOf(first, legacy: true),
+            OrderTransferHandler.KeyOf(second, legacy: true));
+        var merged = OrderTransferHandler.MergeRows(first, second);
+        Assert.Equal(5m, merged.Quantity);
+        Assert.Equal(500m, merged.Values["line_total"].GetDecimal());
+    }
+
+    [Fact]
     public void OtherFieldDifferencesRemainSeparate()
     {
         var first = Row(2);

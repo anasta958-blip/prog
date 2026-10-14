@@ -378,7 +378,11 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
                     reader.IsDBNull(4) ? null : reader.GetGuid(4),
                     reader.GetString(5), reader.GetString(6), reader.GetString(7),
                     reader.GetDecimal(8), values, string.Empty);
-                row = row with { Key = KeyOf(row), LegacyKeys = [KeyOf(row, includeTotal: true)] };
+                row = row with
+                {
+                    Key = KeyOf(row),
+                    LegacyKeys = [KeyOf(row, includeTotal: true), KeyOf(row, legacy: true)],
+                };
                 if (byKey.TryGetValue(row.Key, out var index))
                     rows[index] = MergeRows(rows[index], row);
                 else
@@ -416,18 +420,32 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
     }
 
     /// <summary>Отпечаток строки без количества и зависящей от него суммы.</summary>
-    internal static string KeyOf(TransferRow row, bool includeTotal = false)
+    internal static string KeyOf(TransferRow row, bool includeTotal = false, bool legacy = false)
     {
+        var preserveRepresentation = includeTotal || legacy;
         var canonical = JsonSerializer.Serialize(new object?[]
         {
-            row.CatalogCategoryId, row.CatalogSectionId, row.CatalogItemId,
+            row.CatalogCategoryId, row.CatalogSectionId, preserveRepresentation ? row.CatalogItemId : null,
             row.Name.Trim(), row.Marking.Trim(), row.Unit.Trim(),
             row.Values.Where(item => includeTotal || item.Key is not "quantity" and not "line_total")
                 .OrderBy(item => item.Key, StringComparer.Ordinal)
-                .ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal),
+                .ToDictionary(item => item.Key,
+                    item => preserveRepresentation ? item.Value : NormalizeKeyValue(item.Value),
+                    StringComparer.Ordinal),
         }, JsonOptions);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
     }
+
+    private static JsonElement NormalizeKeyValue(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.Number when value.TryGetDecimal(out var number) =>
+            JsonSerializer.Deserialize<JsonElement>(number.ToString("G29", System.Globalization.CultureInfo.InvariantCulture)),
+        JsonValueKind.Object => JsonSerializer.SerializeToElement(value.EnumerateObject()
+            .OrderBy(property => property.Name, StringComparer.Ordinal)
+            .ToDictionary(property => property.Name, property => NormalizeKeyValue(property.Value))),
+        JsonValueKind.Array => JsonSerializer.SerializeToElement(value.EnumerateArray().Select(NormalizeKeyValue)),
+        _ => value,
+    };
 
     internal static TransferRow MergeRows(TransferRow first, TransferRow second)
     {

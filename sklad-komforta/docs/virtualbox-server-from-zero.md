@@ -1341,7 +1341,17 @@ git status --short
 git pull --ff-only
 git log -1 --oneline
 sudo python3 scripts/server.py config
+
+пересборка конкретного контейнера
+
+sudo docker compose \
+  --project-name sklad-komforta-server \
+  --env-file .env.server \
+  -f compose.server.yaml \
+  up -d --build --no-deps --wait web
+
 sudo python3 scripts/server.py up
+
 sudo python3 scripts/server.py status
 ~~~
 
@@ -1357,6 +1367,131 @@ public/tenant-схем. Миграции требуют отдельной пр�
 После ручного unpublish connector нужно явно вернуть через publish.
 Откат кода сам по себе не откатывает изменённую БД.
 
+Проверка миграций
+~~~bash
+sudo docker exec sklad-komforta-server-postgres-1 sh -lc \
+'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+SELECT o.name, o.schema_name, max(m.version) AS last_migration
+FROM public.organizations o
+LEFT JOIN public.tenant_migrations m ON m.organization_id = o.id
+GROUP BY o.id, o.name, o.schema_name;
+"'
+~~~
+
+остановка контейнеров для миграции
+
+~~~bash
+sudo docker stop \
+  sklad-komforta-server-cloudflared-1 \
+  sklad-komforta-server-web-1 \
+  sklad-komforta-server-api-1 \
+  sklad-komforta-server-worker-1
+~~~
+
+запускаем миграцию указав файлы миграции (для одной организации)
+~~~bash
+(
+  set -eu
+  printf 'BEGIN;\n'
+  printf 'SET LOCAL search_path TO tenant_2393e92d218b465080dbed9c02c4325b, public;\n'
+
+  for version in \
+    0042_order_supplier_filter
+  do
+    cat "migrations/tenant/$version.sql"
+    printf '\n'
+    printf "INSERT INTO public.tenant_migrations (organization_id, version)
+SELECT id, '%s' FROM public.organizations
+WHERE schema_name = current_schema();\n" "$version"
+  done
+
+  printf 'COMMIT;\n'
+) | sudo docker exec -i sklad-komforta-server-postgres-1 \
+  sh -lc 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+
+  ~~~
+
+запускаем миграцию указав файлы миграции (для всех организации)
+~~~bash
+(
+  set -euo pipefail
+  cd ~/apps/prog/sklad-komforta
+
+  # Перечисли нужные миграции без расширения .sql.
+  versions=(
+    0041_drop_organization_profile_legacy
+    0042_order_supplier_filter
+  )
+
+  sql=$(mktemp)
+  trap 'rm -f "$sql"' EXIT
+
+  printf 'BEGIN;\n' > "$sql"
+  printf 'LOCK TABLE public.tenant_migrations IN SHARE ROW EXCLUSIVE MODE;\n' >> "$sql"
+
+  for version in $(printf '%s\n' "${versions[@]}" | sort -u); do
+    [[ "$version" =~ ^[0-9]{4}_[a-z0-9_]+$ ]] || exit 1
+    file="migrations/tenant/$version.sql"
+    [[ -s "$file" ]] || { echo "Нет файла: $file" >&2; exit 1; }
+
+    # Разделители не должны встречаться внутри файла миграции.
+    if grep -Fq -e '$migration_body$' -e '$migration_sql$' "$file"; then
+      echo "Конфликт SQL-разделителей: $file" >&2
+      exit 1
+    fi
+
+    printf 'DO $migration_body$\nDECLARE\n' >> "$sql"
+    printf "  v constant text := '%s';\n" "$version" >> "$sql"
+    cat >> "$sql" <<'SQL'
+  org record;
+  migration_text text := $migration_sql$
+SQL
+    cat "$file" >> "$sql"
+    cat >> "$sql" <<'SQL'
+
+$migration_sql$;
+BEGIN
+  FOR org IN
+    SELECT id, name, schema_name
+    FROM public.organizations ORDER BY schema_name
+  LOOP
+    IF EXISTS (
+      SELECT 1 FROM public.tenant_migrations
+      WHERE organization_id = org.id AND version = v
+    ) THEN
+      RAISE NOTICE 'Пропущено: % / %', org.name, v;
+      CONTINUE;
+    END IF;
+
+    PERFORM set_config(
+      'search_path', format('%I, public', org.schema_name), true);
+    EXECUTE replace(
+      migration_text, '__TENANT_SCHEMA__', format('%I', org.schema_name));
+
+    INSERT INTO public.tenant_migrations (organization_id, version)
+    VALUES (org.id, v);
+    RAISE NOTICE 'Применено: % / %', org.name, v;
+  END LOOP;
+END
+$migration_body$;
+SQL
+  done
+
+  printf 'COMMIT;\n' >> "$sql"
+  sudo docker exec -i sklad-komforta-server-postgres-1 \
+    sh -lc 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < "$sql"
+)
+
+~~~
+
+
+  после чего запускаем всё обратно
+~~~bash
+   sudo python3 scripts/server.py up
+   sudo python3 scripts/server.py publish
+   app.skladkomforta.dpdns.org
+   sudo python3 scripts/server.py status
+~~~
 ### 15.3. Диагностика
 
 <a id="monitoring"></a>
