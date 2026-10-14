@@ -13,6 +13,8 @@
     <PackageReference Include="PDFsharp-MigraDoc" Version="6.2.4" />
     <PackageReference Include="PdfPig" Version="0.1.16" />
     <PackageReference Include="StackExchange.Redis" Version="3.1.13" />
+    <!-- Override vulnerable transitive versions from PDFsharp and MimeKit. -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
   </ItemGroup>
 
   <ItemGroup>
