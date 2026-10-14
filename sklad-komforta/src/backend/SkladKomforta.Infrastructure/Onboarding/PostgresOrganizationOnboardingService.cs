@@ -280,10 +280,11 @@ internal sealed class PostgresOrganizationOnboardingService(
                 var category = workflowCategories[categoryIndex];
                 var categoryId = categoryIds[category.CategoryClientId];
                 await ExecuteAsync(connection, transaction, """
-                    INSERT INTO workflow_categories (workflow_id, category_id, sort_order)
-                    VALUES (@workflow_id, @category_id, @sort)
+                    INSERT INTO workflow_categories (workflow_id, category_id, sort_order, supplier_filter_field_code)
+                    VALUES (@workflow_id, @category_id, @sort, @supplier_field)
                     """, token,
-                    ("workflow_id", workflowId), ("category_id", categoryId), ("sort", categoryIndex));
+                    ("workflow_id", workflowId), ("category_id", categoryId), ("sort", categoryIndex),
+                    ("supplier_field", (object?)category.SupplierFilterFieldCode ?? DBNull.Value));
 
                 for (var fieldIndex = 0; fieldIndex < category.FieldCodes.Count; fieldIndex++)
                     await ExecuteAsync(connection, transaction, """

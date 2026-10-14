@@ -684,7 +684,7 @@ internal sealed class PostgresKanbanService(
                          ON dictionary_item.dictionary_type_id = dictionary_type.id
                        WHERE dictionary_type.code = category_field.dictionary_code
                      ), '[]'::jsonb)
-                   END::text
+                   END::text, workflow_category.supplier_filter_field_code
             FROM workflow_categories AS workflow_category
             JOIN catalog_categories AS category ON category.id = workflow_category.category_id
             LEFT JOIN workflow_category_fields AS workflow_field
@@ -712,7 +712,8 @@ internal sealed class PostgresKanbanService(
                     categoryId,
                     reader.GetString(1),
                     reader.GetInt32(2),
-                    JsonSerializer.Deserialize<List<KanbanSectionSummary>>(reader.GetString(3), JsonOptions) ?? []);
+                    JsonSerializer.Deserialize<List<KanbanSectionSummary>>(reader.GetString(3), JsonOptions) ?? [],
+                    reader.IsDBNull(11) ? null : reader.GetString(11));
                 categories.Add(categoryId, category);
             }
             if (reader.IsDBNull(4)) continue;
@@ -1515,9 +1516,10 @@ internal sealed class PostgresKanbanService(
         Guid id,
         string name,
         int sortOrder,
-        IReadOnlyList<KanbanSectionSummary> sections)
+        IReadOnlyList<KanbanSectionSummary> sections,
+        string? supplierFilterFieldCode)
     {
         public List<KanbanFieldSummary> Fields { get; } = [];
-        public KanbanCategorySummary ToSummary() => new(id, name, sortOrder, sections, Fields);
+        public KanbanCategorySummary ToSummary() => new(id, name, sortOrder, sections, Fields, supplierFilterFieldCode);
     }
 }

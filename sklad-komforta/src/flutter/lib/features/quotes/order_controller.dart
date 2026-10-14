@@ -56,8 +56,40 @@ final class OrderController extends QuoteController {
 
   @override
   bool isPositionVisible(QuotePositionDraft position) =>
-      _matches(supplierFilter, position.values['supplier']) &&
+      (!hasSupplierField ||
+          _matches(supplierFilter, _supplierValue(position))) &&
       _matches(shipmentFilter, position.values['shipment_status']);
+
+  String? _supplierCode(String? categoryId) {
+    for (final category in _board?.categories ?? const <KanbanCategory>[]) {
+      if (category.categoryId != categoryId) continue;
+      final code = category.supplierFilterFieldCode;
+      if (category.fields.any(
+        (field) => field.code == code && field.fieldType == 'dictionary',
+      )) {
+        return code;
+      }
+    }
+    return null;
+  }
+
+  dynamic _fieldValue(QuotePositionDraft position, String? code) =>
+      switch (code) {
+        'unit' => position.unit,
+        null => null,
+        _ => position.values[code],
+      };
+
+  dynamic _supplierValue(QuotePositionDraft position) {
+    for (final category in order?.categories ?? const <QuoteCategoryDraft>[]) {
+      if (category.sections.any(
+        (section) => section.positions.contains(position),
+      )) {
+        return _fieldValue(position, _supplierCode(category.catalogCategoryId));
+      }
+    }
+    return null;
+  }
 
   static bool _matches(Set<String> filter, dynamic value) =>
       filter.isEmpty || filter.contains(_filterValue(value));
@@ -74,12 +106,17 @@ final class OrderController extends QuoteController {
               position.marking.trim().isNotEmpty));
 
   /// Значения фильтра «Поставщик»: справочник поля и значения в строках.
-  List<String> get supplierOptions => _filterOptions('supplier');
+  List<String> get supplierOptions =>
+      hasSupplierField ? _filterOptions(null) : const [];
 
   /// Значения фильтра «Статус отгрузки»: справочник канбана и значения в строках.
   List<String> get shipmentOptions => _filterOptions('shipment_status');
 
-  bool get hasSupplierField => _boardHasField('supplier');
+  bool get hasSupplierField =>
+      _board?.categories.any(
+        (category) => _supplierCode(category.categoryId) != null,
+      ) ??
+      false;
   bool get hasShipmentField => _boardHasField('shipment_status');
 
   bool _boardHasField(String code) =>
@@ -88,14 +125,17 @@ final class OrderController extends QuoteController {
       ) ??
       false;
 
-  List<String> _filterOptions(String code) {
+  List<String> _filterOptions(String? code) {
     final result = <String>[];
     void add(String value) {
       if (!result.contains(value)) result.add(value);
     }
 
     for (final category in _board?.categories ?? const <KanbanCategory>[]) {
-      for (final field in category.fields.where((item) => item.code == code)) {
+      final sourceCode = code ?? _supplierCode(category.categoryId);
+      for (final field in category.fields.where(
+        (item) => item.code == sourceCode,
+      )) {
         for (final option in field.options) {
           add(option.value);
         }
@@ -103,9 +143,10 @@ final class OrderController extends QuoteController {
     }
     var hasEmpty = false;
     for (final category in order?.categories ?? const <QuoteCategoryDraft>[]) {
+      final sourceCode = code ?? _supplierCode(category.catalogCategoryId);
       for (final section in category.sections) {
         for (final position in section.positions) {
-          final value = _filterValue(position.values[code]);
+          final value = _filterValue(_fieldValue(position, sourceCode));
           if (value.isEmpty) {
             hasEmpty = true;
           } else {

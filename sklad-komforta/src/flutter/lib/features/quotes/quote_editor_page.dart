@@ -2860,7 +2860,7 @@ List<KanbanDictionaryOption> _legacyDictionaryOptions(
 double _fieldWidth(KanbanField field) => switch (field.code) {
   'name' => 170,
   'marking' => 155,
-  'group' || 'supplier' => 135,
+  'group' => 135,
   'quantity' => 82,
   'unit' => 105,
   'note' || 'technical_note' => 170,
@@ -3698,7 +3698,7 @@ final class _RowSelect extends StatelessWidget {
                         ? 'Этого значения нет в справочнике'
                         : null,
                     child: Text(
-                      value ?? '',
+                      value == null || value!.isEmpty ? 'Не выбрано' : value!,
                       key: missing ? const Key('row-select-missing') : null,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,

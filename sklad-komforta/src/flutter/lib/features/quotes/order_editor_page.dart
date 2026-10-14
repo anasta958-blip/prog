@@ -805,6 +805,9 @@ final class _OrderFiltersBar extends StatelessWidget {
       _MultiSelectFilter(
         key: const Key('order-filter-supplier'),
         label: 'Поставщик',
+        emptyMessage: controller.hasSupplierField
+            ? 'Значений пока нет'
+            : 'Не настроено поле фильтрации. Выберите источник в настройках канбана.',
         options: controller.supplierOptions,
         selected: controller.supplierFilter,
         onToggle: controller.toggleSupplierFilter,
@@ -835,6 +838,7 @@ final class _MultiSelectFilter extends StatelessWidget {
     required this.options,
     required this.selected,
     required this.onToggle,
+    this.emptyMessage = 'Значений пока нет',
     super.key,
   });
 
@@ -842,6 +846,7 @@ final class _MultiSelectFilter extends StatelessWidget {
   final List<String> options;
   final Set<String> selected;
   final ValueChanged<String> onToggle;
+  final String emptyMessage;
 
   static String _title(String value) =>
       value == orderFilterEmptyValue ? 'Не указан' : value;
@@ -849,8 +854,7 @@ final class _MultiSelectFilter extends StatelessWidget {
   @override
   Widget build(BuildContext context) => MenuAnchor(
     menuChildren: [
-      if (options.isEmpty)
-        const MenuItemButton(child: Text('Значений пока нет')),
+      if (options.isEmpty) MenuItemButton(child: Text(emptyMessage)),
       for (final option in options)
         CheckboxMenuButton(
           key: ValueKey('$label-$option'),

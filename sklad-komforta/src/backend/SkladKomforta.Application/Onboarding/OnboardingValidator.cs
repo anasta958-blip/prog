@@ -302,6 +302,18 @@ public static class OnboardingValidator
                             $"Поле «{definition.Label}» не настроено в категории «{category.Name}».");
                 }
 
+                if (selection.SupplierFilterFieldCode is { } supplierCode)
+                {
+                    var supplierField = category.Fields.FirstOrDefault(item => item.FieldCode == supplierCode);
+                    var isDictionary = supplierField is not null
+                        ? OnboardingFieldRegistry.FieldTypeOf(supplierField) == "dictionary"
+                        : supplierCode == "shipment_status";
+                    if (workflow.Specialization != WorkflowSpecializationCodes.Order ||
+                        !selection.FieldCodes.Contains(supplierCode) || !isDictionary)
+                        Fail("onboarding_supplier_filter_invalid",
+                            $"Источник фильтра поставщика в категории «{category.Name}» должен быть подключённым полем-справочником канбана комплектации.");
+                }
+
             }
         }
     }

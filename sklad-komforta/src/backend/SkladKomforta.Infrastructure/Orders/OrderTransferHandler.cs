@@ -200,6 +200,21 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
                 existing[reader.GetString(1)] = (reader.GetGuid(0), reader.IsDBNull(2) ? null : reader.GetDecimal(2));
         }
 
+        // Сохраняем поля существующей строки при переходе со старого ключа,
+        // в котором расчётная сумма ещё участвовала в сравнении.
+        foreach (var row in rows.Where(row => !existing.ContainsKey(row.Key)))
+        {
+            var legacyKey = row.LegacyKeys.FirstOrDefault(existing.ContainsKey);
+            if (legacyKey is null) continue;
+            var current = existing[legacyKey];
+            await ExecuteAsync(connection, transaction,
+                "UPDATE order_positions SET source_key = @key WHERE id = @id", token,
+                ("key", row.Key), ("id", current.Id));
+            existing.Remove(legacyKey);
+            // Пересчитываем количество и сумму объединённой строки.
+            existing[row.Key] = (current.Id, null);
+        }
+
         var wanted = rows.Select(row => row.Key).ToHashSet(StringComparer.Ordinal);
         foreach (var (_, position) in existing.Where(item => !wanted.Contains(item.Key)))
             await ExecuteAsync(connection, transaction,
@@ -213,9 +228,12 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
                     await ExecuteAsync(connection, transaction, """
                         UPDATE order_positions
                            SET quantity = @quantity, source_quantity = @quantity,
+                               values = values || CAST(@totals AS jsonb),
                                updated_by = @actor, updated_at = now()
                          WHERE id = @id
-                        """, token, ("id", current.Id), ("quantity", row.Quantity), ("actor", actorUserId));
+                        """, token, ("id", current.Id), ("quantity", row.Quantity), ("actor", actorUserId),
+                        ("totals", JsonSerializer.Serialize(row.Values.Where(item => item.Key == "line_total")
+                            .ToDictionary(item => item.Key, item => item.Value), JsonOptions)));
                 continue;
             }
 
@@ -360,9 +378,9 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
                     reader.IsDBNull(4) ? null : reader.GetGuid(4),
                     reader.GetString(5), reader.GetString(6), reader.GetString(7),
                     reader.GetDecimal(8), values, string.Empty);
-                row = row with { Key = KeyOf(row) };
+                row = row with { Key = KeyOf(row), LegacyKeys = [KeyOf(row, includeTotal: true)] };
                 if (byKey.TryGetValue(row.Key, out var index))
-                    rows[index] = rows[index] with { Quantity = rows[index].Quantity + row.Quantity };
+                    rows[index] = MergeRows(rows[index], row);
                 else
                 {
                     byKey[row.Key] = rows.Count;
@@ -397,15 +415,35 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
         return await command.ExecuteScalarAsync(token) is true;
     }
 
-    /// <summary>Отпечаток строки: совпадение по всем переносимым полям, кроме количества.</summary>
-    private static string KeyOf(TransferRow row)
+    /// <summary>Отпечаток строки без количества и зависящей от него суммы.</summary>
+    internal static string KeyOf(TransferRow row, bool includeTotal = false)
     {
         var canonical = JsonSerializer.Serialize(new object?[]
         {
             row.CatalogCategoryId, row.CatalogSectionId, row.CatalogItemId,
-            row.Name.Trim(), row.Marking.Trim(), row.Unit.Trim(), row.Values,
+            row.Name.Trim(), row.Marking.Trim(), row.Unit.Trim(),
+            row.Values.Where(item => includeTotal || item.Key is not "quantity" and not "line_total")
+                .OrderBy(item => item.Key, StringComparer.Ordinal)
+                .ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal),
         }, JsonOptions);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
+    }
+
+    internal static TransferRow MergeRows(TransferRow first, TransferRow second)
+    {
+        var values = first.Values.ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
+        // Сумма зависит от количества и не определяет идентичность позиции.
+        if (first.Values.TryGetValue("line_total", out var firstTotal)
+            && second.Values.TryGetValue("line_total", out var secondTotal)
+            && firstTotal.ValueKind == JsonValueKind.Number && secondTotal.ValueKind == JsonValueKind.Number
+            && firstTotal.TryGetDecimal(out var left) && secondTotal.TryGetDecimal(out var right))
+            values["line_total"] = JsonSerializer.SerializeToElement(left + right);
+        return first with
+        {
+            Quantity = first.Quantity + second.Quantity,
+            Values = values,
+            LegacyKeys = first.LegacyKeys.Concat(second.LegacyKeys).Distinct().ToArray(),
+        };
     }
 
     /// <summary>Перемещает карточку того же рабочего объекта в указанный столбец другого канбана.</summary>
@@ -518,7 +556,7 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
 
     private sealed record LinkedOrder(Guid CardId, Guid ColumnId, Guid? OrderId);
 
-    private sealed record TransferRow(
+    internal sealed record TransferRow(
         Guid CatalogCategoryId,
         string CategoryName,
         Guid? CatalogSectionId,
@@ -529,5 +567,8 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
         string Unit,
         decimal Quantity,
         IReadOnlyDictionary<string, JsonElement> Values,
-        string Key);
+        string Key)
+    {
+        public IReadOnlyList<string> LegacyKeys { get; init; } = [];
+    }
 }

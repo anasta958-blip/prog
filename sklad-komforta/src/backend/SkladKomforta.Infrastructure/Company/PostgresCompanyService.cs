@@ -564,11 +564,13 @@ internal sealed class PostgresCompanyService(
                 var categoryId = categoryIds[selection.CategoryClientId];
                 retainedWorkflowCategoryIds.Add(categoryId);
                 await ExecuteAsync(connection, transaction, """
-                    INSERT INTO workflow_categories (workflow_id, category_id, sort_order)
-                    VALUES (@workflow_id, @category_id, @sort)
+                    INSERT INTO workflow_categories (workflow_id, category_id, sort_order, supplier_filter_field_code)
+                    VALUES (@workflow_id, @category_id, @sort, @supplier_field)
                     ON CONFLICT (workflow_id, category_id)
-                    DO UPDATE SET sort_order = EXCLUDED.sort_order
-                    """, token, ("workflow_id", id), ("category_id", categoryId), ("sort", categoryIndex));
+                    DO UPDATE SET sort_order = EXCLUDED.sort_order,
+                                  supplier_filter_field_code = EXCLUDED.supplier_filter_field_code
+                    """, token, ("workflow_id", id), ("category_id", categoryId), ("sort", categoryIndex),
+                    ("supplier_field", (object?)selection.SupplierFilterFieldCode ?? DBNull.Value));
                 await ExecuteAsync(connection, transaction, """
                     DELETE FROM workflow_category_fields
                     WHERE workflow_id = @workflow_id AND category_id = @category_id

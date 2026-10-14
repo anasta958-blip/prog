@@ -34,6 +34,78 @@ void main() {
     tokens: _MemoryTokenRepository(),
   )..accessToken = 'access-token';
 
+  test('источник поставщика выбирается по коду для каждой категории', () async {
+    final auth = authorized();
+    final board = KanbanBoard(
+      id: _orderBoard.id,
+      code: _orderBoard.code,
+      name: _orderBoard.name,
+      specialization: WorkflowSpecialization.order,
+      columns: _orderBoard.columns,
+      transitions: [],
+      categories: [
+        for (final (id, code) in [
+          ('equipment', 'custom_vendor'),
+          ('materials', 'custom_store'),
+        ])
+          KanbanCategory(
+            categoryId: id,
+            name: id,
+            sortOrder: 0,
+            supplierFilterFieldCode: code,
+            fields: [
+              KanbanField(
+                code: code,
+                label: 'Переименованное поле',
+                fieldType: 'dictionary',
+                isRequired: false,
+                sortOrder: 0,
+                options: const [
+                  KanbanDictionaryOption(
+                    id: 'option',
+                    value: 'Из справочника',
+                    sortOrder: 0,
+                  ),
+                ],
+              ),
+            ],
+          ),
+      ],
+    );
+    final controller = OrderController(
+      config,
+      auth,
+      orderGateway: _MemoryOrderGateway(),
+      catalogGateway: _CatalogGateway(),
+      companyGateway: _CompanyGateway(),
+    );
+    await controller.initializeOrder(board: board, card: _card());
+    await Future<void>.delayed(Duration.zero);
+    final rows = controller.activeVariant!.positions.toList();
+    rows.first.values['custom_vendor'] = 'Продавец A';
+    final other = OrderDocument.fromJson(_orderJson()).categories.single
+      ..catalogCategoryId = 'materials';
+    other.sections.first.positions.first.values['custom_store'] = 'Продавец Б';
+    controller.order!.categories.add(other);
+    expect(
+      controller.supplierOptions,
+      containsAll(['Из справочника', 'Продавец A', 'Продавец Б', '']),
+    );
+    expect(controller.supplierOptions, isNot(contains('ВентАид')));
+    controller.toggleSupplierFilter('Продавец Б');
+    expect(controller.isPositionVisible(rows.first), isFalse);
+    expect(
+      controller.isPositionVisible(other.sections.first.positions.first),
+      isTrue,
+    );
+    controller.clearFilters();
+    controller.toggleSupplierFilter('');
+    expect(controller.isPositionVisible(rows.last), isTrue);
+    expect(controller.isPositionVisible(rows.first), isFalse);
+    controller.dispose();
+    auth.dispose();
+  });
+
   test('комплектация читается из API и сохраняет поля канбана', () {
     final order = OrderDocument.fromJson(_orderJson());
     expect(order.title, 'Лесная, 5');
@@ -382,6 +454,7 @@ void main() {
     final missing = find.byKey(const Key('row-select-missing'));
     expect(missing, findsOneWidget);
     expect(tester.widget<Text>(missing).data, 'В пути');
+    expect(find.text('Не выбрано'), findsWidgets);
     await tester.tap(missing);
     await tester.pumpAndSettle();
     expect(find.text('В пути (нет в справочнике)'), findsOneWidget);
@@ -546,6 +619,7 @@ const _orderBoard = KanbanBoard(
       categoryId: 'equipment',
       name: 'Оборудование',
       sortOrder: 0,
+      supplierFilterFieldCode: 'supplier',
       sections: [KanbanSection(id: 'blocks', name: 'Блоки', sortOrder: 0)],
       fields: [
         KanbanField(

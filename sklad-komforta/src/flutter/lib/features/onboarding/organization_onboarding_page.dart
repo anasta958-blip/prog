@@ -1107,6 +1107,11 @@ final class _OrganizationOnboardingPageState
   void _sanitizeWorkflowLinks() {
     for (final workflow in draft.workflows) {
       final targets = _transferTargets(workflow);
+      if (workflow.specialization != WorkflowSpecialization.order) {
+        for (final category in workflow.categories) {
+          category.supplierFilterFieldCode = null;
+        }
+      }
       for (final column in workflow.columns) {
         final transfer = column.transferTo;
         if (transfer != null &&
@@ -1856,6 +1861,11 @@ final class _OrganizationOnboardingPageState
                       'Поля на карточке',
                       style: TextStyle(fontWeight: FontWeight.w700),
                     ),
+                    if (workflow.specialization ==
+                        WorkflowSpecialization.order) ...[
+                      const SizedBox(height: 12),
+                      _supplierFilterSource(workflow, category, selection),
+                    ],
                     const SizedBox(height: 8),
                     ReorderableListView.builder(
                       shrinkWrap: true,
@@ -1882,9 +1892,13 @@ final class _OrganizationOnboardingPageState
                             '${workflow.code}:${category.clientId}:$fieldCode',
                           ),
                           index: index,
-                          onDelete: () => setState(
-                            () => selection.fieldCodes.remove(fieldCode),
-                          ),
+                          onDelete: () => setState(() {
+                            selection.fieldCodes.remove(fieldCode);
+                            if (selection.supplierFilterFieldCode ==
+                                fieldCode) {
+                              selection.supplierFilterFieldCode = null;
+                            }
+                          }),
                           child: Text(
                             _categoryFieldLabel(category, fieldCode),
                             style: const TextStyle(fontWeight: FontWeight.w600),
@@ -1935,6 +1949,57 @@ final class _OrganizationOnboardingPageState
           ],
         ),
       ),
+    );
+  }
+
+  Widget _supplierFilterSource(
+    WorkflowDraft workflow,
+    CatalogCategoryDraft category,
+    WorkflowCategoryDraft selection,
+  ) {
+    final fields = _workflowAvailableFields(category, workflow)
+        .where(
+          (field) =>
+              field.fieldType == 'dictionary' &&
+              selection.fieldCodes.contains(field.code),
+        )
+        .toList();
+    final source = selection.supplierFilterFieldCode;
+    final missing =
+        source != null && !fields.any((field) => field.code == source);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        AppSelectField<String>(
+          key: ValueKey(
+            'supplier-filter-source-${workflow.code}-${category.clientId}',
+          ),
+          label: 'Источник фильтра «Поставщик»',
+          value: source,
+          options: [
+            const AppSelectOption(value: null, label: 'Не настроено'),
+            if (missing)
+              AppSelectOption(
+                value: source,
+                label: 'Поле недоступно — выберите другое',
+              ),
+            for (final field in fields)
+              AppSelectOption(
+                value: field.code,
+                label: _categoryFieldLabel(category, field.code),
+              ),
+          ],
+          onChanged: (value) =>
+              setState(() => selection.supplierFilterFieldCode = value),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          fields.isEmpty
+              ? 'Сначала подключите поле типа «Справочник» в этой категории.'
+              : 'Фильтр берёт значения из выбранного поля этой категории. Переименование поля не меняет привязку.',
+          style: const TextStyle(color: Color(0xFF8EA5C4), fontSize: 12),
+        ),
+      ],
     );
   }
 

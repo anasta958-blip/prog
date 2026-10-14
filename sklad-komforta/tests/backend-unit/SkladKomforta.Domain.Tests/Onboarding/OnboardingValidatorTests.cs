@@ -7,6 +7,31 @@ namespace SkladKomforta.Domain.Tests.Onboarding;
 /// <summary>Фиксирует серверные инварианты первичной настройки организации.</summary>
 public sealed class OnboardingValidatorTests
 {
+    [Theory]
+    [InlineData("custom_vendor", "order", true)]
+    [InlineData("name", "order", false)]
+    [InlineData("missing", "order", false)]
+    [InlineData("custom_vendor", "quote", false)]
+    public void SupplierFilterRequiresSelectedDictionaryField(string code, string specialization, bool valid)
+    {
+        var source = ValidDraft();
+        var category = source.Categories[0] with
+        {
+            Fields = [.. source.Categories[0].Fields,
+                new CatalogFieldDraft("custom_vendor", true, false, "units", "Продавец", "dictionary")],
+        };
+        var workflow = source.Workflows[0] with
+        {
+            Specialization = specialization,
+            Columns = [new WorkflowColumnDraft("quote-1", "Создание", "#4D8DFF", [specialization])],
+            Categories = [new WorkflowCategoryDraft("equipment", ["name", "custom_vendor"], code)],
+        };
+        var draft = source with { Categories = [category], Workflows = [workflow] };
+        if (valid) OnboardingValidator.Validate(draft, false);
+        else Assert.Equal("onboarding_supplier_filter_invalid",
+            Assert.Throws<IdentityException>(() => OnboardingValidator.Validate(draft, false)).Code);
+    }
+
     [Fact]
     public void DefaultCatalogFieldsContainOnlyFixedCategoryFields()
     {
@@ -15,6 +40,7 @@ public sealed class OnboardingValidatorTests
             .ToArray();
 
         Assert.DoesNotContain("retail_price", OnboardingFieldRegistry.All.Select(field => field.Code));
+        Assert.DoesNotContain("supplier", OnboardingFieldRegistry.All.Select(field => field.Code));
         Assert.Equal(["name", "marking", "quantity", "unit", "base_price"], defaults);
     }
 
@@ -477,7 +503,7 @@ public sealed class OnboardingValidatorTests
         var source = ValidDraft();
         var workflow = source.Workflows[0] with
         {
-            Categories = [new WorkflowCategoryDraft("equipment", ["supplier"])],
+            Categories = [new WorkflowCategoryDraft("equipment", ["note"])],
         };
 
         var exception = Assert.Throws<IdentityException>(() =>

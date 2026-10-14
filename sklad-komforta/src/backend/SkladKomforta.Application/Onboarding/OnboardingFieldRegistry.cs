@@ -51,7 +51,6 @@ public static class OnboardingFieldRegistry
         new("completion", "Комплектация", "text", true, false, "Основные"),
         new("quantity", "Количество", "number", true, false, "Основные"),
         new("unit", "Единица измерения", "dictionary", true, false, "Основные"),
-        new("supplier", "Поставщик", "dictionary", true, false, "Основные"),
         new("purchase_price", "Закупочная цена", "money", true, false, "Цены и расчёты"),
         new("minimal_price", "Минимальная цена", "money", true, false, "Цены и расчёты"),
         new("markup_value", "Наценка", "percent", true, false, "Цены и расчёты"),

@@ -1320,6 +1320,10 @@ void main() {
     expect(section.positions, hasLength(1));
     final row = section.positions.single;
     expect(focused(), 'quote-entry-${row.id}-name');
+    row.unit = '';
+    controller.positionChanged();
+    await tester.pumpAndSettle();
+    expect(find.text('Не выбрано'), findsWidgets);
 
     await tester.enterText(input(row.id, 'name'), 'вент');
     await tester.pump(const Duration(milliseconds: 250));

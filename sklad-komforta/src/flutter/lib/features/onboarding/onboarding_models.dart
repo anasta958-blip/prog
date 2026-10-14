@@ -191,21 +191,25 @@ final class WorkflowCategoryDraft {
   WorkflowCategoryDraft({
     required this.categoryClientId,
     required this.fieldCodes,
+    this.supplierFilterFieldCode,
   });
 
   String categoryClientId;
   List<String> fieldCodes;
+  String? supplierFilterFieldCode;
 
   factory WorkflowCategoryDraft.fromJson(Map<String, dynamic> json) =>
       WorkflowCategoryDraft(
         categoryClientId: json['categoryClientId'] as String,
         fieldCodes: ((json['fieldCodes'] as List<dynamic>?) ?? const [])
             .cast<String>(),
+        supplierFilterFieldCode: json['supplierFilterFieldCode'] as String?,
       );
 
   Map<String, dynamic> toJson() => {
     'categoryClientId': categoryClientId,
     'fieldCodes': fieldCodes,
+    'supplierFilterFieldCode': supplierFilterFieldCode,
   };
 }
 

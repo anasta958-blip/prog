@@ -217,6 +217,7 @@ final class KanbanCategory {
     required this.sortOrder,
     required this.fields,
     this.sections = const [],
+    this.supplierFilterFieldCode,
   });
 
   final String categoryId;
@@ -224,11 +225,13 @@ final class KanbanCategory {
   final int sortOrder;
   final List<KanbanField> fields;
   final List<KanbanSection> sections;
+  final String? supplierFilterFieldCode;
 
   factory KanbanCategory.fromJson(Map<String, dynamic> json) => KanbanCategory(
     categoryId: json['categoryId'] as String,
     name: json['name'] as String,
     sortOrder: json['sortOrder'] as int,
+    supplierFilterFieldCode: json['supplierFilterFieldCode'] as String?,
     sections: ((json['sections'] as List<dynamic>?) ?? const [])
         .map((item) => KanbanSection.fromJson(item as Map<String, dynamic>))
         .toList(growable: false),

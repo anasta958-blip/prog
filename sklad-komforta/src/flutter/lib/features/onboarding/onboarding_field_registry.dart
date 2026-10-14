@@ -121,12 +121,6 @@ const onboardingFieldDefinitions = <OnboardingFieldDefinition>[
     group: 'Основные',
   ),
   OnboardingFieldDefinition(
-    code: 'supplier',
-    label: 'Поставщик',
-    fieldType: 'dictionary',
-    group: 'Основные',
-  ),
-  OnboardingFieldDefinition(
     code: 'purchase_price',
     label: 'Закупочная цена',
     fieldType: 'money',

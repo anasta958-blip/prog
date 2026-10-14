@@ -4,6 +4,39 @@ import 'package:sklad_komforta_app/features/onboarding/onboarding_field_registry
 import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
 
 void main() {
+  test(
+    'источник поставщика сохраняется по коду, явное отключение не заменяется',
+    () {
+      final category = WorkflowCategoryDraft(
+        categoryClientId: 'equipment',
+        fieldCodes: ['custom_vendor'],
+        supplierFilterFieldCode: 'custom_vendor',
+      );
+      expect(
+        WorkflowCategoryDraft.fromJson(
+          category.toJson(),
+        ).supplierFilterFieldCode,
+        'custom_vendor',
+      );
+      category.supplierFilterFieldCode = null;
+      expect(
+        WorkflowCategoryDraft.fromJson(
+          category.toJson(),
+        ).supplierFilterFieldCode,
+        isNull,
+      );
+      expect(
+        WorkflowCategoryDraft.fromJson({
+          'categoryClientId': 'equipment',
+          'fieldCodes': ['supplier'],
+        }).supplierFilterFieldCode,
+        isNull,
+      );
+    },
+  );
+  test('supplier отсутствует в реестре системных полей', () {
+    expect(onboardingFieldByCode.containsKey('supplier'), isFalse);
+  });
   test('занятые поля объединяют записи правил и конвейеров по категории', () {
     final draft = OrganizationOnboardingDraft.initial();
     final action = RuleActionDraft(

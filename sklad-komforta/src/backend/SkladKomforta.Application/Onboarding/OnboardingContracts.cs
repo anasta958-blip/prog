@@ -32,7 +32,8 @@ public sealed record WorkflowTransitionDraft(string FromClientId, string ToClien
 /// <summary>Категория канбана и упорядоченные поля, отображаемые в её карточке.</summary>
 public sealed record WorkflowCategoryDraft(
     string CategoryClientId,
-    IReadOnlyList<string> FieldCodes);
+    IReadOnlyList<string> FieldCodes,
+    string? SupplierFilterFieldCode = null);
 
 /// <summary>Справочники канбана комплектации.</summary>
 /// <param name="ObjectTypes">Типы объекта (квартира, дом и т. п.).</param>

@@ -72,6 +72,7 @@ public sealed partial class DatabaseRegressionTests
             .Single(item => Text(item!, "code") == "shipment_status")!;
         Assert.Equal("Статус отгрузки", Text(shipment, "label"));
         Assert.Equal(2, shipment["options"]!.AsArray().Count);
+        Assert.Equal("custom_vendor", Text(orderBoard["categories"]![0]!, "supplierFilterFieldCode"));
 
         // Одинаковые позиции выбранных вариантов разных типов суммируются;
         // категория «Работы» в комплектацию не попадает.
@@ -250,13 +251,14 @@ public sealed partial class DatabaseRegressionTests
                 new WorkflowTransitionDraft("compose", "back"), new WorkflowTransitionDraft("montage", "back"),
                 new WorkflowTransitionDraft("back", "compose"),
             ], [
-                new WorkflowCategoryDraft("equipment", ["name", "marking", "quantity", "unit", "custom_note", "shipment_status"]),
+                new WorkflowCategoryDraft("equipment", ["name", "marking", "quantity", "unit", "custom_note", "shipment_status", "custom_vendor"], "custom_vendor"),
             ], "order", new WorkflowOrderSettingsDraft(["Квартира", "Дом"], ["Купить", "На складе"])),
         ],
         [
             new CatalogCategoryDraft("equipment", "Оборудование", [new CatalogSectionDraft("Блоки", [])],
                 [.. OnboardingFieldRegistry.DefaultCatalogFields(),
-                    new CatalogFieldDraft("custom_note", true, false, Label: "Цвет", FieldType: "text")]),
+                    new CatalogFieldDraft("custom_note", true, false, Label: "Цвет", FieldType: "text"),
+                    new CatalogFieldDraft("custom_vendor", true, false, "units", "Продавец", "dictionary")]),
             new CatalogCategoryDraft("services", "Работы", [], OnboardingFieldRegistry.DefaultCatalogFields()),
         ],
         [new EntityFieldDraft("quote", "name", "Наименование", "text", true, true)],
