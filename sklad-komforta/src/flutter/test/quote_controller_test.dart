@@ -1874,6 +1874,7 @@ final class _CatalogGatewayWithRelations
     String? search,
     required int page,
     required int pageSize,
+    String? sort,
   }) async {
     lastSearch = search;
     lastGroupId = groupId;

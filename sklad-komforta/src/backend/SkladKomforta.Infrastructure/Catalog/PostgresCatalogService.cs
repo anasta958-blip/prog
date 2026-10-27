@@ -91,9 +91,10 @@ internal sealed class PostgresCatalogService(
               AND (@status = '' OR item.status = @status)
               AND (@search = '' OR item.name ILIKE '%' || @search || '%'
                    OR item.marking ILIKE '%' || @search || '%')
-            ORDER BY item.updated_at DESC, item.id
+            ORDER BY __CATALOG_ORDER__
             LIMIT @limit OFFSET @offset
             """;
+        command.CommandText = command.CommandText.Replace("__CATALOG_ORDER__", ItemOrderBy(query.Sort), StringComparison.Ordinal);
         AddGuidParameter(command, "category_id", query.CategoryId);
         AddGuidParameter(command, "section_id", query.SectionId);
         AddGuidParameter(command, "group_id", query.GroupId);
@@ -489,7 +490,7 @@ internal sealed class PostgresCatalogService(
               AND (@status = '' OR item.status = @status)
               AND (@search = '' OR item.name ILIKE '%' || @search || '%'
                    OR item.marking ILIKE '%' || @search || '%')
-            ORDER BY item.category_id, item.updated_at DESC, item.id
+            ORDER BY item.sort_order, item.id
             """;
         AddGuidParameter(command, "category_id", query.CategoryId);
         AddGuidParameter(command, "section_id", query.SectionId);
@@ -598,7 +599,7 @@ internal sealed class PostgresCatalogService(
                     UPDATE catalog_items
                     SET category_id = @category_id, section_id = @section_id,
                         group_id = @group_id, name = @name, marking = @marking,
-                        status = @status, values = CAST(@values AS jsonb),
+                        status = @status, values = CAST(@values AS jsonb), sort_order = DEFAULT,
                         updated_by = @actor, updated_at = now()
                     WHERE id = @id AND deleted_at IS NULL
                     """;
@@ -644,6 +645,16 @@ internal sealed class PostgresCatalogService(
     }
 
     /// <inheritdoc />
+    internal static string ItemOrderBy(string? sort) => sort switch
+    {
+        null or "" or "import" => "item.sort_order, item.id",
+        "name_asc" => "lower(item.name) ASC, lower(item.marking) ASC, item.sort_order, item.id",
+        "name_desc" => "lower(item.name) DESC, lower(item.marking) DESC, item.sort_order, item.id",
+        "price_asc" => "CASE WHEN jsonb_typeof(item.values->'base_price') = 'number' THEN (item.values->>'base_price')::numeric END ASC NULLS LAST, item.sort_order, item.id",
+        "price_desc" => "CASE WHEN jsonb_typeof(item.values->'base_price') = 'number' THEN (item.values->>'base_price')::numeric END DESC NULLS LAST, item.sort_order, item.id",
+        _ => throw Invalid("catalog_sort_invalid", "Неизвестный порядок сортировки каталога."),
+    };
+
     public async Task<CatalogBulkResult> ApplyBulkAsync(
         Guid actorUserId,
         CatalogBulkRequest request,

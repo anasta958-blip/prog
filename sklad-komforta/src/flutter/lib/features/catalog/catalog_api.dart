@@ -23,6 +23,7 @@ abstract interface class CatalogGateway {
     String? search,
     required int page,
     required int pageSize,
+    String? sort,
   });
 
   Future<CatalogItem> createItem(String accessToken, CatalogItemDraft draft);
@@ -153,12 +154,14 @@ final class CatalogApi
     String? search,
     required int page,
     required int pageSize,
+    String? sort,
   }) async {
     final query = <String, String>{
       if (status != null && status.isNotEmpty) 'status': status,
       if (search != null && search.trim().isNotEmpty) 'search': search.trim(),
       'page': '$page',
       'pageSize': '$pageSize',
+      'sort': ?sort,
     };
     if (categoryId case final value?) query['categoryId'] = value;
     if (sectionId case final value?) query['sectionId'] = value;

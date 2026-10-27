@@ -1041,6 +1041,7 @@ final class _WidgetCatalogGateway implements CatalogGateway {
     String? search,
     required int page,
     required int pageSize,
+    String? sort,
   }) async => CatalogItemPage(
     items: [_widgetCatalogItem],
     page: 1,

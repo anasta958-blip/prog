@@ -11,6 +11,41 @@ namespace SkladKomforta.Api.IntegrationTests;
 public sealed class CatalogSpreadsheetServiceTests
 {
     [Fact]
+    public async Task ImportPreservesWorksheetRowOrder()
+    {
+        var gateway = new SpreadsheetCatalogStub();
+        var service = new CatalogSpreadsheetService(gateway);
+        var file = await service.CreateTemplateAsync(SpreadsheetCatalogStub.CategoryId, CancellationToken.None);
+        using var input = new MemoryStream();
+        using (var source = new MemoryStream(file.Content))
+        using (var book = new XLWorkbook(source))
+        {
+            var sheet = book.Worksheet("Оборудование");
+            foreach (var (row, name) in new[] { (3, "Ящик"), (4, "Болт"), (5, "Анкер") })
+            {
+                sheet.Cell(row, 2).Value = name;
+                sheet.Cell(row, 3).Value = "M-1";
+                sheet.Cell(row, 5).Value = 10m;
+            }
+            book.SaveAs(input);
+        }
+        input.Position = 0;
+        await service.ImportAsync(Guid.NewGuid(), input, CancellationToken.None);
+        Assert.Equal(["Ящик", "Болт", "Анкер"], gateway.ImportedRows.Select(row => row.Item.Name));
+    }
+
+    [Fact]
+    public void SortUsesSystemFieldsAndRejectsUnknownSql()
+    {
+        Assert.Equal("item.sort_order, item.id", PostgresCatalogService.ItemOrderBy(null));
+        Assert.Contains("lower(item.name) ASC, lower(item.marking) ASC", PostgresCatalogService.ItemOrderBy("name_asc"));
+        Assert.Contains("lower(item.name) DESC, lower(item.marking) DESC", PostgresCatalogService.ItemOrderBy("name_desc"));
+        Assert.Contains("::numeric END ASC NULLS LAST", PostgresCatalogService.ItemOrderBy("price_asc"));
+        Assert.Contains("::numeric END DESC NULLS LAST", PostgresCatalogService.ItemOrderBy("price_desc"));
+        Assert.Throws<SkladKomforta.Application.Identity.IdentityException>(() => PostgresCatalogService.ItemOrderBy("name; DELETE"));
+    }
+
+    [Fact]
     public async Task TemplateLinksNewTargetByRowWithoutTypingIds()
     {
         var gateway = new SpreadsheetCatalogStub();

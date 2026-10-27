@@ -167,7 +167,8 @@ public sealed record CatalogItemQuery(
     string? Search,
     int Page = 1,
     int PageSize = 50,
-    Guid? GroupId = null);
+    Guid? GroupId = null,
+    string? Sort = null);
 
 /// <summary>Данные создания или полной замены редактируемой карточки.</summary>
 public sealed record SaveCatalogItemRequest(

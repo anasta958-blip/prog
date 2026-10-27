@@ -59,6 +59,7 @@ final class CatalogController extends ChangeNotifier {
   String? sectionId;
   String? status;
   String search = '';
+  String sort = 'import';
   int page = 1;
   bool loading = false;
   bool saving = false;
@@ -72,6 +73,7 @@ final class CatalogController extends ChangeNotifier {
   List<CatalogItemImage> images = const [];
   List<CatalogItemRelation> relations = const [];
   final Set<String> selectedIds = <String>{};
+  int _selectionGeneration = 0;
   final Map<String, CatalogItem> _selectedItems = {};
   List<CatalogItem> get bulkItems => selectedIds
       .map((id) => _selectedItems[id])
@@ -218,6 +220,13 @@ final class CatalogController extends ChangeNotifier {
     final target = value.clamp(1, pageCount);
     if (target == page) return;
     page = target;
+    await refresh();
+  }
+
+  Future<void> selectSort(String value) async {
+    if (sort == value || loading || transferBusy) return;
+    sort = value;
+    page = 1;
     await refresh();
   }
 
@@ -610,6 +619,7 @@ final class CatalogController extends ChangeNotifier {
   }
 
   void toggleSelection(String itemId) {
+    ++_selectionGeneration;
     if (!selectedIds.add(itemId)) selectedIds.remove(itemId);
     for (final item in items) {
       if (selectedIds.contains(item.id)) _selectedItems[item.id] = item;
@@ -619,6 +629,7 @@ final class CatalogController extends ChangeNotifier {
   }
 
   void toggleCurrentPage() {
+    ++_selectionGeneration;
     if (currentPageSelected) {
       selectedIds.removeAll(items.map((item) => item.id));
     } else {
@@ -632,10 +643,67 @@ final class CatalogController extends ChangeNotifier {
   }
 
   void clearSelection({bool notify = true}) {
+    ++_selectionGeneration;
     if (selectedIds.isEmpty) return;
     selectedIds.clear();
     _selectedItems.clear();
     if (notify) notifyListeners();
+  }
+
+  /// Выбирает все страницы текущей выборки, не меняя открытую страницу.
+  Future<void> selectAllFiltered() async {
+    if (transferBusy || saving || loading || _disposed) return;
+    final generation = ++_selectionGeneration;
+    final filters = (categoryId, sectionId, status, search);
+    final selectedSort = sort;
+    bool active() =>
+        !_disposed &&
+        generation == _selectionGeneration &&
+        filters == (categoryId, sectionId, status, search);
+    transferBusy = true;
+    error = null;
+    notifyListeners();
+    try {
+      final selected = <String, CatalogItem>{};
+      var nextPage = 1;
+      while (active()) {
+        final loaded = await _authorized(
+          (token) => _api.getItems(
+            accessToken: token,
+            categoryId: filters.$1,
+            sectionId: filters.$2,
+            status: filters.$3,
+            search: filters.$4,
+            page: nextPage,
+            pageSize: 100,
+            sort: selectedSort,
+          ),
+        );
+        if (!active()) return;
+        for (final item in loaded.items) {
+          selected[item.id] = item;
+        }
+        if (nextPage >= loaded.pageCount) break;
+        nextPage++;
+      }
+      if (!active()) return;
+      selectedIds
+        ..clear()
+        ..addAll(selected.keys);
+      _selectedItems
+        ..clear()
+        ..addAll(selected);
+    } on AuthApiException catch (exception) {
+      if (active()) error = exception.message;
+    } on Object {
+      if (active()) {
+        error =
+            'Не удалось выбрать все позиции. Проверьте подключение и повторите попытку.';
+      }
+    } finally {
+      transferBusy = false;
+      if (!_disposed) notifyListeners();
+    }
   }
 
   Future<CatalogSpreadsheetDownload?> downloadTemplate() =>
@@ -772,6 +840,7 @@ final class CatalogController extends ChangeNotifier {
         search: search,
         page: page,
         pageSize: pageSize,
+        sort: sort,
       ),
     );
     result = loaded;

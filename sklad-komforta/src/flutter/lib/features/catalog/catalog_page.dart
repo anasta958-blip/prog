@@ -235,6 +235,27 @@ class _CatalogPageState extends State<CatalogPage> {
               ),
             ),
             SizedBox(height: mobile ? 10 : 14),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final option in const [
+                  ('import', 'По порядку импорта'),
+                  ('name_asc', 'А–Я'),
+                  ('name_desc', 'Я–А'),
+                  ('price_asc', 'Цена ↑'),
+                  ('price_desc', 'Цена ↓'),
+                ])
+                  ChoiceChip(
+                    label: Text(option.$2),
+                    selected: controller.sort == option.$1,
+                    onSelected: controller.loading || controller.transferBusy
+                        ? null
+                        : (_) => controller.selectSort(option.$1),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
             if (mobile)
               AppSelectField<String>(
                 label: 'Категория',
@@ -998,6 +1019,15 @@ final class _BulkToolbar extends StatelessWidget {
           Text(
             'Выбрано: ${controller.selectedIds.length}',
             style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+          OutlinedButton(
+            onPressed:
+                controller.transferBusy ||
+                    controller.loading ||
+                    controller.saving
+                ? null
+                : controller.selectAllFiltered,
+            child: const Text('Выбрать всё'),
           ),
           if (controller.selectedIds.length > 1)
             OutlinedButton.icon(

@@ -20,6 +20,93 @@ void main() {
     environment: 'test',
   );
 
+  for (final filtered in [false, true]) {
+    test('select all spans pages, filtered=$filtered', () async {
+      final api = _MemoryCatalogGateway()..paginate = true;
+      api.items
+        ..clear()
+        ..addAll(List.generate(205, (index) => _item(id: 'item-$index')));
+      final auth = _authorizedController(config);
+      final controller = CatalogController(config, auth, api: api);
+      if (filtered) {
+        controller.categoryId = 'category';
+        controller.sectionId = 'section';
+        controller.status = 'approved';
+        controller.search = 'needle';
+      }
+      await controller.initialize();
+      final visible = controller.items;
+      api.requestedFilters.clear();
+      await controller.selectAllFiltered();
+      expect(controller.selectedIds.length, 205);
+      expect(controller.bulkItems.length, 205);
+      expect(controller.items, same(visible));
+      expect(api.lastPage, 3);
+      expect(
+        api.requestedFilters,
+        everyElement((
+          controller.categoryId,
+          controller.sectionId,
+          controller.status,
+          controller.search,
+        )),
+      );
+      controller.dispose();
+      auth.dispose();
+    });
+  }
+
+  test(
+    'sort resets page and is preserved by filtering and select all',
+    () async {
+      final api = _MemoryCatalogGateway();
+      final auth = _authorizedController(config);
+      final controller = CatalogController(config, auth, api: api);
+      await controller.initialize();
+      controller.page = 4;
+      await controller.selectSort('name_desc');
+      expect(controller.page, 1);
+      expect(api.lastSort, 'name_desc');
+      await controller.selectStatus('approved');
+      expect(api.lastSort, 'name_desc');
+      await controller.selectSort('price_asc');
+      await controller.selectAllFiltered();
+      expect(api.lastSort, 'price_asc');
+      controller.dispose();
+      auth.dispose();
+    },
+  );
+
+  test(
+    'select all preserves selection on failure and ignores cancelled result',
+    () async {
+      final api = _MemoryCatalogGateway()..paginate = true;
+      api.items.addAll(
+        List.generate(100, (index) => _item(id: 'other-$index')),
+      );
+      final auth = _authorizedController(config);
+      final controller = CatalogController(config, auth, api: api);
+      await controller.initialize();
+      controller.toggleSelection(controller.items.first.id);
+      final original = controller.selectedIds.single;
+      api.failPage = 2;
+      await controller.selectAllFiltered();
+      expect(controller.selectedIds, {original});
+      expect(controller.error, isNotNull);
+      expect(controller.transferBusy, isFalse);
+      api.failPage = null;
+      api.readGate = Completer<void>();
+      final pending = controller.selectAllFiltered();
+      controller.clearSelection();
+      api.readGate!.complete();
+      await pending;
+      expect(controller.selectedIds, isEmpty);
+      expect(controller.transferBusy, isFalse);
+      controller.dispose();
+      auth.dispose();
+    },
+  );
+
   testWidgets(
     'catalog search survives leaving and returning and can be cleared',
     (tester) async {
@@ -605,6 +692,10 @@ final class _MemoryCatalogGateway
         CatalogTransferGateway,
         CatalogBulkRelationGateway {
   Completer<void>? writeGate;
+  Completer<void>? readGate;
+  bool paginate = false;
+  int? failPage;
+  final requestedFilters = <(String?, String?, String?, String?)>[];
   @override
   Future<CatalogBulkResult> editBulkRelation({
     required String accessToken,
@@ -646,6 +737,7 @@ final class _MemoryCatalogGateway
   int? lastPage;
   int? lastPageSize;
   String? lastSearch;
+  String? lastSort;
   CatalogItemDraft? createdDraft;
   List<CatalogItemRelation> savedRelations = const [];
   List<String> bulkIds = const [];
@@ -668,12 +760,19 @@ final class _MemoryCatalogGateway
     String? search,
     required int page,
     required int pageSize,
+    String? sort,
   }) async {
     lastPage = page;
     lastPageSize = pageSize;
     lastSearch = search;
+    lastSort = sort;
+    requestedFilters.add((categoryId, sectionId, status, search));
+    await readGate?.future;
+    if (page == failPage) throw StateError('Page failed');
     return CatalogItemPage(
-      items: List.unmodifiable(items),
+      items: List.unmodifiable(
+        paginate ? items.skip((page - 1) * pageSize).take(pageSize) : items,
+      ),
       page: page,
       pageSize: pageSize,
       total: items.length,
