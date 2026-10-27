@@ -56,6 +56,31 @@ void main() {
     });
   }
 
+  test('export forwards every sort mode and current filters', () async {
+    final api = _MemoryCatalogGateway();
+    final auth = _authorizedController(config);
+    final controller = CatalogController(config, auth, api: api);
+    await controller.initialize();
+    controller.categoryId = 'category';
+    controller.sectionId = 'section';
+    controller.status = 'approved';
+    controller.search = 'товар';
+    for (final sort in [
+      'import',
+      'name_asc',
+      'name_desc',
+      'price_asc',
+      'price_desc',
+    ]) {
+      controller.sort = sort;
+      expect(await controller.exportCatalog(), isNotNull);
+      expect(api.lastSort, sort);
+      expect(api.exportFilters, ('category', 'section', 'approved', 'товар'));
+    }
+    controller.dispose();
+    auth.dispose();
+  });
+
   test(
     'sort resets page and is preserved by filtering and select all',
     () async {
@@ -738,6 +763,7 @@ final class _MemoryCatalogGateway
   int? lastPageSize;
   String? lastSearch;
   String? lastSort;
+  (String?, String?, String?, String?)? exportFilters;
   CatalogItemDraft? createdDraft;
   List<CatalogItemRelation> savedRelations = const [];
   List<String> bulkIds = const [];
@@ -858,8 +884,16 @@ final class _MemoryCatalogGateway
     String? sectionId,
     String? status,
     String? search,
-  }) async =>
-      CatalogSpreadsheetDownload(fileName: 'catalog.xlsx', bytes: Uint8List(0));
+    String? sort,
+  }) async {
+    exportFilters = (categoryId, sectionId, status, search);
+    lastSort = sort;
+    lastSearch = search;
+    return CatalogSpreadsheetDownload(
+      fileName: 'catalog.xlsx',
+      bytes: Uint8List(0),
+    );
+  }
 
   @override
   Future<CatalogImportResult> importCatalog({

@@ -56,11 +56,12 @@ internal static class CatalogEndpoints
                 Guid? sectionId,
                 string? status,
                 string? search,
+                string? sort,
                 ICatalogSpreadsheetService service,
                 CancellationToken token) =>
             {
                 var file = await service.ExportAsync(
-                    new CatalogItemQuery(categoryId, sectionId, status, search), token);
+                    new CatalogItemQuery(categoryId, sectionId, status, search, Sort: sort), token);
                 return Results.File(file.Content, file.ContentType, file.FileName);
             })
             .RequireTenantPermission("catalog.view");

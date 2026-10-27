@@ -89,6 +89,7 @@ abstract interface class CatalogTransferGateway {
     String? sectionId,
     String? status,
     String? search,
+    String? sort,
   });
   Future<CatalogImportResult> importCatalog({
     required String accessToken,
@@ -383,8 +384,9 @@ final class CatalogApi
     String? sectionId,
     String? status,
     String? search,
+    String? sort,
   }) {
-    final query = <String, String>{};
+    final query = <String, String>{'sort': ?sort};
     final selectedCategoryId = categoryId;
     final selectedSectionId = sectionId;
     final selectedStatus = status;

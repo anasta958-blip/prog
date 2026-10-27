@@ -490,8 +490,9 @@ internal sealed class PostgresCatalogService(
               AND (@status = '' OR item.status = @status)
               AND (@search = '' OR item.name ILIKE '%' || @search || '%'
                    OR item.marking ILIKE '%' || @search || '%')
-            ORDER BY item.sort_order, item.id
+            ORDER BY __CATALOG_ORDER__
             """;
+        command.CommandText = command.CommandText.Replace("__CATALOG_ORDER__", ItemOrderBy(query.Sort), StringComparison.Ordinal);
         AddGuidParameter(command, "category_id", query.CategoryId);
         AddGuidParameter(command, "section_id", query.SectionId);
         AddParameter(command, "status", status ?? string.Empty);

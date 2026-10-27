@@ -10,6 +10,24 @@ namespace SkladKomforta.Api.IntegrationTests;
 
 public sealed class CatalogSpreadsheetServiceTests
 {
+    [Theory]
+    [InlineData("import")]
+    [InlineData("name_asc")]
+    [InlineData("name_desc")]
+    [InlineData("price_asc")]
+    [InlineData("price_desc")]
+    public async Task ExportPassesSortAndFiltersToCatalog(string sort)
+    {
+        var gateway = new SpreadsheetCatalogStub();
+        var service = new CatalogSpreadsheetService(gateway);
+        var query = new CatalogItemQuery(SpreadsheetCatalogStub.CategoryId, null, "approved", "Вентилятор", Sort: sort);
+        var file = await service.ExportAsync(query, CancellationToken.None);
+        Assert.Equal(query, gateway.ExportQueries[0]);
+        using var stream = new MemoryStream(file.Content);
+        using var book = new XLWorkbook(stream);
+        Assert.Equal("Вентилятор", book.Worksheet("Оборудование").Cell(3, 2).GetString());
+    }
+
     [Fact]
     public async Task ImportPreservesWorksheetRowOrder()
     {
@@ -314,6 +332,7 @@ public sealed class CatalogSpreadsheetServiceTests
         }
 
         public IReadOnlyList<CatalogImportRow> ImportedRows { get; private set; } = [];
+        public List<CatalogItemQuery> ExportQueries { get; } = [];
         public IReadOnlyList<CatalogItemRelationSummary> ExtraRelations { get; init; } = [];
         public IReadOnlyList<CatalogItemSummary> ExtraCandidates { get; set; } = [];
 
@@ -324,6 +343,7 @@ public sealed class CatalogSpreadsheetServiceTests
             CatalogItemQuery query,
             CancellationToken cancellationToken)
         {
+            ExportQueries.Add(query);
             var target = new CatalogItemSummary(
                 ItemId,
                 CategoryId,

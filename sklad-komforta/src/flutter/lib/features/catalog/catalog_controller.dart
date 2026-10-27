@@ -719,6 +719,7 @@ final class CatalogController extends ChangeNotifier {
       sectionId: sectionId,
       status: status,
       search: search,
+      sort: sort,
     ),
   );
 
