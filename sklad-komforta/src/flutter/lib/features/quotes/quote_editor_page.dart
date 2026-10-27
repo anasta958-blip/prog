@@ -1813,22 +1813,40 @@ final class _VariantContent extends StatelessWidget {
       if (variant.categories.isEmpty)
         _EmptyVariant(onAddCategory: onAddCategory, title: emptyTitle)
       else
-        for (final category in variant.categories)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: _CategoryBlock(
-              controller: controller,
-              board: board,
-              category: category,
-              expanded: expandedCategories.contains(category.id),
-              expandedSections: expandedSections,
-              onToggle: () => onToggleCategory(category.id),
-              onToggleSection: onToggleSection,
-              onAddSection: () => onAddSection(category),
-              onAddPosition: (section) => onAddPosition(category, section),
-              columnWidthStore: columnWidthStore,
-            ),
-          ),
+        ReorderableListView(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          buildDefaultDragHandles: false,
+          onReorder: (oldIndex, newIndex) =>
+              controller.reorderCategory(variant, oldIndex, newIndex),
+          children: [
+            for (final category in variant.categories)
+              Padding(
+                key: ValueKey(category.id),
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _CategoryBlock(
+                  reorderControls: _StructureReorderControls(
+                    index: variant.categories.indexOf(category),
+                    count: variant.categories.length,
+                    enabled: !controller.saving,
+                    label: 'категорию',
+                    onReorder: (oldIndex, newIndex) =>
+                        controller.reorderCategory(variant, oldIndex, newIndex),
+                  ),
+                  controller: controller,
+                  board: board,
+                  category: category,
+                  expanded: expandedCategories.contains(category.id),
+                  expandedSections: expandedSections,
+                  onToggle: () => onToggleCategory(category.id),
+                  onToggleSection: onToggleSection,
+                  onAddSection: () => onAddSection(category),
+                  onAddPosition: (section) => onAddPosition(category, section),
+                  columnWidthStore: columnWidthStore,
+                ),
+              ),
+          ],
+        ),
       Align(
         alignment: Alignment.centerLeft,
         child: OutlinedButton.icon(
@@ -1879,8 +1897,65 @@ final class _CategoryHeading extends StatelessWidget {
   );
 }
 
+final class _StructureReorderControls extends StatelessWidget {
+  const _StructureReorderControls({
+    required this.index,
+    required this.count,
+    required this.enabled,
+    required this.label,
+    required this.onReorder,
+  });
+
+  final int index;
+  final int count;
+  final bool enabled;
+  final String label;
+  final void Function(int, int) onReorder;
+
+  @override
+  Widget build(BuildContext context) {
+    if (count < 2) return const SizedBox.shrink();
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ReorderableDragStartListener(
+          index: index,
+          enabled: enabled,
+          child: Tooltip(
+            message: 'Перетащить $label',
+            child: const Padding(
+              padding: EdgeInsets.all(8),
+              child: Icon(Icons.drag_indicator, size: 18),
+            ),
+          ),
+        ),
+        PopupMenuButton<int>(
+          tooltip: 'Переместить $label',
+          enabled: enabled,
+          icon: const Icon(Icons.swap_vert, size: 18),
+          onSelected: (direction) =>
+              onReorder(index, direction < 0 ? index - 1 : index + 2),
+          itemBuilder: (_) => [
+            PopupMenuItem(
+              value: -1,
+              enabled: index > 0,
+              child: const Text('Выше'),
+            ),
+            PopupMenuItem(
+              value: 1,
+              enabled: index < count - 1,
+              child: const Text('Ниже'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
 final class _CategoryBlock extends StatelessWidget {
   const _CategoryBlock({
+    required this.reorderControls,
     required this.controller,
     required this.board,
     required this.category,
@@ -1896,6 +1971,7 @@ final class _CategoryBlock extends StatelessWidget {
   final QuoteController controller;
   final KanbanBoard board;
   final QuoteCategoryDraft category;
+  final Widget reorderControls;
   final bool expanded;
   final Set<String> expandedSections;
   final VoidCallback onToggle;
@@ -1925,6 +2001,7 @@ final class _CategoryBlock extends StatelessWidget {
             child: _CategoryHeading(
               key: Key('quote-category-heading-${category.id}'),
               leading: [
+                reorderControls,
                 CollapseToggle(
                   expanded: expanded,
                   expandTooltip: 'Развернуть категорию',
@@ -2003,25 +2080,43 @@ final class _CategoryBlock extends StatelessWidget {
                 ),
               )
             else
-              for (final section in category.sections)
-                _SectionBlock(
-                  controller: controller,
-                  category: category,
-                  section: section,
-                  fields: [
-                    for (final field in fields)
-                      if (field.code != 'group' ||
-                          controller
-                              .catalogGroups(category, section)
-                              .isNotEmpty)
-                        field,
-                  ],
-                  expanded: expandedSections.contains(section.id),
-                  onToggle: () => onToggleSection(section.id),
-                  onAddPosition: () => onAddPosition(section),
-                  widthScope: category.catalogCategoryId ?? category.id,
-                  columnWidthStore: columnWidthStore,
-                ),
+              ReorderableListView(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                buildDefaultDragHandles: false,
+                onReorder: (oldIndex, newIndex) =>
+                    controller.reorderSection(category, oldIndex, newIndex),
+                children: [
+                  for (final section in category.sections)
+                    _SectionBlock(
+                      key: ValueKey(section.id),
+                      reorderControls: _StructureReorderControls(
+                        index: category.sections.indexOf(section),
+                        count: category.sections.length,
+                        enabled: !controller.saving,
+                        label: 'раздел',
+                        onReorder: (oldIndex, newIndex) => controller
+                            .reorderSection(category, oldIndex, newIndex),
+                      ),
+                      controller: controller,
+                      category: category,
+                      section: section,
+                      fields: [
+                        for (final field in fields)
+                          if (field.code != 'group' ||
+                              controller
+                                  .catalogGroups(category, section)
+                                  .isNotEmpty)
+                            field,
+                      ],
+                      expanded: expandedSections.contains(section.id),
+                      onToggle: () => onToggleSection(section.id),
+                      onAddPosition: () => onAddPosition(section),
+                      widthScope: category.catalogCategoryId ?? category.id,
+                      columnWidthStore: columnWidthStore,
+                    ),
+                ],
+              ),
           ],
         ],
       ),
@@ -2031,6 +2126,8 @@ final class _CategoryBlock extends StatelessWidget {
 
 final class _SectionBlock extends StatefulWidget {
   const _SectionBlock({
+    super.key,
+    required this.reorderControls,
     required this.controller,
     required this.category,
     required this.section,
@@ -2045,6 +2142,7 @@ final class _SectionBlock extends StatefulWidget {
   final QuoteController controller;
   final QuoteCategoryDraft category;
   final QuoteSectionDraft section;
+  final Widget reorderControls;
   final List<KanbanField> fields;
   final bool expanded;
   final VoidCallback onToggle;
@@ -2183,6 +2281,7 @@ final class _SectionBlockState extends State<_SectionBlock> {
         DecoratedBox(
           decoration: const BoxDecoration(color: Color(0xFF132334)),
           child: _SectionHeader(
+            reorderControls: widget.reorderControls,
             controller: controller,
             fields: fields,
             section: section,
@@ -2339,6 +2438,7 @@ bool _isDirectSection(QuoteCategoryDraft category, QuoteSectionDraft section) =>
 
 final class _SectionHeader extends StatelessWidget {
   const _SectionHeader({
+    required this.reorderControls,
     required this.controller,
     required this.fields,
     required this.section,
@@ -2352,6 +2452,7 @@ final class _SectionHeader extends StatelessWidget {
   final List<KanbanField> fields;
   final QuoteSectionDraft section;
   final String title;
+  final Widget reorderControls;
   final bool expanded;
   final VoidCallback onToggle;
   final VoidCallback onAddPosition;
@@ -2377,6 +2478,7 @@ final class _SectionHeader extends StatelessWidget {
       final title = Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          reorderControls,
           CollapseToggle(
             expanded: expanded,
             compact: true,

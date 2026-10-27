@@ -22,6 +22,126 @@ void main() {
     environment: 'test',
   );
 
+  for (final order in [false, true]) {
+    test(
+      'structure reorder preserves content and serialized order, order=$order',
+      () {
+        final auth = AuthController(
+          config,
+          api: _NoopAuthGateway(),
+          tokens: _MemoryTokenRepository(),
+        );
+        final controller = order
+            ? OrderController(config, auth)
+            : QuoteController(config, auth);
+        final variant = QuoteVariantDraft.create();
+        final first = QuoteCategoryDraft(
+          id: 'first',
+          name: 'First',
+          sections: [
+            QuoteSectionDraft(id: 's1', name: 'One', positions: []),
+            QuoteSectionDraft(id: 's2', name: 'Two', positions: []),
+          ],
+        );
+        final second = QuoteCategoryDraft(
+          id: 'second',
+          name: 'Second',
+          sections: [],
+        );
+        variant.categories.addAll([first, second]);
+        controller.reorderCategory(variant, 0, 2);
+        controller.reorderSection(first, 0, 2);
+        expect(variant.categories, [second, first]);
+        expect(first.sections.map((s) => s.id), ['s2', 's1']);
+        expect(controller.dirty, isTrue);
+        final restored = QuoteVariantDraft.fromJson(variant.toJson());
+        expect(restored.categories.map((c) => c.id), ['second', 'first']);
+        expect(restored.categories.last.sections.map((s) => s.id), [
+          's2',
+          's1',
+        ]);
+        controller.reorderCategory(variant, 1, 0);
+        expect(variant.categories, [first, second]);
+        controller.saving = true;
+        controller.reorderCategory(variant, 0, 2);
+        expect(variant.categories, [first, second]);
+        controller.saving = false;
+        controller.reorderSection(first, -1, 2);
+        expect(first.sections.map((s) => s.id), ['s2', 's1']);
+        controller.dispose();
+        auth.dispose();
+      },
+    );
+  }
+
+  testWidgets('category move menu changes the document order', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 1600);
+    addTearDown(tester.view.reset);
+    final auth = AuthController(
+      config,
+      api: _NoopAuthGateway(),
+      tokens: _MemoryTokenRepository(),
+    );
+    final controller = QuoteController(config, auth);
+    final type = QuoteProposalTypeDraft.create();
+    final variant = type.variants.first;
+    variant.categories.addAll([
+      QuoteCategoryDraft(
+        id: 'first',
+        name: 'First',
+        sections: [
+          QuoteSectionDraft(id: 's1', name: 'One', positions: []),
+          QuoteSectionDraft(id: 's2', name: 'Two', positions: []),
+        ],
+      ),
+      QuoteCategoryDraft(id: 'second', name: 'Second', sections: []),
+    ]);
+    controller
+      ..draft = QuoteDraft(
+        kind: QuoteKind.quote,
+        title: 'Test',
+        clientId: '',
+        executorCompanyId: '',
+        selectionMode: 'variant',
+        proposalTypes: [type],
+      )
+      ..activeTypeId = type.id
+      ..activeVariantId = variant.id;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: QuoteEditorPage(
+            config: config,
+            authController: auth,
+            board: _quoteBoard,
+            controller: controller,
+            onBack: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final menu = find.byTooltip('Переместить категорию').first;
+    await tester.ensureVisible(menu);
+    await tester.tap(menu);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Ниже'));
+    await tester.pumpAndSettle();
+    expect(variant.categories.map((c) => c.id), ['second', 'first']);
+    expect(find.byTooltip('Перетащить категорию'), findsNWidgets(2));
+    final sectionMenu = find.byTooltip('Переместить раздел').first;
+    await tester.ensureVisible(sectionMenu);
+    await tester.tap(sectionMenu);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Ниже'));
+    await tester.pumpAndSettle();
+    expect(variant.categories.last.sections.map((s) => s.id), ['s2', 's1']);
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+    auth.dispose();
+  });
+
   testWidgets('типы и варианты доступны списками на всех ширинах', (
     tester,
   ) async {

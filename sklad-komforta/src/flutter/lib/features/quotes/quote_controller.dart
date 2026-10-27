@@ -876,6 +876,31 @@ final class QuoteController extends ChangeNotifier {
     _changed();
   }
 
+  void reorderCategory(QuoteVariantDraft variant, int oldIndex, int newIndex) =>
+      _reorderStructure(variant.categories, oldIndex, newIndex);
+
+  void reorderSection(
+    QuoteCategoryDraft category,
+    int oldIndex,
+    int newIndex,
+  ) => _reorderStructure(category.sections, oldIndex, newIndex);
+
+  void _reorderStructure<T>(List<T> items, int oldIndex, int newIndex) {
+    if (saving ||
+        oldIndex < 0 ||
+        oldIndex >= items.length ||
+        newIndex < 0 ||
+        newIndex > items.length) {
+      return;
+    }
+    if (newIndex > oldIndex) newIndex--;
+    if (oldIndex == newIndex) return;
+    items.insert(newIndex, items.removeAt(oldIndex));
+    dirty = true;
+    successMessage = null;
+    notifyListeners();
+  }
+
   /// Применяет значение к выбранным строкам, а при отсутствии выбора — ко
   /// всему разделу. Это соответствует согласованной логике массовых действий.
   void applyPercent(
