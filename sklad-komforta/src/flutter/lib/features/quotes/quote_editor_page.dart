@@ -1813,10 +1813,7 @@ final class _VariantContent extends StatelessWidget {
       if (variant.categories.isEmpty)
         _EmptyVariant(onAddCategory: onAddCategory, title: emptyTitle)
       else
-        ReorderableListView(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          buildDefaultDragHandles: false,
+        _StructureReorderList(
           onReorder: (oldIndex, newIndex) =>
               controller.reorderCategory(variant, oldIndex, newIndex),
           children: [
@@ -1897,6 +1894,69 @@ final class _CategoryHeading extends StatelessWidget {
   );
 }
 
+final class _StructureDrag {
+  const _StructureDrag(this.scope, this.index);
+  final Object scope;
+  final int index;
+}
+
+final class _StructureDragScope extends InheritedWidget {
+  const _StructureDragScope({required this.token, required super.child});
+  final Object token;
+
+  @override
+  bool updateShouldNotify(_StructureDragScope oldWidget) =>
+      token != oldWidget.token;
+}
+
+final class _StructureReorderList extends StatefulWidget {
+  const _StructureReorderList({
+    required this.children,
+    required this.onReorder,
+  });
+  final List<Widget> children;
+  final void Function(int, int) onReorder;
+
+  @override
+  State<_StructureReorderList> createState() => _StructureReorderListState();
+}
+
+final class _StructureReorderListState extends State<_StructureReorderList> {
+  final Object token = Object();
+
+  @override
+  Widget build(BuildContext context) => _StructureDragScope(
+    token: token,
+    // Keep live forms in a keyed Column, never reparent them into a drag overlay.
+    child: Column(
+      children: [
+        for (var index = 0; index < widget.children.length; index++)
+          DragTarget<_StructureDrag>(
+            key: widget.children[index].key,
+            onWillAcceptWithDetails: (details) =>
+                identical(details.data.scope, token) &&
+                details.data.index != index,
+            onAcceptWithDetails: (details) => widget.onReorder(
+              details.data.index,
+              details.data.index < index ? index + 1 : index,
+            ),
+            builder: (context, candidates, rejected) => DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border(
+                  top: BorderSide(
+                    color: candidates.isEmpty ? Colors.transparent : _accent,
+                    width: 2,
+                  ),
+                ),
+              ),
+              child: widget.children[index],
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
 final class _StructureReorderControls extends StatelessWidget {
   const _StructureReorderControls({
     required this.index,
@@ -1915,40 +1975,62 @@ final class _StructureReorderControls extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (count < 2) return const SizedBox.shrink();
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        ReorderableDragStartListener(
-          index: index,
-          enabled: enabled,
-          child: Tooltip(
-            message: 'Перетащить $label',
-            child: const Padding(
-              padding: EdgeInsets.all(8),
-              child: Icon(Icons.drag_indicator, size: 18),
+    final scope = context
+        .dependOnInheritedWidgetOfExactType<_StructureDragScope>()!;
+    return Listener(
+      onPointerDown: enabled
+          ? (_) => FocusManager.instance.primaryFocus?.unfocus()
+          : null,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Draggable<_StructureDrag>(
+            data: _StructureDrag(scope.token, index),
+            maxSimultaneousDrags: enabled ? 1 : 0,
+            feedback: Material(
+              color: _surface,
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.drag_indicator, size: 18),
+                    Text('Переместить $label'),
+                  ],
+                ),
+              ),
+            ),
+            child: Tooltip(
+              message: 'Перетащить $label',
+              child: const Padding(
+                padding: EdgeInsets.all(8),
+                child: Icon(Icons.drag_indicator, size: 18),
+              ),
             ),
           ),
-        ),
-        PopupMenuButton<int>(
-          tooltip: 'Переместить $label',
-          enabled: enabled,
-          icon: const Icon(Icons.swap_vert, size: 18),
-          onSelected: (direction) =>
-              onReorder(index, direction < 0 ? index - 1 : index + 2),
-          itemBuilder: (_) => [
-            PopupMenuItem(
-              value: -1,
-              enabled: index > 0,
-              child: const Text('Выше'),
-            ),
-            PopupMenuItem(
-              value: 1,
-              enabled: index < count - 1,
-              child: const Text('Ниже'),
-            ),
-          ],
-        ),
-      ],
+          PopupMenuButton<int>(
+            tooltip: 'Переместить $label',
+            enabled: enabled,
+            onOpened: () => FocusManager.instance.primaryFocus?.unfocus(),
+            icon: const Icon(Icons.swap_vert, size: 18),
+            onSelected: (direction) =>
+                onReorder(index, direction < 0 ? index - 1 : index + 2),
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: -1,
+                enabled: index > 0,
+                child: const Text('Выше'),
+              ),
+              PopupMenuItem(
+                value: 1,
+                enabled: index < count - 1,
+                child: const Text('Ниже'),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -2080,10 +2162,7 @@ final class _CategoryBlock extends StatelessWidget {
                 ),
               )
             else
-              ReorderableListView(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                buildDefaultDragHandles: false,
+              _StructureReorderList(
                 onReorder: (oldIndex, newIndex) =>
                     controller.reorderSection(category, oldIndex, newIndex),
                 children: [
@@ -4001,7 +4080,6 @@ final class _CatalogEntryFieldState extends State<_CatalogEntryField> {
     text: widget.value,
   );
   final OverlayPortalController overlay = OverlayPortalController();
-  final LayerLink link = LayerLink();
 
   /// Последнее подтверждённое значение. Фиксируется в [initState]: ленивая
   /// инициализация прочитала бы уже изменённое значение модели.
@@ -4171,40 +4249,37 @@ final class _CatalogEntryFieldState extends State<_CatalogEntryField> {
     width: widget.width,
     child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 3),
-      child: CompositedTransformTarget(
-        link: link,
-        child: OverlayPortal(
-          controller: overlay,
-          overlayChildBuilder: _buildOptions,
-          child: TextField(
-            controller: input,
-            focusNode: widget.focusNode,
-            style: const TextStyle(fontSize: 11),
-            textInputAction: TextInputAction.next,
-            // Фокусом управляет строка ввода, а не обход по умолчанию.
-            onEditingComplete: () {},
-            onSubmitted: _submit,
-            onChanged: (text) {
-              widget.onChanged(text);
-              _load(text);
-            },
-            decoration: InputDecoration(
-              isDense: true,
-              hintText: widget.hint,
-              hintStyle: const TextStyle(fontSize: 11, color: _muted),
-              contentPadding: const EdgeInsets.fromLTRB(7, 9, 0, 9),
-              suffixIconConstraints: const BoxConstraints(
-                minWidth: 24,
-                maxWidth: 24,
-                maxHeight: 30,
-              ),
-              suffixIcon: IconButton(
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-                tooltip: 'Показать варианты',
-                onPressed: _toggle,
-                icon: const Icon(Icons.arrow_drop_down, size: 18),
-              ),
+      child: OverlayPortal.overlayChildLayoutBuilder(
+        controller: overlay,
+        overlayChildBuilder: _buildOptions,
+        child: TextField(
+          controller: input,
+          focusNode: widget.focusNode,
+          style: const TextStyle(fontSize: 11),
+          textInputAction: TextInputAction.next,
+          // Фокусом управляет строка ввода, а не обход по умолчанию.
+          onEditingComplete: () {},
+          onSubmitted: _submit,
+          onChanged: (text) {
+            widget.onChanged(text);
+            _load(text);
+          },
+          decoration: InputDecoration(
+            isDense: true,
+            hintText: widget.hint,
+            hintStyle: const TextStyle(fontSize: 11, color: _muted),
+            contentPadding: const EdgeInsets.fromLTRB(7, 9, 0, 9),
+            suffixIconConstraints: const BoxConstraints(
+              minWidth: 24,
+              maxWidth: 24,
+              maxHeight: 30,
+            ),
+            suffixIcon: IconButton(
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+              tooltip: 'Показать варианты',
+              onPressed: _toggle,
+              icon: const Icon(Icons.arrow_drop_down, size: 18),
             ),
           ),
         ),
@@ -4212,13 +4287,36 @@ final class _CatalogEntryFieldState extends State<_CatalogEntryField> {
     ),
   );
 
-  Widget _buildOptions(BuildContext context) => CompositedTransformFollower(
-    link: link,
-    showWhenUnlinked: false,
-    targetAnchor: Alignment.bottomLeft,
-    offset: const Offset(3, 2),
-    child: Align(
-      alignment: Alignment.topLeft,
+  Widget _buildOptions(BuildContext context, OverlayChildLayoutInfo info) {
+    final field = MatrixUtils.transformRect(
+      info.childPaintTransform,
+      Offset.zero & info.childSize,
+    );
+    final media = MediaQueryData.fromView(View.of(context));
+    final top = media.padding.top + 8;
+    final bottom =
+        info.overlaySize.height -
+        math.max(media.viewInsets.bottom, media.padding.bottom) -
+        8;
+    final above = math.max(0.0, field.top - top - 2);
+    final below = math.max(0.0, bottom - field.bottom - 2);
+    final desired = options.isEmpty
+        ? 64.0
+        : math.min(260.0, options.length * 34.0 + 8);
+    final openAbove = below < desired && above > below;
+    final available = openAbove ? above : below;
+    final width = math.min(
+      math.max(widget.width, 240.0),
+      math.max(0.0, info.overlaySize.width - 16),
+    );
+    return Positioned(
+      left: field.left.clamp(
+        8.0,
+        math.max(8.0, info.overlaySize.width - width - 8),
+      ),
+      width: width,
+      top: openAbove ? null : field.bottom + 2,
+      bottom: openAbove ? info.overlaySize.height - field.top + 2 : null,
       // Нажатие на вариант не должно снимать фокус с поля до выбора.
       child: TextFieldTapRegion(
         child: Material(
@@ -4229,7 +4327,9 @@ final class _CatalogEntryFieldState extends State<_CatalogEntryField> {
           child: SizedBox(
             width: math.max(widget.width, 240),
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 260),
+              constraints: BoxConstraints(
+                maxHeight: math.min(260.0, available),
+              ),
               child: loading && options.isEmpty
                   ? const Padding(
                       padding: EdgeInsets.all(12),
@@ -4271,8 +4371,8 @@ final class _CatalogEntryFieldState extends State<_CatalogEntryField> {
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 final class _MoneyLabel extends StatelessWidget {

@@ -1492,6 +1492,92 @@ SQL
    app.skladkomforta.dpdns.org
    sudo python3 scripts/server.py status
 ~~~
+### 15.2.1. Локальная пересборка и миграции
+~~~bash
+    cd "E:\Program Files\XAMPP\htdocs\sklad-komforta"
+    docker compose up -d postgres
+    docker compose stop api worker web
+~~~
+
+резервные копии
+
+~~~bash
+    docker compose exec -T postgres sh -lc 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc -f /tmp/before-migrations.dump'
+    docker compose cp postgres:/tmp/before-migrations.dump "./backup-before-migrations-$(Get-Date -Format yyyyMMdd-HHmmss).dump"
+~~~
+
+
+просмотр миграций
+
+~~~bash
+    @'
+SELECT o.name AS organization,
+       o.schema_name,
+       MAX(m.version) AS last_migration
+FROM public.organizations o
+LEFT JOIN public.tenant_migrations m ON m.organization_id = o.id
+GROUP BY o.id, o.name, o.schema_name
+ORDER BY o.name;
+'@ | docker compose exec -T postgres sh -lc 'psql -X -P pager=off -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+~~~
+
+применение миграций
+
+~~~bash
+   $versions = @(
+    '0039_onboarding_legal_entity'
+      '0040_organization_profile_retired'
+      '0041_drop_organization_profile_legacy'
+      '0042_order_supplier_filter'
+      '0043_catalog_item_order'
+)
+
+$OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$sql = "BEGIN;`nLOCK TABLE public.tenant_migrations IN SHARE ROW EXCLUSIVE MODE;`n"
+
+foreach ($version in $versions) {
+    if ($version -notmatch '^\d{4}_[a-z0-9_]+$') {
+        throw "Недопустимое имя миграции: $version"
+    }
+    $body = Get-Content "migrations/tenant/$version.sql" -Raw -Encoding UTF8 -ErrorAction Stop
+    if ($body.Contains('$body$') -or $body.Contains('$migration$')) {
+        throw "Конфликт разделителей SQL: $version"
+    }
+    $template = @'
+DO $body$
+DECLARE
+    org record;
+    migration_text text := $migration$__SQL__$migration$;
+BEGIN
+    FOR org IN SELECT id, schema_name FROM public.organizations LOOP
+        IF EXISTS (
+            SELECT 1 FROM public.tenant_migrations
+            WHERE organization_id = org.id AND version = '__VERSION__'
+        ) THEN CONTINUE;
+        END IF;
+        PERFORM set_config('search_path', format('%I, public', org.schema_name), true);
+        EXECUTE replace(migration_text, '__TENANT_SCHEMA__', format('%I', org.schema_name));
+        INSERT INTO public.tenant_migrations (organization_id, version)
+        VALUES (org.id, '__VERSION__');
+        RAISE NOTICE 'Applied % to %', '__VERSION__', org.schema_name;
+    END LOOP;
+END
+$body$;
+'@
+    $sql += $template.Replace('__VERSION__', $version).Replace('__SQL__', $body) + "`n"
+}
+$sql += "COMMIT;"
+$sql | docker compose exec -T postgres sh -lc 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+if ($LASTEXITCODE -ne 0) { throw 'Миграции не применены. Не продолжайте обновление.' }
+~~~
+
+запуск
+~~~bash
+docker compose up -d --build api worker web
+docker compose ps
+docker compose logs --tail 100 api
+~~~
+
 ### 15.3. Диагностика
 
 <a id="monitoring"></a>

@@ -137,6 +137,23 @@ void main() {
     await tester.tap(find.text('Ниже'));
     await tester.pumpAndSettle();
     expect(variant.categories.last.sections.map((s) => s.id), ['s2', 's1']);
+    final sectionHandles = find.byTooltip('Перетащить раздел');
+    await tester.dragFrom(
+      tester.getCenter(sectionHandles.last),
+      tester.getCenter(sectionHandles.first) -
+          tester.getCenter(sectionHandles.last),
+    );
+    await tester.pumpAndSettle();
+    expect(variant.categories.last.sections.map((s) => s.id), ['s1', 's2']);
+    final categoryHandles = find.byTooltip('Перетащить категорию');
+    await tester.dragFrom(
+      tester.getCenter(categoryHandles.last),
+      tester.getCenter(categoryHandles.first) -
+          tester.getCenter(categoryHandles.last),
+    );
+    await tester.pumpAndSettle();
+    expect(variant.categories.map((c) => c.id), ['first', 'second']);
+    expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
     controller.dispose();
     auth.dispose();
@@ -657,6 +674,7 @@ void main() {
   ) async {
     tester.view.physicalSize = const Size(1600, 1200);
     tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetViewInsets);
     addTearDown(() {
       tester.view.resetPhysicalSize();
       tester.view.resetDevicePixelRatio();
@@ -738,6 +756,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
+          resizeToAvoidBottomInset: false,
           body: SizedBox(
             width: 1500,
             height: 900,
@@ -1440,6 +1459,9 @@ void main() {
     expect(section.positions, hasLength(1));
     final row = section.positions.single;
     expect(focused(), 'quote-entry-${row.id}-name');
+    variant.categories.add(
+      QuoteCategoryDraft(id: 'extra-category', name: 'Extra', sections: []),
+    );
     row.unit = '';
     controller.positionChanged();
     await tester.pumpAndSettle();
@@ -1453,6 +1475,24 @@ void main() {
       find.byKey(const ValueKey('quote-entry-option-Вентилятор')),
       findsOneWidget,
     );
+    final nameOption = find.byKey(
+      const ValueKey('quote-entry-option-Вентилятор'),
+    );
+    expect(
+      tester.getTopLeft(nameOption).dy,
+      greaterThan(tester.getBottomLeft(input(row.id, 'name')).dy),
+    );
+    tester.view.viewInsets = FakeViewPadding(
+      bottom: 1200 - tester.getBottomLeft(input(row.id, 'name')).dy - 12,
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester.getBottomLeft(nameOption).dy,
+      lessThan(tester.getTopLeft(input(row.id, 'name')).dy),
+    );
+    expect(tester.takeException(), isNull);
+    tester.view.resetViewInsets();
+    await tester.pumpAndSettle();
 
     // Enter выбирает подсвеченный вариант; единственная карточка с таким
     // наименованием сразу заполняет строку, фокус переходит в маркировку.
@@ -1478,6 +1518,67 @@ void main() {
       find.byKey(const ValueKey('quote-entry-option-V-1')),
       findsOneWidget,
     );
+    tester.view.viewInsets = FakeViewPadding(
+      bottom: 1200 - tester.getBottomLeft(input(row.id, 'marking')).dy - 12,
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .getBottomLeft(find.byKey(const ValueKey('quote-entry-option-V-1')))
+          .dy,
+      lessThan(tester.getTopLeft(input(row.id, 'marking')).dy),
+    );
+    expect(tester.takeException(), isNull);
+    tester.view.resetViewInsets();
+    await tester.pumpAndSettle();
+    final dragHandle = find.byTooltip('Перетащить категорию').first;
+    await tester.ensureVisible(dragHandle);
+    final gesture = await tester.startGesture(tester.getCenter(dragHandle));
+    await tester.pump();
+    await gesture.moveBy(const Offset(0, 35));
+    await tester.pump(const Duration(milliseconds: 300));
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const ValueKey('quote-entry-option-V-1')), findsNothing);
+    await tester.ensureVisible(input(row.id, 'marking'));
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(ValueKey('quote-entry-${row.id}-marking')),
+        matching: find.byTooltip('Показать варианты'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final moveMenu = find.byTooltip('Переместить категорию').first;
+    await tester.ensureVisible(moveMenu);
+    await tester.tap(moveMenu);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Ниже'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(row.marking, 'V-1');
+    final categoryOrder = variant.categories.map((c) => c.id).toList();
+    expect(categoryOrder.take(2), ['extra-category', category.id]);
+    final upwardHandles = find.byTooltip('Перетащить категорию');
+    await tester.ensureVisible(upwardHandles.first);
+    await tester.pumpAndSettle();
+    await tester.dragFrom(
+      tester.getCenter(upwardHandles.at(1)),
+      tester.getCenter(upwardHandles.first) -
+          tester.getCenter(upwardHandles.at(1)),
+    );
+    await tester.pumpAndSettle();
+    expect(variant.categories.map((c) => c.id), [
+      category.id,
+      'extra-category',
+      ...categoryOrder.skip(2),
+    ]);
+    expect(section.positions.single, same(row));
+    expect(row.name, 'Вентилятор');
+    expect(row.marking, 'V-1');
+    expect(tester.takeException(), isNull);
+    await tester.ensureVisible(input(row.id, 'marking'));
+    await tester.tap(input(row.id, 'marking'));
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
 
