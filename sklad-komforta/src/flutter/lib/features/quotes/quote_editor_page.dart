@@ -4192,6 +4192,9 @@ final class _CatalogEntryFieldState extends State<_CatalogEntryField> {
     text: widget.value,
   );
   final OverlayPortalController overlay = OverlayPortalController();
+  final ScrollController optionsScroll = ScrollController();
+  double get optionExtent =>
+      math.max(34.0, MediaQuery.textScalerOf(context).scale(12) * 1.5 + 16);
 
   /// Последнее подтверждённое значение. Фиксируется в [initState]: ленивая
   /// инициализация прочитала бы уже изменённое значение модели.
@@ -4244,6 +4247,7 @@ final class _CatalogEntryFieldState extends State<_CatalogEntryField> {
   void dispose() {
     debounce?.cancel();
     _detach(widget.focusNode);
+    optionsScroll.dispose();
     input.dispose();
     super.dispose();
   }
@@ -4287,6 +4291,7 @@ final class _CatalogEntryFieldState extends State<_CatalogEntryField> {
           loading = false;
           highlighted = query.trim().isEmpty || result.isEmpty ? -1 : 0;
         });
+        _scrollToHighlighted(reset: true);
       },
     );
   }
@@ -4325,6 +4330,7 @@ final class _CatalogEntryFieldState extends State<_CatalogEntryField> {
         _load(input.text, immediate: true);
       } else if (options.isNotEmpty) {
         setState(() => highlighted = (highlighted + 1) % options.length);
+        _scrollToHighlighted();
       }
       return KeyEventResult.handled;
     }
@@ -4335,6 +4341,7 @@ final class _CatalogEntryFieldState extends State<_CatalogEntryField> {
               ? options.length - 1
               : highlighted - 1,
         );
+        _scrollToHighlighted();
       }
       return KeyEventResult.handled;
     }
@@ -4354,6 +4361,26 @@ final class _CatalogEntryFieldState extends State<_CatalogEntryField> {
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
+  }
+
+  void _scrollToHighlighted({bool reset = false}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !overlay.isShowing || !optionsScroll.hasClients) return;
+      final position = optionsScroll.position;
+      if (!position.hasContentDimensions) return;
+      var offset = reset ? 0.0 : position.pixels;
+      if (highlighted >= 0 && highlighted < options.length) {
+        final top = 4 + highlighted * optionExtent;
+        final bottom = top + optionExtent;
+        if (top < offset) offset = top;
+        if (bottom > offset + position.viewportDimension) {
+          offset = bottom - position.viewportDimension;
+        }
+      }
+      optionsScroll.jumpTo(
+        offset.clamp(position.minScrollExtent, position.maxScrollExtent),
+      );
+    });
   }
 
   @override
@@ -4414,7 +4441,7 @@ final class _CatalogEntryFieldState extends State<_CatalogEntryField> {
     final below = math.max(0.0, bottom - field.bottom - 2);
     final desired = options.isEmpty
         ? 64.0
-        : math.min(260.0, options.length * 34.0 + 8);
+        : math.min(260.0, options.length * optionExtent + 8);
     final openAbove = below < desired && above > below;
     final available = openAbove ? above : below;
     final width = math.min(
@@ -4456,6 +4483,8 @@ final class _CatalogEntryFieldState extends State<_CatalogEntryField> {
                       ),
                     )
                   : ListView.builder(
+                      controller: optionsScroll,
+                      itemExtent: optionExtent,
                       shrinkWrap: true,
                       padding: const EdgeInsets.symmetric(vertical: 4),
                       itemCount: options.length,

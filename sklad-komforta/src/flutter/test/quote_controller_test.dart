@@ -1467,6 +1467,37 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Не выбрано'), findsWidgets);
 
+    await tester.enterText(input(row.id, 'name'), 'scroll');
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pumpAndSettle();
+    Future<void> expectVisibleOption(String value) async {
+      await tester.pumpAndSettle();
+      final option = find.byKey(ValueKey('quote-entry-option-$value'));
+      expect(option, findsOneWidget);
+      final list = find
+          .ancestor(of: option, matching: find.byType(ListView))
+          .first;
+      final viewport = tester.getRect(list);
+      final rect = tester.getRect(option);
+      expect(rect.top, greaterThanOrEqualTo(viewport.top - 0.1));
+      expect(rect.bottom, lessThanOrEqualTo(viewport.bottom + 0.1));
+    }
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await expectVisibleOption('scroll19');
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await expectVisibleOption('scroll00');
+    for (var i = 0; i < 15; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pump();
+    }
+    await expectVisibleOption('scroll15');
+    for (var i = 0; i < 14; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.pump();
+    }
+    await expectVisibleOption('scroll01');
+
     await tester.enterText(input(row.id, 'name'), 'вент');
     await tester.pump(const Duration(milliseconds: 250));
     await tester.pumpAndSettle();
@@ -2107,17 +2138,34 @@ final class _CatalogGatewayWithRelations
     lastSearch = search;
     lastGroupId = groupId;
     final needle = (search ?? '').trim().toLowerCase();
-    final items = [_equipmentItem]
-        .where(
-          (item) =>
-              (categoryId == null || item.categoryId == categoryId) &&
-              (sectionId == null || item.sectionId == sectionId) &&
-              (groupId == null || item.groupId == groupId) &&
-              (needle.isEmpty ||
-                  item.name.toLowerCase().contains(needle) ||
-                  item.marking.toLowerCase().contains(needle)),
-        )
-        .toList();
+    final items =
+        [
+              _equipmentItem,
+              if (needle == 'scroll')
+                for (var i = 0; i < 20; i++)
+                  CatalogItem(
+                    id: 'scroll-$i',
+                    categoryId: _equipmentCategory.id,
+                    sectionId: _equipmentSection.id,
+                    groupId: null,
+                    name: 'scroll${i.toString().padLeft(2, '0')}',
+                    marking: 'S-$i',
+                    status: 'approved',
+                    values: const {},
+                    createdAt: DateTime.utc(2026, 9, 1),
+                    updatedAt: DateTime.utc(2026, 9, 1),
+                  ),
+            ]
+            .where(
+              (item) =>
+                  (categoryId == null || item.categoryId == categoryId) &&
+                  (sectionId == null || item.sectionId == sectionId) &&
+                  (groupId == null || item.groupId == groupId) &&
+                  (needle.isEmpty ||
+                      item.name.toLowerCase().contains(needle) ||
+                      item.marking.toLowerCase().contains(needle)),
+            )
+            .toList();
     return CatalogItemPage(
       items: items,
       page: 1,
