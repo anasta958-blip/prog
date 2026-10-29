@@ -7,6 +7,15 @@ namespace SkladKomforta.Domain.Tests.Onboarding;
 /// <summary>Фиксирует серверные инварианты первичной настройки организации.</summary>
 public sealed class OnboardingValidatorTests
 {
+    [Fact]
+    public void RemovedSupplierCannotBeAssignedAsSystemField()
+    {
+        var legacy = new CatalogFieldDraft("supplier", true, false);
+        Assert.False(OnboardingFieldRegistry.IsSystemField("supplier"));
+        Assert.Throws<IdentityException>(() => OnboardingFieldRegistry.DefinitionOf(legacy));
+        Assert.Throws<IdentityException>(() => OnboardingFieldRegistry.FieldTypeOf(legacy));
+    }
+
     [Theory]
     [InlineData("custom_vendor", "order", true)]
     [InlineData("name", "order", false)]

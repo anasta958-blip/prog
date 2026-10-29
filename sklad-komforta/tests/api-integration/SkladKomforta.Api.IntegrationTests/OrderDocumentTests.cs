@@ -46,7 +46,7 @@ public sealed class OrderDocumentTests
         var categoryId = Guid.NewGuid();
         var values = new Dictionary<string, JsonElement>
         {
-            ["supplier"] = JsonSerializer.SerializeToElement("ВентАид"),
+            ["custom_vendor"] = JsonSerializer.SerializeToElement("ВентАид"),
             ["shipment_status"] = JsonSerializer.SerializeToElement("Купить"),
         };
         var positions = Enumerable.Range(1, 60)
@@ -65,7 +65,7 @@ public sealed class OrderDocumentTests
             [new KanbanCategorySummary(categoryId, "Оборудование", 0, [],
             [
                 new KanbanFieldSummary("name", "Наименование", "text", true, 0, null, []),
-                new KanbanFieldSummary("supplier", "Поставщик", "dictionary", false, 1, "suppliers", []),
+                new KanbanFieldSummary("custom_vendor", "Поставщик", "dictionary", false, 1, "suppliers", []),
                 new KanbanFieldSummary("shipment_status", "Статус отгрузки", "dictionary", false, 2, null, []),
             ])],
             "order");

@@ -22,6 +22,116 @@ void main() {
     environment: 'test',
   );
 
+  test('copies types and variants with independent data and relation ids', () {
+    final auth = AuthController(
+      config,
+      api: _NoopAuthGateway(),
+      tokens: _MemoryTokenRepository(),
+    );
+    final controller = QuoteController(config, auth);
+    final row =
+        QuotePositionDraft(
+            id: 'row',
+            name: 'Товар',
+            marking: 'М-1',
+            unit: 'шт',
+            quantity: 3,
+            basePrice: 120,
+            purchasePrice: 80,
+            manualPrice: 110,
+            markupPercent: 10,
+            discountPercent: 5,
+            catalogItemId: 'catalog-item',
+            values: {
+              'custom': {
+                'items': ['значение'],
+              },
+              '_auto_relation_sources': ['row|dependency|catalog-item'],
+            },
+          )
+          ..configuredLineTotal = 321
+          ..hiddenFieldCodes.add('custom');
+    final variant = QuoteVariantDraft(
+      id: 'variant',
+      name: 'Вариант',
+      subtitle: 'Описание',
+      vatRate: 10,
+      categories: [
+        QuoteCategoryDraft(
+          id: 'category',
+          name: 'Категория',
+          catalogCategoryId: 'catalog-category',
+          sections: [
+            QuoteSectionDraft(
+              id: 'section',
+              name: 'Раздел',
+              catalogSectionId: 'catalog-section',
+              markupPercent: 7,
+              discountPercent: 2,
+              positions: [row],
+            ),
+          ],
+        ),
+      ],
+    );
+    final type = QuoteProposalTypeDraft(
+      id: 'type',
+      name: 'Тип',
+      variants: [variant],
+      selectedByClient: true,
+      selectedVariantId: variant.id,
+    );
+    controller.draft = QuoteDraft(
+      kind: QuoteKind.quote,
+      title: 'КП',
+      clientId: '',
+      executorCompanyId: '',
+      selectionMode: 'variant',
+      proposalTypes: [type],
+    );
+    final copy = controller.copyVariant()!;
+    expect(type.variants, [variant, copy]);
+    expect(copy.name, 'Вариант (копия)');
+    expect(copy.subtitle, variant.subtitle);
+    expect(copy.vatRate, variant.vatRate);
+    expect(copy.id, isNot(variant.id));
+    expect(copy.categories.single.id, isNot('category'));
+    expect(copy.categories.single.sections.single.id, isNot('section'));
+    final copiedRow = copy.positions.single;
+    expect(copiedRow.id, isNot(row.id));
+    final expected = Map<String, dynamic>.from(row.toJson())
+      ..remove('id')
+      ..remove('values');
+    expect(
+      Map<String, dynamic>.from(copiedRow.toJson())
+        ..remove('id')
+        ..remove('values'),
+      expected,
+    );
+    expect(copiedRow.configuredLineTotal, 321);
+    expect(copiedRow.hiddenFieldCodes, {'custom'});
+    expect(copiedRow.values['_auto_relation_sources'], [
+      '${copiedRow.id}|dependency|catalog-item',
+    ]);
+    (copiedRow.values['custom']['items'] as List).add('новое');
+    expect(row.values['custom']['items'], ['значение']);
+    expect(type.selectedVariantId, variant.id);
+    final typeCopy = controller.copyType()!;
+    expect(typeCopy.name, 'Тип (копия)');
+    expect(typeCopy.variants.length, 2);
+    expect(typeCopy.selectedByClient, isFalse);
+    expect(typeCopy.selectedVariantId, isNull);
+    expect(controller.activeTypeId, typeCopy.id);
+    expect(controller.dirty, isTrue);
+    controller.selectType(type.id);
+    expect(controller.copyType()!.name, 'Тип (копия 2)');
+    controller.saving = true;
+    expect(controller.copyType(), isNull);
+    expect(controller.copyVariant(), isNull);
+    controller.dispose();
+    auth.dispose();
+  });
+
   for (final order in [false, true]) {
     test(
       'structure reorder preserves content and serialized order, order=$order',

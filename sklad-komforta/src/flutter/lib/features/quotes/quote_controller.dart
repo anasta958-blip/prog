@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
@@ -291,6 +292,113 @@ final class QuoteController extends ChangeNotifier {
     activeVariantId = variant.id;
     _changed();
     return variant;
+  }
+
+  QuoteProposalTypeDraft? copyType() {
+    final document = draft;
+    final source = activeType;
+    if (saving || document == null || source == null) return null;
+    final copy = QuoteProposalTypeDraft(
+      id: newQuoteId(),
+      name: _copyName(
+        source.name,
+        document.proposalTypes.map((item) => item.name),
+      ),
+      variants: source.variants.map(_copyVariantData).toList(),
+    );
+    document.proposalTypes.insert(
+      document.proposalTypes.indexOf(source) + 1,
+      copy,
+    );
+    activeTypeId = copy.id;
+    activeVariantId = copy.variants.firstOrNull?.id;
+    dirty = true;
+    successMessage = null;
+    notifyListeners();
+    return copy;
+  }
+
+  QuoteVariantDraft? copyVariant() {
+    final type = activeType;
+    final source = activeVariant;
+    if (saving || type == null || source == null) return null;
+    final copy = _copyVariantData(source)
+      ..name = _copyName(source.name, type.variants.map((item) => item.name));
+    type.variants.insert(type.variants.indexOf(source) + 1, copy);
+    activeVariantId = copy.id;
+    dirty = true;
+    successMessage = null;
+    notifyListeners();
+    return copy;
+  }
+
+  String _copyName(String name, Iterable<String> existing) {
+    final names = existing.toSet();
+    var result = '$name (копия)';
+    for (var suffix = 2; names.contains(result); suffix++) {
+      result = '$name (копия $suffix)';
+    }
+    return result;
+  }
+
+  QuoteVariantDraft _copyVariantData(QuoteVariantDraft source) {
+    final ids = {for (final row in source.positions) row.id: newQuoteId()};
+    return QuoteVariantDraft(
+      id: newQuoteId(),
+      name: source.name,
+      subtitle: source.subtitle,
+      vatRate: source.vatRate,
+      categories: [
+        for (final category in source.categories)
+          QuoteCategoryDraft(
+            id: newQuoteId(),
+            name: category.name,
+            catalogCategoryId: category.catalogCategoryId,
+            sections: [
+              for (final section in category.sections)
+                QuoteSectionDraft(
+                  id: newQuoteId(),
+                  name: section.name,
+                  catalogSectionId: section.catalogSectionId,
+                  markupPercent: section.markupPercent,
+                  discountPercent: section.discountPercent,
+                  positions: [
+                    for (final row in section.positions)
+                      _copyPositionData(row, ids),
+                  ],
+                ),
+            ],
+          ),
+      ],
+    );
+  }
+
+  QuotePositionDraft _copyPositionData(
+    QuotePositionDraft source,
+    Map<String, String> ids,
+  ) {
+    final copy =
+        QuotePositionDraft.fromJson(
+            jsonDecode(jsonEncode(source.toJson())) as Map<String, dynamic>
+              ..['id'] = ids[source.id],
+          )
+          ..name = source.name
+          ..marking = source.marking
+          ..unit = source.unit
+          ..configuredLineTotal = source.configuredLineTotal
+          ..hiddenFieldCodes.addAll(source.hiddenFieldCodes);
+    // Automatic relations must point to the copied parent, not the original row.
+    final sources = _autoRelationSources(copy);
+    if (sources.isNotEmpty) {
+      _writeAutoRelationSources(copy, {
+        for (final marker in sources)
+          if (marker.contains('|'))
+            '${ids[marker.split('|').first] ?? marker.split('|').first}${marker.substring(marker.indexOf('|'))}'
+          else
+            marker,
+      });
+    }
+    return copy;
   }
 
   void removeType(String id) {

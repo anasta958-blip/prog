@@ -113,7 +113,7 @@ void main() {
     expect(order.fromQuotePositionIds, {'row-1'});
     final rows = order.categories.single.sections.single.positions;
     expect(rows.first.quantity, 3);
-    expect(rows.first.values['supplier'], 'ВентАид');
+    expect(rows.first.values['custom_vendor'], 'ВентАид');
 
     final json = order.toJson();
     final position =
@@ -160,7 +160,7 @@ void main() {
         second.categories.single.sections.single.positions.first.purchasePrice,
         123.45,
       );
-      expect(row.values['supplier'], 'ВентАид');
+      expect(row.values['custom_vendor'], 'ВентАид');
     },
   );
 
@@ -572,7 +572,7 @@ Map<String, dynamic> _orderJson() => {
               'quantity': 3,
               'isReorder': false,
               'fromQuote': true,
-              'values': {'supplier': 'ВентАид', 'shipment_status': 'Купить'},
+              'values': {'custom_vendor': 'ВентАид', 'shipment_status': 'Купить'},
             },
             {
               'id': 'row-2',
@@ -619,7 +619,7 @@ const _orderBoard = KanbanBoard(
       categoryId: 'equipment',
       name: 'Оборудование',
       sortOrder: 0,
-      supplierFilterFieldCode: 'supplier',
+      supplierFilterFieldCode: 'custom_vendor',
       sections: [KanbanSection(id: 'blocks', name: 'Блоки', sortOrder: 0)],
       fields: [
         KanbanField(
@@ -639,7 +639,7 @@ const _orderBoard = KanbanBoard(
           options: [],
         ),
         KanbanField(
-          code: 'supplier',
+          code: 'custom_vendor',
           label: 'Поставщик',
           fieldType: 'dictionary',
           isRequired: false,

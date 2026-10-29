@@ -626,7 +626,7 @@ internal sealed class PostgresQuoteService(
                                     (@id, @section_id, @catalog_item_id, @name,
                                      @marking, @unit, @quantity, @purchase_price,
                                      @base_price, @manual_price, @markup_percent, @discount_percent,
-                                     @line_total, @exclude, CAST(@values AS jsonb), @sort_order,
+                                     @line_total, @exclude, CAST(@values AS jsonb) - 'supplier', @sort_order,
                                      @actor, @actor)
                                 """, token,
                                 ("id", position.Id ?? Guid.NewGuid()), ("section_id", sectionId),

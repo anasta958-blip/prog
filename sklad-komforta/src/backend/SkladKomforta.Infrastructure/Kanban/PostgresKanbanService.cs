@@ -290,7 +290,7 @@ internal sealed class PostgresKanbanService(
                      sort_order, created_by, updated_by)
                 VALUES
                     (@id, @id, @workflow_id, @column_id, @category_id, @section_id, @title,
-                     CAST(@values AS jsonb),
+                     CAST(@values AS jsonb) - 'supplier',
                      COALESCE((SELECT max(sort_order) + 1 FROM kanban_cards
                                WHERE workflow_id = @workflow_id
                                  AND column_id = @column_id
@@ -331,7 +331,7 @@ internal sealed class PostgresKanbanService(
                 SET category_id = @category_id,
                     section_id = @section_id,
                     title = @title,
-                    values = CAST(@values AS jsonb),
+                    values = CAST(@values AS jsonb) - 'supplier',
                     updated_by = @actor,
                     updated_at = now()
                 WHERE id = @id AND workflow_id = @workflow_id AND deleted_at IS NULL

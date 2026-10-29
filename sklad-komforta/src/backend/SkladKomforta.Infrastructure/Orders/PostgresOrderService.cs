@@ -445,7 +445,7 @@ internal sealed class PostgresOrderService(
                     var positionId = position.Id ?? Guid.NewGuid();
                     var state = states.GetValueOrDefault(positionId) ?? new PositionState(reorder, null, null);
                     var values = (position.Values ?? new Dictionary<string, JsonElement>())
-                        .Where(item => allowed is null || allowed.Contains(item.Key))
+                        .Where(item => item.Key != "supplier" && (allowed is null || allowed.Contains(item.Key)))
                         .ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
                     await ExecuteAsync(connection, transaction, """
                         INSERT INTO order_positions

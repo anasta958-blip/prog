@@ -896,6 +896,7 @@ internal sealed class PostgresCatalogService(
         var status = NormalizeStatus(request.Status, false)!;
         var values = request.Values?.ToDictionary(item => item.Key.Trim(), item => item.Value.Clone(), StringComparer.Ordinal)
                      ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        values.Remove("supplier"); // Old client drafts must not restore the retired field.
         if (values.Keys.Any(string.IsNullOrWhiteSpace) || values.Keys.Any(ReservedValueCodes.Contains))
             throw Invalid("catalog_field_invalid", "Системные поля карточки нельзя передавать в наборе значений.");
 

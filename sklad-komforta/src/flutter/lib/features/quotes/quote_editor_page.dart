@@ -1552,6 +1552,7 @@ final class _DocumentChoice extends StatelessWidget {
     required this.field,
     required this.onAdd,
     required this.onRename,
+    required this.onCopy,
     required this.onDelete,
     required this.name,
     this.deleteTooltip,
@@ -1560,6 +1561,7 @@ final class _DocumentChoice extends StatelessWidget {
   final Widget field;
   final VoidCallback? onAdd;
   final VoidCallback? onRename;
+  final VoidCallback? onCopy;
   final VoidCallback? onDelete;
   final String name;
   @override
@@ -1577,6 +1579,11 @@ final class _DocumentChoice extends StatelessWidget {
             tooltip: 'Переименовать $name',
             onPressed: onRename,
             icon: const Icon(Icons.edit_outlined),
+          ),
+          IconButton(
+            tooltip: 'Копировать $name',
+            onPressed: onCopy,
+            icon: const Icon(Icons.content_copy, size: 20),
           ),
           IconButton(
             tooltip: deleteTooltip ?? 'Удалить $name',
@@ -1665,6 +1672,7 @@ final class _TypeTabs extends StatelessWidget {
         },
       ),
       onAdd: controller.saving ? null : controller.addType,
+      onCopy: type == null || controller.saving ? null : controller.copyType,
       onRename: type == null || controller.saving
           ? null
           : () => _rename(context, type.name, (value) {
@@ -1720,6 +1728,9 @@ final class _VariantTabs extends StatelessWidget {
         },
       ),
       onAdd: controller.saving ? null : controller.addVariant,
+      onCopy: variant == null || controller.saving
+          ? null
+          : controller.copyVariant,
       onRename: variant == null || controller.saving
           ? null
           : () => _rename(context, variant.name, (value) {
