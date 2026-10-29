@@ -2,8 +2,10 @@ import 'dart:async';
 import 'package:sklad_komforta_app/core/formatters/russian.dart';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:sklad_komforta_app/core/widgets/document_command_bar.dart';
 import 'package:sklad_komforta_app/core/widgets/collapse_toggle.dart';
 import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
@@ -1901,12 +1903,118 @@ final class _StructureDrag {
 }
 
 final class _StructureDragScope extends InheritedWidget {
-  const _StructureDragScope({required this.token, required super.child});
+  const _StructureDragScope({
+    required this.token,
+    this.boundary,
+    required super.child,
+  });
   final Object token;
+  final GlobalKey? boundary;
 
   @override
   bool updateShouldNotify(_StructureDragScope oldWidget) =>
-      token != oldWidget.token;
+      token != oldWidget.token || boundary != oldWidget.boundary;
+}
+
+final class _StructureDragSurface extends StatefulWidget {
+  const _StructureDragSurface({required this.token, required this.child});
+  final Object token;
+  final Widget child;
+
+  @override
+  State<_StructureDragSurface> createState() => _StructureDragSurfaceState();
+}
+
+final class _StructureDragSurfaceState extends State<_StructureDragSurface> {
+  final boundary = GlobalKey();
+
+  @override
+  Widget build(BuildContext context) => _StructureDragScope(
+    token: widget.token,
+    boundary: boundary,
+    child: _StructureSnapshotBoundary(key: boundary, child: widget.child),
+  );
+}
+
+final class _StructureSnapshotBoundary extends SingleChildRenderObjectWidget {
+  const _StructureSnapshotBoundary({super.key, required super.child});
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _StructureSnapshotRender();
+}
+
+final class _StructureSnapshotRender extends RenderRepaintBoundary {
+  ui.Image? snapshot(Rect bounds, double pixelRatio) {
+    // Use the last painted layer even if focus changes have scheduled a repaint.
+    final paintedLayer = layer;
+    return paintedLayer is OffsetLayer
+        ? paintedLayer.toImageSync(bounds, pixelRatio: pixelRatio)
+        : null;
+  }
+}
+
+final class _StructureDragPreview extends StatefulWidget {
+  const _StructureDragPreview({required this.boundary, required this.maxWidth});
+  final GlobalKey boundary;
+  final double maxWidth;
+
+  @override
+  State<_StructureDragPreview> createState() => _StructureDragPreviewState();
+}
+
+final class _StructureDragPreviewState extends State<_StructureDragPreview> {
+  ui.Image? image;
+  Size size = const Size(200, 48);
+
+  @override
+  void initState() {
+    super.initState();
+    final render = widget.boundary.currentContext?.findRenderObject();
+    if (render is _StructureSnapshotRender &&
+        render.hasSize &&
+        !render.size.isEmpty) {
+      // Snapshot the last painted layer, not the live form/OverlayPortal tree.
+      final scale = math.min(1.0, widget.maxWidth / render.size.width);
+      final height = math.min(render.size.height, 400 / scale);
+      size = Size(render.size.width * scale, height * scale);
+      image = render.snapshot(
+        Rect.fromLTWH(0, 0, render.size.width, height),
+        scale,
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    image?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Opacity(
+    opacity: 0.9,
+    child: Material(
+      elevation: 12,
+      color: _surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: const BorderSide(color: _accent),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        width: size.width,
+        height: size.height,
+        child: image == null
+            ? const Icon(Icons.folder_outlined)
+            : RawImage(
+                key: const ValueKey('structure-drag-preview'),
+                image: image,
+                fit: BoxFit.fill,
+              ),
+      ),
+    ),
+  );
 }
 
 final class _StructureReorderList extends StatefulWidget {
@@ -1944,12 +2052,25 @@ final class _StructureReorderListState extends State<_StructureReorderList> {
               decoration: BoxDecoration(
                 border: Border(
                   top: BorderSide(
-                    color: candidates.isEmpty ? Colors.transparent : _accent,
+                    color:
+                        candidates.isNotEmpty && candidates.first!.index > index
+                        ? _accent
+                        : Colors.transparent,
+                    width: 2,
+                  ),
+                  bottom: BorderSide(
+                    color:
+                        candidates.isNotEmpty && candidates.first!.index < index
+                        ? _accent
+                        : Colors.transparent,
                     width: 2,
                   ),
                 ),
               ),
-              child: widget.children[index],
+              child: _StructureDragSurface(
+                token: token,
+                child: widget.children[index],
+              ),
             ),
           ),
       ],
@@ -1987,19 +2108,10 @@ final class _StructureReorderControls extends StatelessWidget {
           Draggable<_StructureDrag>(
             data: _StructureDrag(scope.token, index),
             maxSimultaneousDrags: enabled ? 1 : 0,
-            feedback: Material(
-              color: _surface,
-              borderRadius: BorderRadius.circular(8),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.drag_indicator, size: 18),
-                    Text('Переместить $label'),
-                  ],
-                ),
-              ),
+            dragAnchorStrategy: pointerDragAnchorStrategy,
+            feedback: _StructureDragPreview(
+              boundary: scope.boundary!,
+              maxWidth: math.min(760, MediaQuery.sizeOf(context).width * 0.85),
             ),
             child: Tooltip(
               message: 'Перетащить $label',

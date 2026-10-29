@@ -1537,8 +1537,15 @@ void main() {
     await tester.pump();
     await gesture.moveBy(const Offset(0, 35));
     await tester.pump(const Duration(milliseconds: 300));
+    final preview = find.byKey(const ValueKey('structure-drag-preview'));
+    expect(preview, findsOneWidget);
+    expect(tester.widget<RawImage>(preview).image, isNotNull);
+    expect(tester.getSize(preview).width, lessThanOrEqualTo(760));
+    expect(tester.getSize(preview).height, lessThanOrEqualTo(400));
+    expect(find.text('Переместить категорию'), findsNothing);
     await gesture.up();
     await tester.pumpAndSettle();
+    expect(preview, findsNothing);
     expect(tester.takeException(), isNull);
     expect(find.byKey(const ValueKey('quote-entry-option-V-1')), findsNothing);
     await tester.ensureVisible(input(row.id, 'marking'));
