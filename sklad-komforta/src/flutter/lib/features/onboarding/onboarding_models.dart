@@ -504,23 +504,27 @@ final class RuleConditionDraft {
     required this.fieldCode,
     required this.operator,
     this.comparisonValue,
+    this.comparisonFieldCode,
   });
 
   String fieldCode;
   String operator;
   String? comparisonValue;
+  String? comparisonFieldCode;
 
   factory RuleConditionDraft.fromJson(Map<String, dynamic> json) =>
       RuleConditionDraft(
         fieldCode: json['fieldCode'] as String,
         operator: json['operator'] as String,
         comparisonValue: json['comparisonValue'] as String?,
+        comparisonFieldCode: json['comparisonFieldCode'] as String?,
       );
 
   Map<String, dynamic> toJson() => {
     'fieldCode': fieldCode,
     'operator': operator,
     'comparisonValue': comparisonValue,
+    'comparisonFieldCode': comparisonFieldCode,
   };
 }
 
@@ -539,6 +543,7 @@ final class RuleActionDraft {
     this.quantityFieldCode,
     this.message,
     this.formula,
+    this.highlightColor,
   });
 
   String actionType;
@@ -553,6 +558,7 @@ final class RuleActionDraft {
   String? quantityFieldCode;
   String? message;
   FormulaDraft? formula;
+  String? highlightColor;
 
   factory RuleActionDraft.fromJson(Map<String, dynamic> json) =>
       RuleActionDraft(
@@ -567,6 +573,7 @@ final class RuleActionDraft {
         multiplyByQuantity: json['multiplyByQuantity'] as bool? ?? false,
         quantityFieldCode: json['quantityFieldCode'] as String?,
         message: json['message'] as String?,
+        highlightColor: json['highlightColor'] as String?,
         formula: json['formula'] == null
             ? null
             : FormulaDraft.fromJson(json['formula'] as Map<String, dynamic>),
@@ -585,6 +592,7 @@ final class RuleActionDraft {
     'quantityFieldCode': quantityFieldCode,
     'message': message,
     'formula': formula?.toJson(),
+    'highlightColor': highlightColor,
   };
 }
 

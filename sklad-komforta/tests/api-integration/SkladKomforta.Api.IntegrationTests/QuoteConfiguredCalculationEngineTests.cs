@@ -6,6 +6,84 @@ namespace SkladKomforta.Api.IntegrationTests;
 
 public sealed class QuoteConfiguredCalculationEngineTests
 {
+    [Theory]
+    [InlineData("name")]
+    [InlineData("marking")]
+    [InlineData("unit")]
+    public void TextConditionsUseCurrentPositionFieldsInsteadOfStaleValues(string field)
+    {
+        var values = new Dictionary<string, JsonElement> {
+            [field] = JsonSerializer.SerializeToElement("old"),
+            ["technical_note"] = JsonSerializer.SerializeToElement("пробка")
+        };
+        var row = new SaveQuotePositionRequest(null, null, "пробка", "пробка", "пробка", 1m,
+            null, 10m, null, null, null, false, values);
+        var rule = new CalculationRuleDraft("text", "Text", "equipment", "row_calculation", true, null,
+            [new RuleConditionDraft("technical_note", "equals", ComparisonFieldCode: field)],
+            [new RuleActionDraft("set_field", TargetFieldCode: "result", ConstantValue: "matched")]);
+        var result = QuoteConfiguredCalculationEngine.Calculate(row, "equipment", [rule], []);
+        Assert.Equal("пробка", result.Values[field].GetString());
+        Assert.Equal("matched", result.Values["result"].GetString());
+        var nextValues = result.Values.ToDictionary(pair => pair.Key, pair => pair.Value);
+        nextValues.Remove("result");
+        row = row with { Name = "new", Marking = "new", Unit = "new", Values = nextValues };
+        var updated = QuoteConfiguredCalculationEngine.Calculate(row, "equipment", [rule], []);
+        Assert.Equal("new", updated.Values[field].GetString());
+        Assert.False(updated.Values.ContainsKey("result"));
+        row = row with { Marking = null, Unit = null, Name = "" };
+        Assert.Equal("", QuoteConfiguredCalculationEngine.Calculate(row, "equipment", [], []).Values[field].GetString());
+    }
+
+    [Theory]
+    [InlineData("exclude_row", false)]
+    [InlineData("exclude_row", true)]
+    [InlineData("block_save", false)]
+    [InlineData("block_save", true)]
+    public void SaveDoesNotInventFieldEvents(string actionType, bool fired)
+    {
+        var rule = new CalculationRuleDraft("event", "Event", "equipment", "field_changed", true, "base_price",
+            [new RuleConditionDraft("base_price", "less_than", "20")],
+            [new RuleActionDraft(actionType, Message: "Blocked")]);
+        var activeIds = new List<string>();
+        if (fired) activeIds.Add("event");
+        var values = new Dictionary<string, JsonElement> {
+            ["_active_effect_rules"] = JsonSerializer.SerializeToElement(activeIds)
+        };
+        var row = new SaveQuotePositionRequest(null, null, "Item", "", "", 1m, null, 10m, null, null, null, false, values);
+        if (fired && actionType == "block_save")
+        {
+            Assert.Throws<SkladKomforta.Application.Identity.IdentityException>(() =>
+                QuoteConfiguredCalculationEngine.Calculate(row, "equipment", [rule], []));
+        }
+        else
+        {
+            var result = QuoteConfiguredCalculationEngine.Calculate(row, "equipment", [rule], []);
+            Assert.Equal(fired && actionType == "exclude_row", result.ExcludeFromTotals);
+        }
+    }
+
+    [Theory]
+    [InlineData("less_than", "11", true)]
+    [InlineData("less_than", "10", false)]
+    [InlineData("greater_than", "9,5", true)]
+    [InlineData("greater_than", "10", false)]
+    [InlineData("equals", "10.0", true)]
+    [InlineData("equals", "11", false)]
+    [InlineData("less_than", "", false)]
+    public void ConditionsCompareFieldsAndConstants(string operation, string operand, bool expected)
+    {
+        foreach (var useField in new[] { false, true })
+        {
+            var values = new Dictionary<string, JsonElement> { ["other"] = JsonSerializer.SerializeToElement(operand) };
+            var row = new SaveQuotePositionRequest(null, null, "Item", "", "", 1m, null, 10m, null, null, null, false, values);
+            var condition = new RuleConditionDraft("base_price", operation,
+                useField ? null : operand, useField ? "other" : null);
+            var rule = new CalculationRuleDraft("r", "Comparison", "equipment", "row_calculation", true, null,
+                [condition], [new RuleActionDraft("exclude_row")]);
+            Assert.Equal(expected, QuoteConfiguredCalculationEngine.Calculate(row, "equipment", [rule], []).ExcludeFromTotals);
+        }
+    }
+
     [Fact]
     public void FieldTotalsReplaceLegacyPipelineAndAggregateParticipation()
     {
@@ -101,12 +179,12 @@ public sealed class QuoteConfiguredCalculationEngineTests
     public void ConditionalExclusionIsReversibleAndCombinesRules(bool first, bool second, bool expected)
     {
         var position = new SaveQuotePositionRequest(null, null, "Item", "", "", 1m,
-            null, 100m, null, null, null, true,
+            null, 100m, null, null, null, false,
             new Dictionary<string, JsonElement> {
                 ["first"] = JsonSerializer.SerializeToElement(first),
                 ["second"] = JsonSerializer.SerializeToElement(second),
             });
-        CalculationRuleDraft Rule(string code) => new(code, code, "equipment", "field_changed", true, code,
+        CalculationRuleDraft Rule(string code) => new(code, code, "equipment", "row_calculation", true, null,
             [new RuleConditionDraft(code, "is_true")], [new RuleActionDraft("exclude_row")]);
         var result = QuoteConfiguredCalculationEngine.Calculate(position, "equipment", [Rule("first"), Rule("second")], []);
         Assert.Equal(expected, result.ExcludeFromTotals);

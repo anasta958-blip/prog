@@ -158,10 +158,8 @@ final class QuoteProposalTypeDraft {
       .fold(0.0, (total, variant) => total + variant.clientTotal)
       .roundMoney();
 
-  QuoteSystemSummary get systemSummary => QuoteSystemSummary(
-    subtotal: clientTotal,
-    vat: vatAmount,
-  );
+  QuoteSystemSummary get systemSummary =>
+      QuoteSystemSummary(subtotal: clientTotal, vat: vatAmount);
 
   double get purchaseTotal => variants
       .fold(0.0, (total, variant) => total + variant.purchaseTotal)
@@ -235,10 +233,8 @@ final class QuoteVariantDraft {
       .fold(0.0, (total, position) => total + position.lineTotal)
       .roundMoney();
 
-  QuoteSystemSummary get systemSummary => QuoteSystemSummary(
-    subtotal: clientTotal,
-    vat: vatAmount,
-  );
+  QuoteSystemSummary get systemSummary =>
+      QuoteSystemSummary(subtotal: clientTotal, vat: vatAmount);
 
   double get purchaseTotal => positions
       .where((position) => !position.excludeFromTotals)
@@ -390,6 +386,8 @@ final class QuotePositionDraft {
   bool selected = false;
   double? configuredLineTotal;
   final Set<String> hiddenFieldCodes = <String>{};
+  final Set<String> activatedHighlightRuleIds = <String>{};
+  final Map<String, ({String color, String message})> fieldHighlights = {};
 
   factory QuotePositionDraft.fromJson(Map<String, dynamic> json) =>
       QuotePositionDraft(
@@ -447,10 +445,7 @@ final class QuotePositionDraft {
 
 /// Editor summary using the same included line totals as sections and categories.
 final class QuoteSystemSummary {
-  const QuoteSystemSummary({
-    required this.subtotal,
-    required this.vat,
-  });
+  const QuoteSystemSummary({required this.subtotal, required this.vat});
   final double subtotal;
   final double vat;
   double get total => (subtotal + vat).roundMoney();

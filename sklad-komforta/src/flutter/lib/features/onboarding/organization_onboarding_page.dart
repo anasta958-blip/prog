@@ -1718,7 +1718,9 @@ final class _OrganizationOnboardingPageState
           rule.categoryClientId == category.clientId &&
           (rule.eventFieldCode == fieldCode ||
               rule.conditions.any(
-                (condition) => condition.fieldCode == fieldCode,
+                (condition) =>
+                    condition.fieldCode == fieldCode ||
+                    condition.comparisonFieldCode == fieldCode,
               ) ||
               rule.actions.any(
                 (action) =>
@@ -2606,14 +2608,46 @@ final class _OrganizationOnboardingPageState
           AppSelectOption(value: 'greater_than_zero', label: 'Больше нуля'),
           AppSelectOption(value: 'is_filled', label: 'Поле заполнено'),
           AppSelectOption(value: 'equals', label: 'Равно значению'),
+          AppSelectOption(value: 'less_than', label: 'Поле меньше'),
+          AppSelectOption(value: 'greater_than', label: 'Поле больше'),
         ],
         onChanged: (value) =>
             setState(() => condition.operator = value ?? 'is_filled'),
       ),
-      if (condition.operator == 'equals')
-        _textField('Значение', condition.comparisonValue ?? '', (value) {
-          condition.comparisonValue = value;
-        }),
+      if (const {
+        'equals',
+        'less_than',
+        'greater_than',
+      }.contains(condition.operator)) ...[
+        AppSelectField<String>(
+          value: condition.comparisonFieldCode == null ? 'value' : 'field',
+          label: 'Сравнить с',
+          options: const [
+            AppSelectOption(value: 'value', label: 'Значением'),
+            AppSelectOption(value: 'field', label: 'Другим полем'),
+          ],
+          onChanged: (value) => setState(() {
+            condition.comparisonFieldCode = value == 'field' ? '' : null;
+            condition.comparisonValue = null;
+          }),
+        ),
+        if (condition.comparisonFieldCode != null)
+          _ruleFieldSelect(
+            category,
+            'Поле сравнения',
+            condition.comparisonFieldCode,
+            condition.operator == 'equals'
+                ? const []
+                : const ['number', 'money', 'calculated_money', 'percent'],
+            (value) =>
+                setState(() => condition.comparisonFieldCode = value ?? ''),
+            required: true,
+          )
+        else
+          _textField('Значение', condition.comparisonValue ?? '', (value) {
+            condition.comparisonValue = value;
+          }),
+      ],
     ]);
   }
 
@@ -2667,6 +2701,7 @@ final class _OrganizationOnboardingPageState
           label: 'Скрыть или показать поле',
         ),
         AppSelectOption(value: 'block_save', label: 'Запретить сохранение'),
+        AppSelectOption(value: 'highlight_field', label: 'Выделить поле'),
       ],
       onChanged: (value) => setState(() {
         action.actionType = value ?? 'exclude_row';
@@ -2676,6 +2711,9 @@ final class _OrganizationOnboardingPageState
         action.booleanValue = null;
         action.dependencyClientId = null;
         action.formula = null;
+        action.highlightColor = action.actionType == 'highlight_field'
+            ? '#F59E0B'
+            : null;
       }),
     );
     if (category == null) return actionType;
@@ -2771,6 +2809,45 @@ final class _OrganizationOnboardingPageState
               AppSelectOption(value: false, label: 'Скрыть'),
             ],
             onChanged: (value) => setState(() => action.booleanValue = value),
+          ),
+        ]);
+        break;
+      case 'highlight_field':
+        controls.addAll([
+          _ruleFieldSelect(
+            category,
+            'Выделить поле',
+            action.targetFieldCode,
+            const [],
+            (value) => setState(() => action.targetFieldCode = value),
+            required: true,
+          ),
+          AppSelectField<String>(
+            value: action.highlightColor ?? '#F59E0B',
+            label: 'Цвет выделения',
+            options:
+                {
+                      ..._workflowColors,
+                      '#F59E0B',
+                      if (action.highlightColor != null) action.highlightColor!,
+                    }
+                    .map(
+                      (color) => AppSelectOption(
+                        value: color,
+                        label: color,
+                        color: Color(
+                          int.parse(color.substring(1), radix: 16) | 0xFF000000,
+                        ),
+                      ),
+                    )
+                    .toList(),
+            onChanged: (value) =>
+                setState(() => action.highlightColor = value ?? '#F59E0B'),
+          ),
+          _textField(
+            'Сообщение пользователю',
+            action.message ?? '',
+            (value) => action.message = value,
           ),
         ]);
         break;

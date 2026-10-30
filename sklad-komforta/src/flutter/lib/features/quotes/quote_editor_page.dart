@@ -3240,6 +3240,44 @@ final class _PositionFieldCell extends StatelessWidget {
     if (position.hiddenFieldCodes.contains(field.code)) {
       return SizedBox(width: width);
     }
+    final input = _buildInput(context);
+    final highlight = position.fieldHighlights[field.code];
+    if (highlight == null) return input;
+    final color = Color(
+      int.parse(highlight.color.substring(1), radix: 16) | 0xFF000000,
+    );
+    return SizedBox(
+      width: width,
+      child: Tooltip(
+        message: highlight.message,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              key: ValueKey('field-highlight-${position.id}-${field.code}'),
+              foregroundDecoration: BoxDecoration(
+                color: color.withValues(alpha: 0.12),
+                border: Border.all(color: color, width: 2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: input,
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+              child: Text(
+                highlight.message,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 10, color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInput(BuildContext context) {
     // Группа, наименование и маркировка всегда вводятся с автопоиском по
     // каталогу — и в новых строках, и в сохранённых позициях после повторного
     // открытия редактора.
@@ -3596,7 +3634,14 @@ final class _PositionRow extends StatelessWidget {
     final highlighted = controller.isPositionHighlighted(position);
     return Container(
       key: highlighted ? ValueKey('position-reorder-${position.id}') : null,
-      height: 48,
+      height:
+          fields.any(
+            (field) =>
+                position.fieldHighlights.containsKey(field.code) &&
+                !position.hiddenFieldCodes.contains(field.code),
+          )
+          ? 84
+          : 48,
       decoration: BoxDecoration(
         color: highlighted
             ? const Color(0x24F59E0B)

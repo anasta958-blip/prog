@@ -455,14 +455,34 @@ public static class OnboardingValidator
         var fieldType = OnboardingFieldRegistry.FieldTypeOf(field);
         RequireAllowed(
             condition.Operator,
-            ["is_true", "is_false", "greater_than_zero", "is_filled", "equals"],
+            ["is_true", "is_false", "greater_than_zero", "is_filled", "equals", "less_than", "greater_than"],
             "Условие");
         if (condition.Operator is "is_true" or "is_false" && fieldType != "boolean")
             Fail("onboarding_rule_field_invalid", "Условие по состоянию флажка применимо только к полю типа «Флажок».");
         if (condition.Operator == "greater_than_zero" && !IsNumericField(fieldType))
             Fail("onboarding_rule_field_invalid", "Сравнение с нулём применимо только к числовому полю.");
-        if (condition.Operator == "equals" && string.IsNullOrWhiteSpace(condition.ComparisonValue))
-            Fail("onboarding_rule_invalid", "Для сравнения укажите значение.");
+        if (condition.Operator is "equals" or "less_than" or "greater_than")
+        {
+            var numeric = condition.Operator is "less_than" or "greater_than";
+            if (numeric && !IsNumericField(fieldType))
+                Fail("onboarding_rule_field_invalid", "Сравнение больше или меньше применимо только к числовому полю.");
+            if (condition.ComparisonFieldCode is not null)
+            {
+                var other = RequireRuleField(fields, condition.ComparisonFieldCode, null, "Поле сравнения");
+                var otherType = OnboardingFieldRegistry.FieldTypeOf(other);
+                if (numeric && !IsNumericField(otherType) ||
+                    !numeric && fieldType != otherType && !(IsNumericField(fieldType) && IsNumericField(otherType)))
+                    Fail("onboarding_rule_field_invalid", "Выберите совместимое поле для сравнения.");
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(condition.ComparisonValue))
+                    Fail("onboarding_rule_invalid", "Для сравнения укажите значение.");
+                if (numeric && !decimal.TryParse(condition.ComparisonValue?.Trim().Replace(',', '.'),
+                    System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out _))
+                    Fail("onboarding_rule_invalid", "Для сравнения больше или меньше укажите число.");
+            }
+        }
     }
 
     private static void ValidateAction(
@@ -475,7 +495,7 @@ public static class OnboardingValidator
             action.ActionType,
             [
                 "exclude_row", "set_field", "calculate_field", "add_related_cards",
-                "remove_related_cards", "set_field_visibility", "block_save", "aggregate_money"
+                "remove_related_cards", "set_field_visibility", "block_save", "aggregate_money", "highlight_field"
             ],
             "Действие");
 
@@ -506,6 +526,12 @@ public static class OnboardingValidator
                 RequireRuleField(fields, action.TargetFieldCode, null, "Поле видимости");
                 if (action.BooleanValue is null)
                     Fail("onboarding_rule_invalid", "Для видимости поля выберите «Показать» или «Скрыть».");
+                return;
+            case "highlight_field":
+                RequireRuleField(fields, action.TargetFieldCode, null, "Выделяемое поле");
+                if (action.HighlightColor is not { Length: 7 } color || color[0] != '#' || !color[1..].All(Uri.IsHexDigit))
+                    Fail("onboarding_color_invalid", "Цвет выделения должен иметь формат #RRGGBB.");
+                RequireText(action.Message ?? string.Empty, 1, 300, "Сообщение выделенного поля");
                 return;
             case "block_save":
                 RequireText(action.Message ?? string.Empty, 1, 300, "Сообщение запрета сохранения");

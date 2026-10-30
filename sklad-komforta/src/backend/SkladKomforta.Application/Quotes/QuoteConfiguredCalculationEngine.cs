@@ -34,17 +34,38 @@ public static class QuoteConfiguredCalculationEngine
         }
 
         var exclude = position.ExcludeFromTotals;
-        var conditionalExclusions = rules.Where(rule => rule.IsEnabled &&
-            rule.CategoryClientId == categoryClientId && rule.Conditions.Count > 0 &&
-            rule.Actions.Any(action => action.ActionType == "exclude_row")).ToArray();
-        if (conditionalExclusions.Length > 0 || BooleanValue(values, "_conditional_exclusion") == true)
+        var effectRules = rules.Where(rule => rule.IsEnabled && rule.CategoryClientId == categoryClientId &&
+            rule.EventType is "field_changed" or "row_calculation" or "card_saving" or "variant_calculation" &&
+            rule.Actions.Any(action => action.ActionType is "exclude_row" or "block_save")).ToArray();
+        var activeEffects = values.TryGetValue("_active_effect_rules", out var storedEffects) &&
+            storedEffects.ValueKind == JsonValueKind.Array
+            ? storedEffects.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String)
+                .Select(item => item.GetString()!).ToHashSet(StringComparer.Ordinal)
+            : new HashSet<string>(StringComparer.Ordinal);
+        activeEffects.RemoveWhere(id => !effectRules.Any(rule => rule.ClientId == id));
+        foreach (var rule in effectRules.Where(rule => rule.EventType != "field_changed"))
         {
+            if (rule.Conditions.All(condition => Matches(values, condition))) activeEffects.Add(rule.ClientId);
+            else activeEffects.Remove(rule.ClientId);
+        }
+        if (effectRules.Any(rule => rule.Actions.Any(action => action.ActionType == "exclude_row")) ||
+            BooleanValue(values, "_conditional_exclusion") == true)
+        {
+            if (!values.ContainsKey("_manual_excluded_from_calc"))
+                values["_manual_excluded_from_calc"] = JsonSerializer.SerializeToElement(
+                    BooleanValue(values, "_conditional_exclusion") != true && position.ExcludeFromTotals);
             exclude = BooleanValue(values, "_manual_excluded_from_calc") == true ||
-                BooleanValue(values, "_unconditional_excluded_from_calc") == true ||
-                conditionalExclusions.Any(rule => rule.Conditions.All(condition => Matches(values, condition)));
+                effectRules.Any(rule => activeEffects.Contains(rule.ClientId) &&
+                    rule.Actions.Any(action => action.ActionType == "exclude_row"));
             values["excluded_from_calc"] = JsonSerializer.SerializeToElement(exclude);
             values["_conditional_exclusion"] = JsonSerializer.SerializeToElement(true);
+            values.Remove("_unconditional_excluded_from_calc");
         }
+        values["_active_effect_rules"] = JsonSerializer.SerializeToElement(activeEffects);
+        foreach (var rule in effectRules.Where(rule => activeEffects.Contains(rule.ClientId)))
+            foreach (var action in rule.Actions.Where(action => action.ActionType == "block_save"))
+                throw new IdentityException(422, "quote_rule_blocked_save",
+                    string.IsNullOrWhiteSpace(action.Message) ? "Сохранение запрещено настроенным правилом." : action.Message.Trim());
         var formulaDefinesLineTotal = false;
         var calculations = new List<(string Target, HashSet<string> Inputs, Action Run)>();
         var systemInputs = new Dictionary<string, JsonElement>(values, StringComparer.Ordinal);
@@ -62,10 +83,6 @@ public static class QuoteConfiguredCalculationEngine
                 switch (action.ActionType)
                 {
                     case "exclude_row":
-                        if (rule.Conditions.Count == 0)
-                            values["_unconditional_excluded_from_calc"] = JsonSerializer.SerializeToElement(true);
-                        exclude = true;
-                        values["excluded_from_calc"] = JsonSerializer.SerializeToElement(true);
                         break;
                     case "set_field":
                         calculations.Add((action.TargetFieldCode!,
@@ -183,6 +200,9 @@ public static class QuoteConfiguredCalculationEngine
         Dictionary<string, JsonElement> values,
         SaveQuotePositionRequest position)
     {
+        values["name"] = JsonSerializer.SerializeToElement(position.Name);
+        values["marking"] = JsonSerializer.SerializeToElement(position.Marking ?? string.Empty);
+        values["unit"] = JsonSerializer.SerializeToElement(position.Unit ?? string.Empty);
         values["quantity"] = JsonSerializer.SerializeToElement(position.Quantity);
         values["base_price"] = JsonSerializer.SerializeToElement(position.ManualPrice ?? position.BasePrice);
         SetNullable(values, "purchase_price", position.PurchasePrice);
@@ -229,15 +249,25 @@ public static class QuoteConfiguredCalculationEngine
         RuleConditionDraft condition)
     {
         values.TryGetValue(condition.FieldCode, out var value);
+        var comparison = condition.ComparisonFieldCode is not null
+            ? values.GetValueOrDefault(condition.ComparisonFieldCode)
+            : JsonSerializer.SerializeToElement(condition.ComparisonValue?.Trim());
+        var leftIsNumber = TryDecimal(value, out var left);
+        var rightIsNumber = TryDecimal(comparison, out var right);
+        var numericComparison = leftIsNumber && rightIsNumber;
         return condition.Operator switch
         {
             "is_true" => value.ValueKind == JsonValueKind.True,
             "is_false" => value.ValueKind == JsonValueKind.False,
             "greater_than_zero" => TryDecimal(value, out var number) && number > 0,
             "is_filled" => IsFilled(value),
-            "equals" => StringValue(value).Equals(
-                condition.ComparisonValue?.Trim() ?? string.Empty,
-                StringComparison.OrdinalIgnoreCase),
+            "less_than" => numericComparison && left < right,
+            "greater_than" => numericComparison && left > right,
+            "equals" => condition.ComparisonFieldCode is not null &&
+                (value.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null ||
+                 comparison.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null) ? false :
+                numericComparison ? left == right : StringValue(value).Trim().Equals(
+                    StringValue(comparison).Trim(), StringComparison.OrdinalIgnoreCase),
             _ => false,
         };
     }

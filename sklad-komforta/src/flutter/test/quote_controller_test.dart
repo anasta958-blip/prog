@@ -973,6 +973,43 @@ void main() {
     await controller.positionChanged();
     await tester.pump();
     expect(find.text('changed-by-rule'), findsOneWidget);
+    final originalCatalog = controller.catalog!;
+    controller.catalog = CatalogConfiguration(
+      categories: originalCatalog.categories,
+      dictionaries: originalCatalog.dictionaries,
+      rules: [
+        CalculationRuleDraft(
+          clientId: 'highlight-test',
+          name: 'Highlight',
+          isEnabled: true,
+          categoryClientId: originalCatalog.categories
+              .firstWhere(
+                (item) => item.sections.any(
+                  (section) => section.id == _equipmentSection.id,
+                ),
+              )
+              .clientId,
+          eventType: 'row_calculation',
+          conditions: [],
+          actions: [
+            RuleActionDraft(
+              actionType: 'highlight_field',
+              targetFieldCode: 'base_price',
+              highlightColor: '#F59E0B',
+              message: 'Проверьте цену',
+            ),
+          ],
+        ),
+      ],
+    );
+    await controller.positionChanged();
+    await tester.pump();
+    expect(find.text('Проверьте цену'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    controller.catalog = originalCatalog;
+    await controller.positionChanged();
+    await tester.pump();
+    expect(find.text('Проверьте цену'), findsNothing);
 
     final nameColumn = find.byKey(const ValueKey('quote-column-name')).first;
     final resizeHandle = find

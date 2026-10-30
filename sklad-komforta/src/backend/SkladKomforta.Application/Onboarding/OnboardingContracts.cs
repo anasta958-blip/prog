@@ -120,7 +120,8 @@ public sealed record FormulaDraft(
 public sealed record RuleConditionDraft(
     string FieldCode,
     string Operator,
-    string? ComparisonValue = null);
+    string? ComparisonValue = null,
+    string? ComparisonFieldCode = null);
 
 /// <summary>Одно действие, выполняемое после успешной проверки условий.</summary>
 public sealed record RuleActionDraft(
@@ -135,7 +136,8 @@ public sealed record RuleActionDraft(
     bool MultiplyByQuantity = false,
     string? QuantityFieldCode = null,
     string? Message = null,
-    FormulaDraft? Formula = null);
+    FormulaDraft? Formula = null,
+    string? HighlightColor = null);
 
 /// <summary>Событийное правило одной категории с условиями и действиями.</summary>
 public sealed record CalculationRuleDraft(

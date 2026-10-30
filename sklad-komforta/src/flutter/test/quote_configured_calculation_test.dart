@@ -5,6 +5,276 @@ import 'package:sklad_komforta_app/features/quotes/quote_configured_calculation.
 import 'package:sklad_komforta_app/features/quotes/quote_models.dart';
 
 void main() {
+  test('text conditions use current built-in fields and respect events', () {
+    for (final code in ['name', 'marking', 'unit']) {
+      final row = _position(values: {code: 'old', 'technical_note': 'пробка'})
+        ..name = 'пробка'
+        ..marking = 'пробка'
+        ..unit = 'пробка';
+      final rule = CalculationRuleDraft(
+        clientId: 'text',
+        name: 'Text',
+        categoryClientId: 'equipment',
+        eventType: 'field_changed',
+        eventFieldCode: 'base_price',
+        isEnabled: true,
+        conditions: [
+          RuleConditionDraft(
+            fieldCode: 'technical_note',
+            operator: 'equals',
+            comparisonFieldCode: code,
+          ),
+        ],
+        actions: [
+          RuleActionDraft(
+            actionType: 'highlight_field',
+            targetFieldCode: 'name',
+            highlightColor: '#F59E0B',
+            message: 'Matched',
+          ),
+        ],
+      );
+      final engine = QuoteConfiguredCalculationEngine(
+        _configuration(rules: [rule]),
+      );
+      final document = _document(row);
+      expect(engine.matchesRule(row, rule), isTrue);
+      engine.calculateDocument(document);
+      expect(row.fieldHighlights, isEmpty);
+      engine.calculateDocument(
+        document,
+        changedPosition: row,
+        changedFieldCode: 'quantity',
+      );
+      expect(row.fieldHighlights, isEmpty);
+      engine.calculateDocument(
+        document,
+        changedPosition: row,
+        changedFieldCode: 'base_price',
+      );
+      expect(row.fieldHighlights['name']?.message, 'Matched');
+      expect(row.values[code], 'пробка');
+      row
+        ..name = 'new'
+        ..marking = 'new'
+        ..unit = 'new';
+      expect(engine.matchesRule(row, rule), isFalse);
+      engine.calculateDocument(
+        document,
+        changedPosition: row,
+        changedFieldCode: 'base_price',
+      );
+      expect(row.fieldHighlights, isEmpty);
+      expect(row.values[code], 'new');
+      final restored = QuotePositionDraft.fromJson(row.toJson());
+      expect(restored.marking, 'new');
+      expect(restored.name, 'new');
+      expect(restored.unit, 'new');
+    }
+  });
+
+  test('exclusion and save blocking require the configured field event', () {
+    for (final actionType in ['exclude_row', 'block_save']) {
+      final rule = CalculationRuleDraft(
+        clientId: 'event',
+        name: 'Event',
+        categoryClientId: 'equipment',
+        eventType: 'field_changed',
+        eventFieldCode: 'base_price',
+        isEnabled: true,
+        conditions: [
+          RuleConditionDraft(
+            fieldCode: 'base_price',
+            operator: 'less_than',
+            comparisonValue: '20',
+          ),
+        ],
+        actions: [RuleActionDraft(actionType: actionType, message: 'Blocked')],
+      );
+      final engine = QuoteConfiguredCalculationEngine(
+        _configuration(rules: [rule]),
+      );
+      final row = _position(basePrice: 10);
+      final document = _document(row);
+      void expectActive(bool active) {
+        expect(row.excludeFromTotals, actionType == 'exclude_row' && active);
+        expect(
+          engine.validateForSave(document),
+          actionType == 'block_save' && active ? 'Blocked' : null,
+        );
+      }
+
+      engine.calculateDocument(document);
+      expectActive(false);
+      engine.calculateDocument(document, saving: true);
+      expectActive(false);
+      engine.calculateDocument(
+        document,
+        changedPosition: row,
+        changedFieldCode: 'quantity',
+      );
+      expectActive(false);
+      engine.calculateDocument(
+        document,
+        changedPosition: _position(),
+        changedFieldCode: 'base_price',
+      );
+      expectActive(false);
+      engine.calculateDocument(
+        document,
+        changedPosition: row,
+        changedFieldCode: 'base_price',
+      );
+      expectActive(true);
+      engine.calculateDocument(document, saving: true);
+      expectActive(true);
+      row.basePrice = 30;
+      engine.calculateDocument(
+        document,
+        changedPosition: row,
+        changedFieldCode: 'quantity',
+      );
+      expectActive(true);
+      engine.calculateDocument(
+        document,
+        changedPosition: row,
+        changedFieldCode: 'base_price',
+      );
+      expectActive(false);
+    }
+  });
+
+  test(
+    'field highlight is serialized, reactive and does not change values',
+    () {
+      final action = RuleActionDraft.fromJson(
+        RuleActionDraft(
+          actionType: 'highlight_field',
+          targetFieldCode: 'base_price',
+          highlightColor: '#F59E0B',
+          message: 'Проверьте цену',
+        ).toJson(),
+      );
+      expect(action.highlightColor, '#F59E0B');
+      expect(action.message, 'Проверьте цену');
+      final rule = CalculationRuleDraft(
+        clientId: 'highlight',
+        name: 'Highlight',
+        categoryClientId: 'equipment',
+        eventType: 'field_changed',
+        isEnabled: true,
+        eventFieldCode: 'base_price',
+        conditions: [
+          RuleConditionDraft(
+            fieldCode: 'base_price',
+            operator: 'less_than',
+            comparisonValue: '20',
+          ),
+        ],
+        actions: [action],
+      );
+      final calculator = QuoteConfiguredCalculationEngine(
+        _configuration(rules: [rule]),
+      );
+      final row = _position(basePrice: 10);
+      final document = _document(row);
+      calculator.calculateDocument(document);
+      expect(row.fieldHighlights, isEmpty);
+      calculator.calculateDocument(
+        document,
+        changedPosition: row,
+        changedFieldCode: 'purchase_price',
+      );
+      expect(row.fieldHighlights, isEmpty);
+      calculator.calculateDocument(document, saving: true);
+      expect(row.fieldHighlights, isEmpty);
+      calculator.calculateDocument(
+        document,
+        changedPosition: _position(basePrice: 10),
+        changedFieldCode: 'base_price',
+      );
+      expect(row.fieldHighlights, isEmpty);
+      calculator.calculateDocument(
+        document,
+        changedPosition: row,
+        changedFieldCode: 'base_price',
+      );
+      expect(row.fieldHighlights['base_price'], (
+        color: '#F59E0B',
+        message: 'Проверьте цену',
+      ));
+      expect(row.lineTotal, 10);
+      expect(row.toJson().containsKey('fieldHighlights'), isFalse);
+      calculator.calculateDocument(document);
+      expect(row.fieldHighlights, isNotEmpty);
+      row.basePrice = 30;
+      calculator.calculateDocument(
+        document,
+        changedPosition: row,
+        changedFieldCode: 'base_price',
+      );
+      expect(row.fieldHighlights, isEmpty);
+      row.basePrice = 10;
+      calculator.calculateDocument(
+        document,
+        changedPosition: row,
+        changedFieldCode: 'purchase_price',
+      );
+      expect(row.fieldHighlights, isEmpty);
+      calculator.calculateDocument(
+        document,
+        changedPosition: row,
+        changedFieldCode: 'base_price',
+      );
+      expect(row.fieldHighlights, isNotEmpty);
+      rule.isEnabled = false;
+      calculator.calculateDocument(document);
+      expect(row.fieldHighlights, isEmpty);
+    },
+  );
+
+  test(
+    'conditions compare fields and constants with strict numeric bounds',
+    () {
+      for (final entry in [
+        ('less_than', '11', true),
+        ('less_than', '10', false),
+        ('greater_than', '9,5', true),
+        ('greater_than', '10', false),
+        ('equals', '10.0', true),
+        ('equals', '11', false),
+        ('less_than', '', false),
+      ]) {
+        for (final useField in [false, true]) {
+          final condition = RuleConditionDraft(
+            fieldCode: 'base_price',
+            operator: entry.$1,
+            comparisonValue: useField ? null : entry.$2,
+            comparisonFieldCode: useField ? 'other' : null,
+          );
+          final restored = RuleConditionDraft.fromJson(condition.toJson());
+          expect(restored.comparisonFieldCode, condition.comparisonFieldCode);
+          final rule = CalculationRuleDraft(
+            clientId: 'r',
+            name: 'Comparison',
+            categoryClientId: 'equipment',
+            isEnabled: true,
+            eventType: 'row_calculation',
+            conditions: [restored],
+            actions: [RuleActionDraft(actionType: 'exclude_row')],
+          );
+          final calculator = QuoteConfiguredCalculationEngine(
+            _configuration(rules: [rule]),
+          );
+          final row = _position(basePrice: 10, values: {'other': entry.$2});
+          expect(calculator.matchesRule(row, rule), entry.$3);
+          calculator.calculateDocument(_document(row));
+          expect(row.excludeFromTotals, entry.$3);
+        }
+      }
+    },
+  );
+
   test(
     'field totals include separate and total once, ignore legacy aggregation',
     () {

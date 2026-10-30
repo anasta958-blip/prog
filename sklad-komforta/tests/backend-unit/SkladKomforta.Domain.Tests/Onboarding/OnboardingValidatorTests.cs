@@ -7,6 +7,39 @@ namespace SkladKomforta.Domain.Tests.Onboarding;
 /// <summary>Фиксирует серверные инварианты первичной настройки организации.</summary>
 public sealed class OnboardingValidatorTests
 {
+    [Theory]
+    [InlineData("#F59E0B", "Check", "base_price", true)]
+    [InlineData("red", "Check", "base_price", false)]
+    [InlineData("#F59E0B", "", "base_price", false)]
+    [InlineData("#F59E0B", "Check", "missing", false)]
+    public void HighlightActionValidatesTargetColorAndMessage(string color, string message, string target, bool valid)
+    {
+        var action = new RuleActionDraft("highlight_field", TargetFieldCode: target, Message: message, HighlightColor: color);
+        var rule = new CalculationRuleDraft("highlight", "Highlight", "equipment", "row_calculation", true,
+            null, [], [action]);
+        var draft = ValidDraft() with { Rules = [rule] };
+        if (valid) OnboardingValidator.Validate(draft, false);
+        else Assert.Throws<IdentityException>(() => OnboardingValidator.Validate(draft, false));
+    }
+
+    [Theory]
+    [InlineData("less_than", "10,5", null, true)]
+    [InlineData("greater_than", null, "custom_quantity", true)]
+    [InlineData("equals", null, "custom_total", true)]
+    [InlineData("less_than", "text", null, false)]
+    [InlineData("greater_than", null, "name", false)]
+    [InlineData("equals", null, "missing", false)]
+    [InlineData("equals", null, "", false)]
+    public void ComparisonOperandIsValidated(string operation, string? value, string? field, bool valid)
+    {
+        var rule = new CalculationRuleDraft("compare", "Comparison", "equipment", "row_calculation", true,
+            null, [new RuleConditionDraft("base_price", operation, value, field)],
+            [new RuleActionDraft("block_save", Message: "Blocked")]);
+        var draft = ValidDraft() with { Categories = [CategoryWithCalculationFields()], Rules = [rule] };
+        if (valid) OnboardingValidator.Validate(draft, false);
+        else Assert.Throws<IdentityException>(() => OnboardingValidator.Validate(draft, false));
+    }
+
     [Fact]
     public void RemovedSupplierCannotBeAssignedAsSystemField()
     {

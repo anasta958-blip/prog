@@ -67,7 +67,11 @@ final class QuoteConfiguredCalculationEngine {
           )) {
             final values = _valuesOf(position);
             for (final rule in _rulesFor(categoryClientId)) {
-              if (!_matchesAll(values, rule.conditions)) continue;
+              if (rule.eventType == 'field_changed') {
+                if (!_effectRuleIds(values).contains(rule.clientId)) continue;
+              } else if (!_matchesAll(values, rule.conditions)) {
+                continue;
+              }
               for (final action in rule.actions) {
                 if (action.actionType == 'block_save') {
                   final message = action.message?.trim() ?? '';
@@ -97,7 +101,11 @@ final class QuoteConfiguredCalculationEngine {
   }) {
     position.configuredLineTotal = null;
     position.hiddenFieldCodes.clear();
-    if (categoryClientId == null) return;
+    position.fieldHighlights.clear();
+    if (categoryClientId == null) {
+      position.activatedHighlightRuleIds.clear();
+      return;
+    }
     final categoryFields = configuration.categories
         .where((category) => category.clientId == categoryClientId)
         .expand((category) => category.fields)
@@ -118,23 +126,6 @@ final class QuoteConfiguredCalculationEngine {
         values[code] = 0.0;
       }
     }
-    final conditionalExclusions = _rulesFor(categoryClientId)
-        .where(
-          (rule) =>
-              rule.conditions.isNotEmpty &&
-              rule.actions.any((action) => action.actionType == 'exclude_row'),
-        )
-        .toList();
-    if (conditionalExclusions.isNotEmpty ||
-        values['_conditional_exclusion'] == true) {
-      values['excluded_from_calc'] =
-          values['_manual_excluded_from_calc'] == true ||
-          values['_unconditional_excluded_from_calc'] == true ||
-          conditionalExclusions.any(
-            (rule) => _matchesAll(values, rule.conditions),
-          );
-      values['_conditional_exclusion'] = true;
-    }
     final rules = _rulesFor(categoryClientId)
         .where(
           (rule) =>
@@ -147,6 +138,48 @@ final class QuoteConfiguredCalculationEngine {
                       rule.eventFieldCode == changedFieldCode)),
         )
         .toList(growable: false);
+    final effectRules = _rulesFor(categoryClientId)
+        .where(
+          (rule) => rule.actions.any(
+            (action) =>
+                action.actionType == 'exclude_row' ||
+                action.actionType == 'block_save',
+          ),
+        )
+        .toList();
+    final activeEffects = _effectRuleIds(values);
+    activeEffects.removeWhere(
+      (id) => !effectRules.any((rule) => rule.clientId == id),
+    );
+    for (final rule in effectRules.where(rules.contains)) {
+      if (_matchesAll(values, rule.conditions)) {
+        activeEffects.add(rule.clientId);
+      } else {
+        activeEffects.remove(rule.clientId);
+      }
+    }
+    if (effectRules.any(
+          (rule) =>
+              rule.actions.any((action) => action.actionType == 'exclude_row'),
+        ) ||
+        values['_conditional_exclusion'] == true) {
+      values['_manual_excluded_from_calc'] ??=
+          values['_conditional_exclusion'] == true
+          ? false
+          : position.excludeFromTotals;
+      values['excluded_from_calc'] =
+          values['_manual_excluded_from_calc'] == true ||
+          effectRules.any(
+            (rule) =>
+                activeEffects.contains(rule.clientId) &&
+                rule.actions.any(
+                  (action) => action.actionType == 'exclude_row',
+                ),
+          );
+      values['_conditional_exclusion'] = true;
+      values.remove('_unconditional_excluded_from_calc');
+    }
+    values['_active_effect_rules'] = activeEffects.toList();
     var formulaDefinesLineTotal = false;
     final calculations =
         <({String target, Set<String> inputs, void Function() run})>[];
@@ -156,11 +189,6 @@ final class QuoteConfiguredCalculationEngine {
       for (final action in rule.actions) {
         switch (action.actionType) {
           case 'exclude_row':
-            if (rule.conditions.isEmpty) {
-              values['_unconditional_excluded_from_calc'] = true;
-            }
-            position.excludeFromTotals = true;
-            values['excluded_from_calc'] = true;
             break;
           case 'set_field':
             final sourceCode = action.sourceFieldCode;
@@ -322,6 +350,40 @@ final class QuoteConfiguredCalculationEngine {
     position.values
       ..clear()
       ..addAll(values);
+    // An event activates a highlight; unrelated recalculations must not activate it.
+    final highlightRules = _rulesFor(categoryClientId)
+        .where(
+          (rule) => rule.actions.any(
+            (action) => action.actionType == 'highlight_field',
+          ),
+        )
+        .toList();
+    final eligibleIds = highlightRules.map((rule) => rule.clientId).toSet();
+    position.activatedHighlightRuleIds.removeWhere(
+      (id) => !eligibleIds.contains(id),
+    );
+    for (final rule in highlightRules) {
+      if (rules.contains(rule)) {
+        if (_matchesAll(values, rule.conditions)) {
+          position.activatedHighlightRuleIds.add(rule.clientId);
+        } else {
+          position.activatedHighlightRuleIds.remove(rule.clientId);
+        }
+      }
+      if (!position.activatedHighlightRuleIds.contains(rule.clientId)) continue;
+      for (final action in rule.actions) {
+        if (action.actionType != 'highlight_field' ||
+            action.targetFieldCode == null) {
+          continue;
+        }
+        final color = action.highlightColor ?? '';
+        if (!RegExp(r'^#[0-9a-fA-F]{6}$').hasMatch(color)) continue;
+        position.fieldHighlights[action.targetFieldCode!] = (
+          color: color,
+          message: action.message?.trim() ?? '',
+        );
+      }
+    }
   }
 
   Iterable<CalculationRuleDraft> _rulesFor(String categoryClientId) =>
@@ -337,8 +399,16 @@ final class QuoteConfiguredCalculationEngine {
             }.contains(rule.eventType),
       );
 
+  static Set<String> _effectRuleIds(Map<String, dynamic> values) =>
+      values['_active_effect_rules'] is List
+      ? (values['_active_effect_rules'] as List).whereType<String>().toSet()
+      : <String>{};
+
   Map<String, dynamic> _valuesOf(QuotePositionDraft position) =>
       Map<String, dynamic>.from(position.values)
+        ..['name'] = position.name
+        ..['marking'] = position.marking
+        ..['unit'] = position.unit
         ..['quantity'] = position.quantity
         ..['purchase_price'] = position.purchasePrice
         ..['base_price'] = position.manualPrice ?? position.basePrice
@@ -362,6 +432,11 @@ final class QuoteConfiguredCalculationEngine {
     List<RuleConditionDraft> conditions,
   ) => conditions.every((condition) {
     final value = values[condition.fieldCode];
+    final comparison = condition.comparisonFieldCode != null
+        ? values[condition.comparisonFieldCode]
+        : condition.comparisonValue;
+    final left = _number(value);
+    final right = _number(comparison);
     return switch (condition.operator) {
       'is_true' => value == true,
       'is_false' => value == false,
@@ -370,9 +445,16 @@ final class QuoteConfiguredCalculationEngine {
         value != null &&
             (value is! String || value.trim().isNotEmpty) &&
             (value is! Iterable || value.isNotEmpty),
+      'less_than' => left != null && right != null && left < right,
+      'greater_than' => left != null && right != null && left > right,
       'equals' =>
-        (value?.toString() ?? '').trim().toLowerCase() ==
-            (condition.comparisonValue ?? '').trim().toLowerCase(),
+        condition.comparisonFieldCode != null &&
+                (value == null || comparison == null)
+            ? false
+            : left != null && right != null
+            ? left == right
+            : (value?.toString() ?? '').trim().toLowerCase() ==
+                  (comparison?.toString() ?? '').trim().toLowerCase(),
       _ => false,
     };
   });
