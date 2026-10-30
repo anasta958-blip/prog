@@ -98,6 +98,13 @@ final class QuoteConfiguredCalculationEngine {
     position.configuredLineTotal = null;
     position.hiddenFieldCodes.clear();
     if (categoryClientId == null) return;
+    final categoryFields = configuration.categories
+        .where((category) => category.clientId == categoryClientId)
+        .expand((category) => category.fields)
+        .toList();
+    final fieldTotalsConfigured = categoryFields.any(
+      (field) => field.totalMode != null,
+    );
     final values = _valuesOf(position);
     final percentFields = configuration.categories
         .where((category) => category.clientId == categoryClientId)
@@ -259,7 +266,7 @@ final class QuoteConfiguredCalculationEngine {
       total = _number(values['line_total']);
     }
 
-    for (final rule in rules) {
+    for (final rule in rules.where((_) => !fieldTotalsConfigured)) {
       if (!_matchesAll(values, rule.conditions)) continue;
       for (final action in rule.actions) {
         if (action.actionType != 'aggregate_money') continue;
@@ -287,6 +294,26 @@ final class QuoteConfiguredCalculationEngine {
           ? values['excluded_from_calc'] as bool
           : position.excludeFromTotals
       ..configuredLineTotal = total == null ? null : _round(total!, 2);
+    if (fieldTotalsConfigured) {
+      if (!formulaDefinesLineTotal &&
+          !pipelines.any(
+            (pipeline) => pipeline.resultFieldCode == 'line_total',
+          )) {
+        values['line_total'] = position.legacyLineTotal;
+      }
+      position.configuredLineTotal = _round(
+        categoryFields
+            .where(
+              (field) =>
+                  field.totalMode == 'total' || field.totalMode == 'separate',
+            )
+            .fold(
+              0.0,
+              (sum, field) => sum + (_number(values[field.code]) ?? 0),
+            ),
+        2,
+      );
+    }
     if ((position.configuredLineTotal ?? 0) < 0) {
       throw const FormatException(
         'Итоговая стоимость позиции не может быть отрицательной.',

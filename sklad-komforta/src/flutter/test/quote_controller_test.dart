@@ -952,12 +952,14 @@ void main() {
     expect(find.text('Вентилятор'), findsOneWidget);
     expect(find.text('НАИМЕНОВАНИЕ'), findsOneWidget);
     expect(find.text('ЦЕНА'), findsOneWidget);
+    expect(find.text('Валовая прибыль'), findsNothing);
+    expect(find.text('Маржинальность'), findsNothing);
     expect(
-      tester.getTopLeft(find.text('Закупка')).dx,
+      tester.getTopLeft(find.text('Сумма')).dx,
       greaterThan(tester.getTopRight(find.byTooltip('Добавить раздел')).dx),
     );
     expect(
-      tester.getTopRight(find.text('Розница')).dx,
+      tester.getTopRight(find.text('Сумма')).dx,
       lessThan(tester.getTopLeft(find.byTooltip('Удалить категорию')).dx),
     );
     expect(find.text('ГРУППА'), findsNothing);

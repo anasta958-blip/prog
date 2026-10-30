@@ -2064,7 +2064,7 @@ final class _OrganizationOnboardingPageState
             ),
           )
         : null;
-    return LayoutBuilder(
+    final editor = LayoutBuilder(
       builder: (context, constraints) {
         final name = TextFormField(
           initialValue: catalogFieldLabel(field),
@@ -2102,6 +2102,60 @@ final class _OrganizationOnboardingPageState
           ],
         );
       },
+    );
+    if (!const {'money', 'calculated_money'}.contains(definition.fieldType)) {
+      return editor;
+    }
+    final category = draft.categories.firstWhere(
+      (item) => item.fields.contains(field),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        editor,
+        RadioGroup<String>(
+          groupValue: field.totalMode,
+          onChanged: (value) => setState(() {
+            // Switching to field totals is explicit; null still means legacy settings.
+            for (final other in category.fields) {
+              if (const {
+                'money',
+                'calculated_money',
+              }.contains(catalogFieldDefinition(other).fieldType)) {
+                other.totalMode ??= 'none';
+              }
+            }
+            field.totalMode = value ?? 'none';
+          }),
+          child: Wrap(
+            spacing: 8,
+            children: [
+              for (final option in const [
+                ('none', 'Не включать в итог'),
+                ('separate', 'Включить в итог отдельной строкой'),
+                ('total', 'Включить в суммарный итог'),
+              ])
+                SizedBox(
+                  width: option.$1 == 'none' ? 220 : 330,
+                  child: RadioListTile<String>(
+                    key: ValueKey(
+                      'field-total-${category.clientId}-${field.fieldCode}-${option.$1}',
+                    ),
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    value: option.$1,
+                    title: Text(option.$2),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        if (field.totalMode == null)
+          const Text(
+            'Режим ещё не задан. До выбора режима действуют прежние настройки итогов категории. При выборе настройте участие всех нужных денежных полей.',
+            style: TextStyle(fontSize: 12, color: Color(0xFF8EA5C4)),
+          ),
+      ],
     );
   }
 
@@ -2329,16 +2383,8 @@ final class _OrganizationOnboardingPageState
             ),
           ]),
           const SizedBox(height: 8),
-          CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            controlAffinity: ListTileControlAffinity.leading,
-            title: const Text('Участвует в итогах'),
-            subtitle: const Text(
-              'Результат строки включается в сумму варианта.',
-            ),
-            value: pipeline.includeResultInTotals,
-            onChanged: (value) =>
-                setState(() => pipeline.includeResultInTotals = value ?? true),
+          const Text(
+            'Участие результата в итогах задаётся в настройках поля результата.',
           ),
         ],
       ),
@@ -2595,6 +2641,9 @@ final class _OrganizationOnboardingPageState
   );
 
   Widget _actionEditor(RuleActionDraft action, CatalogCategoryDraft? category) {
+    if (action.actionType == 'aggregate_money') {
+      return const SizedBox.shrink();
+    }
     final actionType = AppSelectField<String>(
       value: action.actionType,
       label: 'Действие',
@@ -2618,10 +2667,6 @@ final class _OrganizationOnboardingPageState
           label: 'Скрыть или показать поле',
         ),
         AppSelectOption(value: 'block_save', label: 'Запретить сохранение'),
-        AppSelectOption(
-          value: 'aggregate_money',
-          label: 'Добавить в итог варианта',
-        ),
       ],
       onChanged: (value) => setState(() {
         action.actionType = value ?? 'exclude_row';
@@ -2738,30 +2783,6 @@ final class _OrganizationOnboardingPageState
           ),
         );
         break;
-      case 'aggregate_money':
-        controls.addAll([
-          _ruleFieldSelect(
-            category,
-            'Денежное поле',
-            action.sourceFieldCode,
-            const ['money', 'calculated_money'],
-            (value) => setState(() => action.sourceFieldCode = value),
-            required: true,
-          ),
-          AppSelectField<String>(
-            value: action.aggregationOperation,
-            label: 'Операция',
-            options: const [
-              AppSelectOption(value: 'add', label: 'Прибавить'),
-              AppSelectOption(value: 'subtract', label: 'Вычесть'),
-            ],
-            onChanged: (value) => setState(() {
-              action.aggregationOperation = value;
-              action.aggregationTarget = 'variant_total';
-            }),
-          ),
-        ]);
-        break;
     }
 
     return Column(
@@ -2771,27 +2792,6 @@ final class _OrganizationOnboardingPageState
         if (action.actionType == 'calculate_field') ...[
           const SizedBox(height: 12),
           _formulaEditor(action, category),
-        ],
-        if (action.actionType == 'aggregate_money') ...[
-          CheckboxListTile(
-            contentPadding: EdgeInsets.zero,
-            controlAffinity: ListTileControlAffinity.leading,
-            title: const Text('Учитывать количество'),
-            value: action.multiplyByQuantity,
-            onChanged: (value) => setState(() {
-              action.multiplyByQuantity = value ?? false;
-              if (!action.multiplyByQuantity) action.quantityFieldCode = null;
-            }),
-          ),
-          if (action.multiplyByQuantity)
-            _ruleFieldSelect(
-              category,
-              'Поле количества',
-              action.quantityFieldCode,
-              const ['number'],
-              (value) => setState(() => action.quantityFieldCode = value),
-              required: true,
-            ),
         ],
       ],
     );

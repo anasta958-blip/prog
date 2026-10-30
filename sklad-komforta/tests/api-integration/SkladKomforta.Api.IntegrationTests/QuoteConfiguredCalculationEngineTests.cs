@@ -6,6 +6,29 @@ namespace SkladKomforta.Api.IntegrationTests;
 
 public sealed class QuoteConfiguredCalculationEngineTests
 {
+    [Fact]
+    public void FieldTotalsReplaceLegacyPipelineAndAggregateParticipation()
+    {
+        var values = new Dictionary<string, JsonElement> { ["extra"] = JsonSerializer.SerializeToElement(15m) };
+        var row = new SaveQuotePositionRequest(null, null, "Item", "", "", 2m, 40m, 100m, null, null, null, false, values);
+        var pipeline = new MoneyPipelineDraft("equipment", "base_price", null, null, null, "quantity", "computed", 2, false);
+        var rule = new CalculationRuleDraft("old", "Old total", "equipment", "row_calculation", true, null, [],
+            [new RuleActionDraft("aggregate_money", SourceFieldCode: "extra", AggregationOperation: "add", MultiplyByQuantity: true, QuantityFieldCode: "quantity")]);
+        for (var run = 0; run < 3; run++)
+        {
+            var result = QuoteConfiguredCalculationEngine.Calculate(row, "equipment", [rule], [pipeline],
+                totalFields: new HashSet<string> { "computed", "extra" });
+            Assert.Equal(215m, result.LineTotal);
+            Assert.Equal(200m, result.Values["computed"].GetDecimal());
+            Assert.Equal(200m, result.Values["line_total"].GetDecimal());
+            row = row with { Values = result.Values };
+        }
+        Assert.Equal(0m, QuoteConfiguredCalculationEngine.Calculate(row, "equipment", [rule], [pipeline],
+            totalFields: new HashSet<string>()).LineTotal);
+        Assert.Equal(215m, QuoteConfiguredCalculationEngine.Calculate(row, "equipment", [rule], [],
+            totalFields: new HashSet<string> { "line_total", "extra" }).LineTotal);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

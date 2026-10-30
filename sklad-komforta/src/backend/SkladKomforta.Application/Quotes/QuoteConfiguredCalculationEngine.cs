@@ -16,7 +16,8 @@ public static class QuoteConfiguredCalculationEngine
         string categoryClientId,
         IReadOnlyList<CalculationRuleDraft> rules,
         IReadOnlyList<MoneyPipelineDraft> pipelines,
-        IReadOnlySet<string>? percentFields = null)
+        IReadOnlySet<string>? percentFields = null,
+        IReadOnlySet<string>? totalFields = null)
     {
         var values = new Dictionary<string, JsonElement>(
             position.Values ?? new Dictionary<string, JsonElement>(),
@@ -150,7 +151,7 @@ public static class QuoteConfiguredCalculationEngine
                 ExcludeFromTotals = exclude,
             }).LineTotal;
 
-        foreach (var rule in matchedRules)
+        foreach (var rule in matchedRules.Where(_ => totalFields is null))
         {
             if (!rule.Conditions.All(condition => Matches(values, condition))) continue;
             foreach (var action in rule.Actions.Where(item => item.ActionType == "aggregate_money"))
@@ -162,10 +163,15 @@ public static class QuoteConfiguredCalculationEngine
             }
         }
 
+        if (!categoryPipelines.Any(pipeline => pipeline.ResultFieldCode == "line_total") && !formulaDefinesLineTotal)
+            values["line_total"] = JsonSerializer.SerializeToElement(QuoteCalculationEngine.Calculate(
+                position with { Quantity = quantity, ManualPrice = manualPrice, MarkupPercent = markup, DiscountPercent = discount }).LineTotal);
+        if (totalFields is not null)
+            lineTotal = totalFields.Sum(code => DecimalValue(values, code) ?? 0m);
         lineTotal = decimal.Round(lineTotal, 2, MidpointRounding.AwayFromZero);
         if (lineTotal < 0)
             throw new IdentityException(422, "quote_price_invalid", "Итоговая стоимость позиции не может быть отрицательной.");
-        if (!categoryPipelines.Any(pipeline => pipeline.ResultFieldCode == "line_total") &&
+        if (totalFields is null && !categoryPipelines.Any(pipeline => pipeline.ResultFieldCode == "line_total") &&
             !formulaDefinesLineTotal)
             values["line_total"] = JsonSerializer.SerializeToElement(lineTotal);
         return new QuoteConfiguredCalculationResult(

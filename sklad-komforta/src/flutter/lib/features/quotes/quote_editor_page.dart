@@ -2238,9 +2238,26 @@ final class _CategoryBlock extends StatelessWidget {
                   ),
                 const SizedBox(width: 8),
                 if (controller.showsMoney) ...[
-                  _MoneyLabel('Закупка', category.purchaseTotal),
-                  const SizedBox(width: 16),
-                  _MoneyLabel('Розница', category.clientTotal),
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: MediaQuery.sizeOf(context).width * 0.45,
+                    ),
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          for (final row in controller.separateTotalRows([
+                            category,
+                          ])) ...[
+                            _MoneyLabel(row.$1, row.$2),
+                            const SizedBox(width: 20),
+                          ],
+                          _MoneyLabel('Сумма', category.clientTotal),
+                        ],
+                      ),
+                    ),
+                  ),
                   const SizedBox(width: 8),
                 ],
                 IconButton(
@@ -3668,31 +3685,23 @@ final class _SummaryColumn extends StatelessWidget {
       _SummaryCard(
         title: 'Сводка варианта',
         rows: [
-          ('Сумма без НДС', variant.systemSummary.subtotal),
-          ('Итого закупка', variant.purchaseTotal),
-          ('Валовая прибыль', variant.systemSummary.margin),
+          ...controller.separateTotalRows(variant.categories),
           ('НДС', variant.systemSummary.vat),
+          ('Сумма без НДС', variant.systemSummary.subtotal),
           ('Итого для клиента', variant.systemSummary.total),
         ],
-        footer: (
-          'Маржинальность',
-          russianPercent(variant.systemSummary.marginPercent),
-        ),
       ),
       if (controller.activeType case final type?)
         _SummaryCard(
           title: 'Сводка типа',
           rows: [
-            ('Сумма без НДС', type.systemSummary.subtotal),
-            ('Итого закупка', type.purchaseTotal),
-            ('Валовая прибыль', type.systemSummary.margin),
+            ...controller.separateTotalRows(
+              type.variants.expand((variant) => variant.categories),
+            ),
             ('НДС', type.systemSummary.vat),
+            ('Сумма без НДС', type.systemSummary.subtotal),
             ('Итого для клиента', type.systemSummary.total),
           ],
-          footer: (
-            'Маржинальность',
-            russianPercent(type.systemSummary.marginPercent),
-          ),
         ),
     ];
     if (horizontal) {
@@ -3718,10 +3727,9 @@ final class _SummaryColumn extends StatelessWidget {
 }
 
 final class _SummaryCard extends StatelessWidget {
-  const _SummaryCard({required this.title, required this.rows, this.footer});
+  const _SummaryCard({required this.title, required this.rows});
   final String title;
   final List<(String, double)> rows;
-  final (String, String)? footer;
 
   @override
   Widget build(BuildContext context) => _Panel(
@@ -3749,23 +3757,6 @@ final class _SummaryCard extends StatelessWidget {
               ],
             ),
           ),
-        if (footer case final value?) ...[
-          const Divider(),
-          Row(
-            children: [
-              Expanded(
-                child: Text(value.$1, style: const TextStyle(color: _muted)),
-              ),
-              Text(
-                value.$2,
-                style: const TextStyle(
-                  color: Color(0xFF55D889),
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ],
-          ),
-        ],
       ],
     ),
   );

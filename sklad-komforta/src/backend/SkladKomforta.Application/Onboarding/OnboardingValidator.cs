@@ -76,6 +76,14 @@ public static class OnboardingValidator
                 category.Fields.Select(OnboardingFieldRegistry.LabelOf),
                 $"Названия полей категории «{category.Name}»");
             ValidateFieldSelection(category.Fields, $"категории «{category.Name}»");
+            foreach (var field in category.Fields)
+            {
+                if (field.TotalMode is not null && field.TotalMode is not ("none" or "total" or "separate"))
+                    Fail("onboarding_total_mode_invalid", "Неизвестный режим участия поля в итогах.");
+                if (field.TotalMode is "total" or "separate" &&
+                    OnboardingFieldRegistry.FieldTypeOf(field) is not ("money" or "calculated_money"))
+                    Fail("onboarding_total_mode_invalid", "В итоги можно включать только денежные значения и расчётные суммы.");
+            }
             ValidateUnique(category.Sections.Select(item => item.Name), "Названия разделов");
             foreach (var section in category.Sections)
             {

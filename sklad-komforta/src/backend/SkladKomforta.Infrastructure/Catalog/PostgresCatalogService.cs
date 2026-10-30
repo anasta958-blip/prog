@@ -773,7 +773,7 @@ internal sealed class PostgresCatalogService(
             fields.CommandText = """
                 SELECT category.id, category.client_id, category.name, category.sort_order,
                        field.field_code, field.label, field.is_visible, field.is_required,
-                       field.sort_order, field.dictionary_code, field.field_type
+                       field.sort_order, field.dictionary_code, field.field_type, field.total_mode
                 FROM catalog_categories AS category
                 LEFT JOIN catalog_category_fields AS field ON field.category_id = category.id
                 ORDER BY category.sort_order, field.sort_order
@@ -801,7 +801,8 @@ internal sealed class PostgresCatalogService(
                         reader.GetBoolean(6),
                         reader.GetBoolean(7),
                         reader.GetInt32(8),
-                        reader.IsDBNull(9) ? null : reader.GetString(9)));
+                        reader.IsDBNull(9) ? null : reader.GetString(9),
+                        reader.IsDBNull(11) ? null : reader.GetString(11)));
                 }
             }
         }

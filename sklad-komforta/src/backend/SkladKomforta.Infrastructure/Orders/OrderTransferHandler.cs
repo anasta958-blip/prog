@@ -236,7 +236,7 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
                     foreach (var item in current.Values) inputs[item.Key] = item.Value;
                     recalculated = RecalculateRow(row with { Quantity = quantity, CalculationInputs = inputs }, category,
                         runtime.Rules, runtime.Pipelines, runtime.PercentFields.GetValueOrDefault(category),
-                        row.Values.Keys.ToHashSet(StringComparer.Ordinal));
+                        row.Values.Keys.ToHashSet(StringComparer.Ordinal), runtime.TotalFields?.GetValueOrDefault(category));
                 }
                 await ExecuteAsync(connection, transaction, """
                     UPDATE order_positions
@@ -417,14 +417,14 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
         var runtime = await PostgresQuoteService.ReadCalculationConfigurationAsync(connection, transaction, token);
         return rows.Select(row => runtime.CategoryClientIds.TryGetValue(row.CatalogCategoryId, out var category)
             ? RecalculateRow(row, category, runtime.Rules, runtime.Pipelines,
-                runtime.PercentFields.GetValueOrDefault(category), boardFields[row.CatalogCategoryId])
+                runtime.PercentFields.GetValueOrDefault(category), boardFields[row.CatalogCategoryId], runtime.TotalFields?.GetValueOrDefault(category))
             : row).ToArray();
     }
 
     internal static TransferRow RecalculateRow(
         TransferRow row, string category, IReadOnlyList<CalculationRuleDraft> rules,
         IReadOnlyList<MoneyPipelineDraft> pipelines, IReadOnlySet<string>? percentFields,
-        IReadOnlySet<string> allowed)
+        IReadOnlySet<string> allowed, IReadOnlySet<string>? totalFields = null)
     {
         var inputs = row.CalculationInputs ?? row.Values;
         decimal? Number(string code) => inputs.TryGetValue(code, out var value)
@@ -441,7 +441,7 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
             Number("purchase_price"), Number("base_price") ?? 0m, null,
             Number("markup_value"), Number("discount_value"),
             inputs.TryGetValue("excluded_from_calc", out var excluded) && excluded.ValueKind == JsonValueKind.True,
-            inputs), category, calculationRules, pipelines, percentFields);
+            inputs), category, calculationRules, pipelines, percentFields, totalFields);
         return row with
         {
             Quantity = result.Quantity,

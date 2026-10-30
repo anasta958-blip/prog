@@ -6,6 +6,77 @@ import 'package:sklad_komforta_app/features/quotes/quote_models.dart';
 
 void main() {
   test(
+    'field totals include separate and total once, ignore legacy aggregation',
+    () {
+      final row = _position(basePrice: 100, quantity: 2, values: {'extra': 15});
+      final document = _document(row);
+      CatalogField field(String code, String mode) => CatalogField(
+        code: code,
+        label: 'Название $code',
+        fieldType: code == 'computed' ? 'calculated_money' : 'money',
+        isVisible: true,
+        isRequired: false,
+        sortOrder: 0,
+        totalMode: mode,
+      );
+      final config = _configuration(
+        fields: [
+          field('computed', 'separate'),
+          field('extra', 'total'),
+          field('base_price', 'none'),
+        ],
+        pipelines: [
+          MoneyPipelineDraft(
+            categoryClientId: 'equipment',
+            basePriceFieldCode: 'base_price',
+            quantityFieldCode: 'quantity',
+            resultFieldCode: 'computed',
+            includeResultInTotals: false,
+          ),
+        ],
+        rules: [
+          CalculationRuleDraft(
+            clientId: 'old',
+            name: 'Old',
+            categoryClientId: 'equipment',
+            eventType: 'row_calculation',
+            isEnabled: true,
+            actions: [
+              RuleActionDraft(
+                actionType: 'aggregate_money',
+                sourceFieldCode: 'extra',
+                multiplyByQuantity: true,
+                quantityFieldCode: 'quantity',
+              ),
+            ],
+          ),
+        ],
+      );
+      final engine = QuoteConfiguredCalculationEngine(config);
+      for (var run = 0; run < 3; run++) {
+        engine.calculateDocument(document);
+        expect(row.lineTotal, 215);
+        expect(row.values['computed'], 200);
+        expect(row.values['line_total'], 200);
+        expect(document.proposalTypes.single.clientTotal, 215);
+      }
+      QuoteConfiguredCalculationEngine(
+        _configuration(fields: [field('extra', 'none')]),
+      ).calculateDocument(document);
+      expect(row.lineTotal, 0);
+      QuoteConfiguredCalculationEngine(
+        _configuration(
+          fields: [field('line_total', 'separate'), field('extra', 'total')],
+        ),
+      ).calculateDocument(document);
+      expect(row.lineTotal, 215);
+      row.excludeFromTotals = true;
+      engine.calculateDocument(document);
+      expect(document.proposalTypes.single.clientTotal, 0);
+    },
+  );
+
+  test(
     'сводки согласованы с разделами после конвейеров и денежной агрегации',
     () {
       final position = _position(
@@ -61,8 +132,6 @@ void main() {
         expect(variant.categories.single.sections.single.clientTotal, 230);
         expect(variant.categories.single.clientTotal, 230);
         expect(variant.systemSummary.subtotal, 230);
-        expect(variant.systemSummary.purchase, 80);
-        expect(variant.systemSummary.margin, 150);
         expect(variant.systemSummary.vat, 46);
         expect(variant.systemSummary.total, 276);
         expect(type.systemSummary.total, 276);
@@ -301,7 +370,6 @@ void main() {
       expect(variant.systemSummary.subtotal, 2);
       expect(variant.systemSummary.vat, 0.02);
       expect(variant.systemSummary.total, 2.02);
-      expect(variant.systemSummary.margin, -198);
       expect(document.proposalTypes.single.systemSummary.subtotal, 2);
     }
     position.manualPrice = 4200;

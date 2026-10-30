@@ -160,18 +160,12 @@ final class QuoteProposalTypeDraft {
 
   QuoteSystemSummary get systemSummary => QuoteSystemSummary(
     subtotal: clientTotal,
-    purchase: purchaseTotal,
     vat: vatAmount,
   );
 
   double get purchaseTotal => variants
       .fold(0.0, (total, variant) => total + variant.purchaseTotal)
       .roundMoney();
-
-  double get margin => (clientTotal - purchaseTotal).roundMoney();
-
-  double get marginPercent =>
-      purchaseTotal <= 0 ? 0 : margin / purchaseTotal * 100;
 
   double get vatAmount => variants
       .fold(0.0, (total, variant) => total + variant.vatAmount)
@@ -243,7 +237,6 @@ final class QuoteVariantDraft {
 
   QuoteSystemSummary get systemSummary => QuoteSystemSummary(
     subtotal: clientTotal,
-    purchase: purchaseTotal,
     vat: vatAmount,
   );
 
@@ -255,11 +248,6 @@ final class QuoteVariantDraft {
             total + (position.purchasePrice ?? 0) * position.quantity,
       )
       .roundMoney();
-
-  double get margin => (clientTotal - purchaseTotal).roundMoney();
-
-  double get marginPercent =>
-      purchaseTotal <= 0 ? 0 : margin / purchaseTotal * 100;
 
   double get vatAmount =>
       vatRate == null ? 0 : (clientTotal * vatRate! / 100).roundMoney();
@@ -461,14 +449,10 @@ final class QuotePositionDraft {
 final class QuoteSystemSummary {
   const QuoteSystemSummary({
     required this.subtotal,
-    required this.purchase,
     required this.vat,
   });
   final double subtotal;
-  final double purchase;
   final double vat;
-  double get margin => (subtotal - purchase).roundMoney();
-  double get marginPercent => purchase <= 0 ? 0 : margin / purchase * 100;
   double get total => (subtotal + vat).roundMoney();
 }
 

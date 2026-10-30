@@ -395,17 +395,18 @@ internal sealed class PostgresCompanyService(
                 var field = category.Fields[fieldIndex];
                 await ExecuteAsync(connection, transaction, """
                     INSERT INTO catalog_category_fields
-                        (category_id, field_code, label, field_type, is_visible, is_required, sort_order, dictionary_code)
-                    VALUES (@category_id, @code, @label, @field_type, @visible, @required, @sort, @dictionary_code)
+                        (category_id, field_code, label, field_type, is_visible, is_required, sort_order, dictionary_code, total_mode)
+                    VALUES (@category_id, @code, @label, @field_type, @visible, @required, @sort, @dictionary_code, @total_mode)
                     ON CONFLICT (category_id, field_code) DO UPDATE SET
                         label = EXCLUDED.label, field_type = EXCLUDED.field_type,
                         is_visible = EXCLUDED.is_visible, is_required = EXCLUDED.is_required,
-                        sort_order = EXCLUDED.sort_order, dictionary_code = EXCLUDED.dictionary_code
+                        sort_order = EXCLUDED.sort_order, dictionary_code = EXCLUDED.dictionary_code,
+                        total_mode = EXCLUDED.total_mode
                     """, token, ("category_id", id), ("code", field.FieldCode.Trim()),
                     ("label", OnboardingFieldRegistry.LabelOf(field)),
                     ("field_type", OnboardingFieldRegistry.FieldTypeOf(field)),
                     ("visible", field.IsVisible), ("required", field.IsRequired), ("sort", fieldIndex),
-                    ("dictionary_code", Db(field.DictionaryCode)));
+                    ("dictionary_code", Db(field.DictionaryCode)), ("total_mode", Db(field.TotalMode)));
             }
             await ExecuteAsync(connection, transaction, """
                 DELETE FROM catalog_category_fields

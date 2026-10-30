@@ -12,6 +12,7 @@ final class CatalogField {
     required this.isRequired,
     required this.sortOrder,
     this.dictionaryCode,
+    this.totalMode,
   });
   final String code;
   final String label;
@@ -20,6 +21,7 @@ final class CatalogField {
   final bool isRequired;
   final int sortOrder;
   final String? dictionaryCode;
+  final String? totalMode;
   factory CatalogField.fromJson(Map<String, dynamic> json) => CatalogField(
     code: json['code'] as String,
     label: json['label'] as String,
@@ -28,6 +30,7 @@ final class CatalogField {
     isRequired: json['isRequired'] as bool,
     sortOrder: json['sortOrder'] as int,
     dictionaryCode: json['dictionaryCode'] as String?,
+    totalMode: json['totalMode'] as String?,
   );
 }
 

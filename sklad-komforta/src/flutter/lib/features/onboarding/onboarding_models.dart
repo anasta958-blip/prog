@@ -252,6 +252,7 @@ final class CatalogFieldDraft {
     this.dictionaryCode,
     this.label,
     this.fieldType,
+    this.totalMode,
   });
 
   String fieldCode;
@@ -260,6 +261,7 @@ final class CatalogFieldDraft {
   String? dictionaryCode;
   String? label;
   String? fieldType;
+  String? totalMode;
 
   factory CatalogFieldDraft.fromJson(Map<String, dynamic> json) =>
       CatalogFieldDraft(
@@ -271,6 +273,7 @@ final class CatalogFieldDraft {
             : json['dictionaryCode'] as String?,
         label: json['label'] as String?,
         fieldType: json['fieldType'] as String?,
+        totalMode: json['totalMode'] as String?,
       );
 
   Map<String, dynamic> toJson() => {
@@ -280,6 +283,7 @@ final class CatalogFieldDraft {
     'dictionaryCode': fieldCode == 'group' ? null : dictionaryCode,
     'label': label,
     'fieldType': fieldType,
+    'totalMode': totalMode,
   };
 }
 

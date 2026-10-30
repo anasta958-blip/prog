@@ -11,7 +11,8 @@ public sealed record CatalogFieldSummary(
     bool IsVisible,
     bool IsRequired,
     int SortOrder,
-    string? DictionaryCode);
+    string? DictionaryCode,
+    string? TotalMode = null);
 
 /// <summary>Группа внутри раздела каталога.</summary>
 public sealed record CatalogGroupSummary(Guid Id, string Name, int SortOrder);

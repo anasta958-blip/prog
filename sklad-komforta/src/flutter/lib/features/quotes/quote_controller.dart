@@ -124,6 +124,47 @@ final class QuoteController extends ChangeNotifier {
     );
   }
 
+  List<(String, double)> separateTotalRows(
+    Iterable<QuoteCategoryDraft> categories,
+  ) {
+    final totals = <(String, String), double>{};
+    for (final category in categories) {
+      final fields =
+          catalog?.categories
+              .where((item) => item.id == category.catalogCategoryId)
+              .firstOrNull
+              ?.fields ??
+          const <CatalogField>[];
+      for (final field in fields.where(
+        (field) => field.totalMode == 'separate',
+      )) {
+        final key = (field.code, field.label);
+        for (final position in category.sections.expand(
+          (section) => section.positions,
+        )) {
+          if (position.excludeFromTotals) continue;
+          final raw =
+              position.values[field.code] ??
+              switch (field.code) {
+                'base_price' => position.manualPrice ?? position.basePrice,
+                'purchase_price' => position.purchasePrice,
+                _ => position.values[field.code],
+              };
+          final number = raw is num
+              ? raw.toDouble()
+              : double.tryParse((raw?.toString() ?? '').replaceAll(',', '.')) ??
+                    0;
+          totals[key] = (totals[key] ?? 0) + number;
+        }
+        totals.putIfAbsent(key, () => 0);
+      }
+    }
+    return [
+      for (final entry in totals.entries)
+        (entry.key.$2, (entry.value * 100).round() / 100),
+    ];
+  }
+
   /// Загружает справочники параллельно с документом. Отсутствие документа для
   /// новой карточки является штатным состоянием, а не ошибкой редактора.
   Future<void> initialize({

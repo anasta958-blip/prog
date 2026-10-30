@@ -4,6 +4,18 @@ import 'package:sklad_komforta_app/features/onboarding/onboarding_field_registry
 import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
 
 void main() {
+  test('field total mode survives serialization including legacy null', () {
+    for (final mode in [null, 'none', 'total', 'separate']) {
+      final field = CatalogFieldDraft(
+        fieldCode: 'custom_amount',
+        fieldType: 'money',
+        isVisible: true,
+        isRequired: false,
+        totalMode: mode,
+      );
+      expect(CatalogFieldDraft.fromJson(field.toJson()).totalMode, mode);
+    }
+  });
   test(
     'источник поставщика сохраняется по коду, явное отключение не заменяется',
     () {

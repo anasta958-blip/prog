@@ -602,7 +602,8 @@ internal sealed class PostgresQuoteService(
                                 ? null
                                 : QuoteConfiguredCalculationEngine.Calculate(
                                     position, categoryClientId, runtime.Rules, runtime.Pipelines,
-                                    runtime.PercentFields.GetValueOrDefault(categoryClientId));
+                                    runtime.PercentFields.GetValueOrDefault(categoryClientId),
+                                    runtime.TotalFields?.GetValueOrDefault(categoryClientId));
                             }
                             catch (IdentityException error) when (error.Code == "calculation_value_missing")
                             {
@@ -731,7 +732,12 @@ internal sealed class PostgresQuoteService(
                 ?? new Dictionary<string, IReadOnlySet<string>>(),
             draft?.Categories.ToDictionary(category => category.ClientId,
                 category => (IReadOnlyDictionary<string, string>)category.Fields.ToDictionary(field => field.FieldCode, OnboardingFieldRegistry.LabelOf))
-                ?? new Dictionary<string, IReadOnlyDictionary<string, string>>());
+                ?? new Dictionary<string, IReadOnlyDictionary<string, string>>(),
+            draft?.Categories.Where(category => category.Fields.Any(field => field.TotalMode is not null))
+                .ToDictionary(category => category.ClientId,
+                    category => (IReadOnlySet<string>)category.Fields
+                        .Where(field => field.TotalMode is "total" or "separate")
+                        .Select(field => field.FieldCode).ToHashSet(StringComparer.Ordinal)));
     }
 
     internal sealed record QuoteCalculationConfiguration(
@@ -740,7 +746,8 @@ internal sealed class PostgresQuoteService(
         IReadOnlyList<MoneyPipelineDraft> Pipelines,
         IReadOnlyDictionary<string, IReadOnlySet<string>> PercentFields,
         IReadOnlyDictionary<string, IReadOnlySet<string>> MoneyFields,
-        IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> FieldLabels);
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> FieldLabels,
+        IReadOnlyDictionary<string, IReadOnlySet<string>>? TotalFields = null);
 
     private static async Task ExecuteAsync(
         DbConnection connection,

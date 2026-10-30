@@ -62,7 +62,8 @@ public sealed record CatalogFieldDraft(
     bool IsRequired,
     string? DictionaryCode = null,
     string? Label = null,
-    string? FieldType = null);
+    string? FieldType = null,
+    string? TotalMode = null);
 
 /// <summary>Раздел каталога и его группы.</summary>
 public sealed record CatalogSectionDraft(string Name, IReadOnlyList<CatalogGroupDraft> Groups);
