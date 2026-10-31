@@ -22,6 +22,107 @@ void main() {
     environment: 'test',
   );
 
+  test(
+    'variant total event queues related cards once without recursion',
+    () async {
+      final auth = AuthController(
+        config,
+        api: _NoopAuthGateway(),
+        tokens: _MemoryTokenRepository(),
+      )..accessToken = 'access-token';
+      final controller = QuoteController(
+        config,
+        auth,
+        catalogGateway: _CatalogGatewayWithRelations(),
+      );
+      final row = QuotePositionDraft(
+        id: 'primary',
+        catalogItemId: _equipmentItem.id,
+        name: 'Товар',
+        marking: '',
+        unit: 'шт',
+        quantity: 1,
+        basePrice: 10,
+        values: {},
+      );
+      final variant = QuoteVariantDraft(
+        id: 'variant',
+        name: 'Вариант',
+        categories: [
+          QuoteCategoryDraft(
+            id: 'category',
+            catalogCategoryId: _equipmentCategory.id,
+            name: _equipmentCategory.name,
+            sections: [
+              QuoteSectionDraft(
+                id: 'section',
+                catalogSectionId: _equipmentSection.id,
+                name: _equipmentSection.name,
+                positions: [row],
+              ),
+            ],
+          ),
+        ],
+      );
+      controller
+        ..catalog = CatalogConfiguration(
+          categories: _configuration.categories,
+          dictionaries: const [],
+          dependencies: const [_dependency],
+          rules: [
+            CalculationRuleDraft(
+              clientId: 'variant-related',
+              name: 'Related',
+              categoryClientId: 'equipment',
+              eventType: 'variant_calculation',
+              isEnabled: true,
+              conditions: [
+                RuleConditionDraft(
+                  fieldCode: 'variant_total',
+                  operator: 'greater_than',
+                  comparisonValue: '100',
+                ),
+              ],
+              actions: [
+                RuleActionDraft(
+                  actionType: 'add_related_cards',
+                  dependencyClientId: _dependency.clientId,
+                ),
+              ],
+            ),
+          ],
+        )
+        ..draft = QuoteDraft(
+          kind: QuoteKind.quote,
+          title: 'КП',
+          clientId: 'client',
+          executorCompanyId: 'executor',
+          selectionMode: 'variant',
+          proposalTypes: [
+            QuoteProposalTypeDraft(
+              id: 'type',
+              name: 'Тип',
+              variants: [variant],
+            ),
+          ],
+        );
+      await controller.positionChanged();
+      expect(variant.positions, hasLength(1));
+      row.quantity = 20;
+      await controller.positionChanged(position: row, fieldCode: 'quantity');
+      expect(variant.positions, hasLength(2));
+      final work = variant.positions.singleWhere(
+        (item) => item.catalogItemId == _workItemId,
+      );
+      expect(work.quantity, 1);
+      expect(variant.lastRuleTotal, variant.totalWithVat);
+      await controller.positionChanged(position: row, fieldCode: 'name');
+      expect(work.quantity, 1);
+      controller.dispose();
+      auth.dispose();
+    },
+  );
+
   test('copies types and variants with independent data and relation ids', () {
     final auth = AuthController(
       config,

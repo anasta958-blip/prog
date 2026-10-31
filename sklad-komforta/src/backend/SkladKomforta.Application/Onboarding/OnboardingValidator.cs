@@ -413,12 +413,20 @@ public static class OnboardingValidator
             else if (!string.IsNullOrWhiteSpace(rule.EventFieldCode))
                 Fail("onboarding_rule_invalid", "Поле события задаётся только для изменения поля.");
 
+            if (rule.EventType == "variant_calculation")
+                fields.Add("variant_total", new CatalogFieldDraft("variant_total", true, false,
+                    Label: "Итоговая сумма варианта (с НДС)", FieldType: "money"));
+
             foreach (var condition in rule.Conditions)
                 ValidateCondition(fields, condition);
             if (rule.Actions.Count == 0)
                 Fail("onboarding_rule_invalid", $"В правиле «{rule.Name}» отсутствуют действия.");
             foreach (var action in rule.Actions)
+            {
+                if (action.TargetFieldCode == "variant_total")
+                    Fail("onboarding_rule_field_invalid", "Итоговая сумма варианта доступна только для чтения.");
                 ValidateAction(fields, dependenciesById, category.ClientId, action);
+            }
         }
 
         var writers = new HashSet<(string Category, string Field)>();
@@ -452,7 +460,7 @@ public static class OnboardingValidator
         RuleConditionDraft condition)
     {
         var field = RequireRuleField(fields, condition.FieldCode, null, "Поле условия");
-        var fieldType = OnboardingFieldRegistry.FieldTypeOf(field);
+        var fieldType = RuleFieldType(field);
         RequireAllowed(
             condition.Operator,
             ["is_true", "is_false", "greater_than_zero", "is_filled", "equals", "less_than", "greater_than"],
@@ -469,7 +477,7 @@ public static class OnboardingValidator
             if (condition.ComparisonFieldCode is not null)
             {
                 var other = RequireRuleField(fields, condition.ComparisonFieldCode, null, "Поле сравнения");
-                var otherType = OnboardingFieldRegistry.FieldTypeOf(other);
+                var otherType = RuleFieldType(other);
                 if (numeric && !IsNumericField(otherType) ||
                     !numeric && fieldType != otherType && !(IsNumericField(fieldType) && IsNumericField(otherType)))
                     Fail("onboarding_rule_field_invalid", "Выберите совместимое поле для сравнения.");
@@ -597,7 +605,7 @@ public static class OnboardingValidator
         if (string.IsNullOrWhiteSpace(fieldCode) || !fields.ContainsKey(fieldCode))
             Fail("onboarding_rule_field_invalid", $"{label} не выбрано или отсутствует в категории.");
         var field = fields[fieldCode];
-        var fieldType = OnboardingFieldRegistry.FieldTypeOf(field);
+        var fieldType = RuleFieldType(field);
         if (allowedTypes is not null && !allowedTypes.Contains(fieldType))
             Fail("onboarding_rule_field_invalid", $"Поле «{OnboardingFieldRegistry.LabelOf(field)}» имеет неподходящий тип.");
         return field;
@@ -614,6 +622,9 @@ public static class OnboardingValidator
 
     private static bool IsNumericField(string fieldType) =>
         fieldType is "number" or "money" or "percent" or "calculated_money";
+
+    private static string RuleFieldType(CatalogFieldDraft field) =>
+        field.FieldCode == "variant_total" ? "money" : OnboardingFieldRegistry.FieldTypeOf(field);
 
     private static void RequireAllowed(string? value, string[] values, string label)
     {

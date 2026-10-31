@@ -7,6 +7,41 @@ namespace SkladKomforta.Api.IntegrationTests;
 public sealed class QuoteConfiguredCalculationEngineTests
 {
     [Theory]
+    [InlineData("exclude_row", false)]
+    [InlineData("exclude_row", true)]
+    [InlineData("block_save", false)]
+    [InlineData("block_save", true)]
+    public void SaveRespectsVariantEffectsWithoutReevaluatingTheirConditions(string actionType, bool fired)
+    {
+        var rule = new CalculationRuleDraft("variant", "Variant", "equipment", "variant_calculation", true, null,
+            [new RuleConditionDraft("variant_total", "greater_than", "10")],
+            [new RuleActionDraft(actionType, Message: "Blocked")]);
+        var activeIds = new List<string>();
+        if (fired) activeIds.Add("variant");
+        var values = new Dictionary<string, JsonElement> {
+            ["_active_effect_rules"] = JsonSerializer.SerializeToElement(activeIds)
+        };
+        var row = new SaveQuotePositionRequest(null, null, "Item", "", "", 1m, null, 10m, null, null, null, false, values);
+        if (fired && actionType == "block_save")
+            Assert.Throws<SkladKomforta.Application.Identity.IdentityException>(() =>
+                QuoteConfiguredCalculationEngine.Calculate(row, "equipment", [rule], []));
+        else
+            Assert.Equal(fired && actionType == "exclude_row",
+                QuoteConfiguredCalculationEngine.Calculate(row, "equipment", [rule], []).ExcludeFromTotals);
+    }
+
+    [Fact]
+    public void SavingDoesNotRepeatVariantEventActions()
+    {
+        var rule = new CalculationRuleDraft("variant", "Variant", "equipment", "variant_calculation", true, null,
+            [], [new RuleActionDraft("set_field", TargetFieldCode: "base_price", ConstantValue: "99")]);
+        var row = new SaveQuotePositionRequest(null, null, "Item", "", "", 1m,
+            null, 10m, null, null, null, false, null);
+        var result = QuoteConfiguredCalculationEngine.Calculate(row, "equipment", [rule], []);
+        Assert.Equal(10m, result.LineTotal);
+    }
+
+    [Theory]
     [InlineData("name")]
     [InlineData("marking")]
     [InlineData("unit")]

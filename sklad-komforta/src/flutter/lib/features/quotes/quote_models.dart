@@ -187,6 +187,8 @@ final class QuoteVariantDraft {
   String subtitle;
   double? vatRate;
   final List<QuoteCategoryDraft> categories;
+  // Runtime baseline: loading a document must not invent a total-change event.
+  double? lastRuleTotal;
 
   factory QuoteVariantDraft.create({
     String name = 'Бюджетный',
@@ -385,8 +387,10 @@ final class QuotePositionDraft {
   final Map<String, dynamic> values;
   bool selected = false;
   double? configuredLineTotal;
+  bool ruleDefinesLineTotal = false;
   final Set<String> hiddenFieldCodes = <String>{};
   final Set<String> activatedHighlightRuleIds = <String>{};
+  final Set<String> activatedVisibilityRuleIds = <String>{};
   final Map<String, ({String color, String message})> fieldHighlights = {};
 
   factory QuotePositionDraft.fromJson(Map<String, dynamic> json) =>

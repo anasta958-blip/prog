@@ -2203,6 +2203,7 @@ final class _OrganizationOnboardingPageState
   ];
 
   String _categoryFieldLabel(CatalogCategoryDraft category, String code) {
+    if (code == 'variant_total') return 'Итоговая сумма варианта (с НДС)';
     for (final field in category.fields) {
       if (field.fieldCode == code) return catalogFieldLabel(field);
     }
@@ -2552,6 +2553,15 @@ final class _OrganizationOnboardingPageState
             required: true,
           ),
       ]),
+      if (rule.eventType == 'variant_calculation')
+        const Padding(
+          padding: EdgeInsets.only(top: 8),
+          child: Text(
+            'Выполняется при изменении итога для клиента с НДС. '
+            'Итоговая сумма варианта доступна в условиях и формулах. '
+            'Открытие карточки не запускает событие.',
+          ),
+        ),
     ],
   );
 
@@ -2566,7 +2576,11 @@ final class _OrganizationOnboardingPageState
       for (var index = 0; index < rule.conditions.length; index++)
         _DeleteRow(
           onDelete: () => setState(() => rule.conditions.removeAt(index)),
-          child: _conditionEditor(rule.conditions[index], category),
+          child: _conditionEditor(
+            rule.conditions[index],
+            category,
+            includeVariantTotal: rule.eventType == 'variant_calculation',
+          ),
         ),
       TextButton.icon(
         onPressed: category == null || category.fields.isEmpty
@@ -2587,8 +2601,9 @@ final class _OrganizationOnboardingPageState
 
   Widget _conditionEditor(
     RuleConditionDraft condition,
-    CatalogCategoryDraft? category,
-  ) {
+    CatalogCategoryDraft? category, {
+    bool includeVariantTotal = false,
+  }) {
     if (category == null) return const SizedBox.shrink();
     return _responsiveFields([
       _ruleFieldSelect(
@@ -2598,6 +2613,7 @@ final class _OrganizationOnboardingPageState
         const [],
         (value) => setState(() => condition.fieldCode = value!),
         required: true,
+        includeVariantTotal: includeVariantTotal,
       ),
       AppSelectField<String>(
         value: condition.operator,
@@ -2642,6 +2658,7 @@ final class _OrganizationOnboardingPageState
             (value) =>
                 setState(() => condition.comparisonFieldCode = value ?? ''),
             required: true,
+            includeVariantTotal: includeVariantTotal,
           )
         else
           _textField('Значение', condition.comparisonValue ?? '', (value) {
@@ -2662,7 +2679,11 @@ final class _OrganizationOnboardingPageState
       for (var index = 0; index < rule.actions.length; index++)
         _DeleteRow(
           onDelete: () => setState(() => rule.actions.removeAt(index)),
-          child: _actionEditor(rule.actions[index], category),
+          child: _actionEditor(
+            rule.actions[index],
+            category,
+            includeVariantTotal: rule.eventType == 'variant_calculation',
+          ),
         ),
       TextButton.icon(
         onPressed: () => setState(
@@ -2674,7 +2695,11 @@ final class _OrganizationOnboardingPageState
     ],
   );
 
-  Widget _actionEditor(RuleActionDraft action, CatalogCategoryDraft? category) {
+  Widget _actionEditor(
+    RuleActionDraft action,
+    CatalogCategoryDraft? category, {
+    bool includeVariantTotal = false,
+  }) {
     if (action.actionType == 'aggregate_money') {
       return const SizedBox.shrink();
     }
@@ -2743,6 +2768,7 @@ final class _OrganizationOnboardingPageState
             const [],
             (value) => setState(() => action.sourceFieldCode = value),
             required: true,
+            includeVariantTotal: includeVariantTotal,
           ),
         ]);
         break;
@@ -2868,7 +2894,11 @@ final class _OrganizationOnboardingPageState
         _responsiveFields(controls),
         if (action.actionType == 'calculate_field') ...[
           const SizedBox(height: 12),
-          _formulaEditor(action, category),
+          _formulaEditor(
+            action,
+            category,
+            includeVariantTotal: includeVariantTotal,
+          ),
         ],
       ],
     );
@@ -2880,14 +2910,18 @@ final class _OrganizationOnboardingPageState
     return '${source?.name ?? 'Категория'} → ${target?.name ?? 'Категория'}';
   }
 
-  Widget _formulaEditor(RuleActionDraft action, CatalogCategoryDraft category) {
+  Widget _formulaEditor(
+    RuleActionDraft action,
+    CatalogCategoryDraft category, {
+    bool includeVariantTotal = false,
+  }) {
     final formula = action.formula ??= FormulaDraft();
     final numeric = _numericFields(category, const [
       'number',
       'money',
       'percent',
       'calculated_money',
-    ]);
+    ], includeVariantTotal: includeVariantTotal);
     return DecoratedBox(
       decoration: BoxDecoration(
         color: const Color(0xFF0B141F),
@@ -3133,11 +3167,14 @@ final class _OrganizationOnboardingPageState
     List<String> allowedTypes,
     ValueChanged<String?> onChanged, {
     bool required = false,
+    bool includeVariantTotal = false,
     Set<String> excludedFieldCodes = const <String>{},
   }) {
-    final candidates = allowedTypes.isEmpty
-        ? category.fields
-        : _numericFields(category, allowedTypes);
+    final candidates = _numericFields(
+      category,
+      allowedTypes,
+      includeVariantTotal: includeVariantTotal,
+    );
     final fields = candidates
         .where(
           (field) =>
@@ -3179,10 +3216,26 @@ final class _OrganizationOnboardingPageState
 
   List<CatalogFieldDraft> _numericFields(
     CatalogCategoryDraft category,
-    List<String> allowedTypes,
-  ) => category.fields
-      .where((field) => allowedTypes.contains(catalogFieldType(field)))
-      .toList();
+    List<String> allowedTypes, {
+    bool includeVariantTotal = false,
+  }) =>
+      [
+            ...category.fields,
+            if (includeVariantTotal)
+              CatalogFieldDraft(
+                fieldCode: 'variant_total',
+                isVisible: true,
+                isRequired: false,
+                fieldType: 'money',
+                label: 'Итоговая сумма варианта (с НДС)',
+              ),
+          ]
+          .where(
+            (field) =>
+                allowedTypes.isEmpty ||
+                allowedTypes.contains(catalogFieldType(field)),
+          )
+          .toList();
 
   Widget _rolesEditor() => Column(
     children: [

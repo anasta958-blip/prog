@@ -17,9 +17,13 @@ final class QuoteConfiguredCalculationEngine {
     QuotePositionDraft? changedPosition,
     String? changedFieldCode,
     bool saving = false,
+    QuoteVariantDraft? consumedVariant,
+    void Function(QuoteVariantDraft variant, double total)?
+    onVariantTotalChanged,
   }) {
     for (final type in document.proposalTypes) {
       for (final variant in type.variants) {
+        final previousTotal = variant.lastRuleTotal;
         for (final category in variant.categories) {
           final configuredCategory = configuration.categories
               .where((item) => item.id == category.catalogCategoryId)
@@ -49,6 +53,49 @@ final class QuoteConfiguredCalculationEngine {
             }
           }
         }
+        final total = variant.totalWithVat;
+        if (previousTotal != null &&
+            total != previousTotal &&
+            !identical(variant, consumedVariant)) {
+          for (final category in variant.categories) {
+            final clientId = configuration.categories
+                .where((item) => item.id == category.catalogCategoryId)
+                .firstOrNull
+                ?.clientId;
+            if (clientId == null ||
+                !_rulesFor(
+                  clientId,
+                ).any((rule) => rule.eventType == 'variant_calculation')) {
+              continue;
+            }
+            for (final position in category.sections.expand(
+              (item) => item.positions,
+            )) {
+              final before = _valuesOf(position);
+              _calculatePosition(
+                clientId,
+                position,
+                variantTotal: total,
+                variantEvent: true,
+              );
+              // Recalculate dependent row formulas after an event changes their inputs.
+              // Do not re-run row actions for purely visual variant events.
+              final after = _valuesOf(position);
+              if (after.entries.any(
+                (entry) =>
+                    !entry.key.startsWith('_') &&
+                    before[entry.key] != entry.value,
+              )) {
+                _calculatePosition(clientId, position);
+              }
+            }
+          }
+          // Consume changes produced by the event itself; never recursively fire it.
+          variant.lastRuleTotal = variant.totalWithVat;
+          onVariantTotalChanged?.call(variant, total);
+        } else {
+          variant.lastRuleTotal = total;
+        }
       }
     }
   }
@@ -67,7 +114,8 @@ final class QuoteConfiguredCalculationEngine {
           )) {
             final values = _valuesOf(position);
             for (final rule in _rulesFor(categoryClientId)) {
-              if (rule.eventType == 'field_changed') {
+              if (rule.eventType == 'field_changed' ||
+                  rule.eventType == 'variant_calculation') {
                 if (!_effectRuleIds(values).contains(rule.clientId)) continue;
               } else if (!_matchesAll(values, rule.conditions)) {
                 continue;
@@ -90,14 +138,22 @@ final class QuoteConfiguredCalculationEngine {
 
   /// Проверяет условия правила по текущим значениям строки. Метод используется
   /// контроллером только для действий, которым требуется доступ к API каталога.
-  bool matchesRule(QuotePositionDraft position, CalculationRuleDraft rule) =>
-      _matchesAll(_valuesOf(position), rule.conditions);
+  bool matchesRule(
+    QuotePositionDraft position,
+    CalculationRuleDraft rule, {
+    double? variantTotal,
+  }) => _matchesAll({
+    ..._valuesOf(position),
+    'variant_total': ?variantTotal,
+  }, rule.conditions);
 
   void _calculatePosition(
     String? categoryClientId,
     QuotePositionDraft position, {
     String? changedFieldCode,
     bool saving = false,
+    double? variantTotal,
+    bool variantEvent = false,
   }) {
     position.configuredLineTotal = null;
     position.hiddenFieldCodes.clear();
@@ -114,6 +170,7 @@ final class QuoteConfiguredCalculationEngine {
       (field) => field.totalMode != null,
     );
     final values = _valuesOf(position);
+    if (variantTotal != null) values['variant_total'] = variantTotal;
     final percentFields = configuration.categories
         .where((category) => category.clientId == categoryClientId)
         .expand((category) => category.fields)
@@ -128,14 +185,14 @@ final class QuoteConfiguredCalculationEngine {
     }
     final rules = _rulesFor(categoryClientId)
         .where(
-          (rule) =>
-              rule.eventType == 'row_calculation' ||
-              rule.eventType == 'variant_calculation' ||
-              (saving && rule.eventType == 'card_saving') ||
-              (rule.eventType == 'field_changed' &&
-                  changedFieldCode != null &&
-                  (rule.eventFieldCode == null ||
-                      rule.eventFieldCode == changedFieldCode)),
+          (rule) => (variantEvent
+              ? rule.eventType == 'variant_calculation'
+              : rule.eventType == 'row_calculation' ||
+                    (saving && rule.eventType == 'card_saving') ||
+                    (rule.eventType == 'field_changed' &&
+                        changedFieldCode != null &&
+                        (rule.eventFieldCode == null ||
+                            rule.eventFieldCode == changedFieldCode))),
         )
         .toList(growable: false);
     final effectRules = _rulesFor(categoryClientId)
@@ -180,7 +237,24 @@ final class QuoteConfiguredCalculationEngine {
       values.remove('_unconditional_excluded_from_calc');
     }
     values['_active_effect_rules'] = activeEffects.toList();
-    var formulaDefinesLineTotal = false;
+    var formulaDefinesLineTotal =
+        (variantEvent && position.ruleDefinesLineTotal) ||
+        (values['_event_line_total'] == true &&
+            _rulesFor(categoryClientId).any(
+              (rule) =>
+                  const {
+                    'field_changed',
+                    'variant_calculation',
+                  }.contains(rule.eventType) &&
+                  rule.actions.any(
+                    (action) =>
+                        action.targetFieldCode == 'line_total' &&
+                        const {
+                          'set_field',
+                          'calculate_field',
+                        }.contains(action.actionType),
+                  ),
+            ));
     final calculations =
         <({String target, Set<String> inputs, void Function() run})>[];
     final systemInputs = Map<String, dynamic>.from(values);
@@ -204,6 +278,13 @@ final class QuoteConfiguredCalculationEngine {
                     : _parseConstant(action.constantValue);
                 systemInputs[action.targetFieldCode!] =
                     values[action.targetFieldCode!];
+                if (action.targetFieldCode == 'line_total') {
+                  formulaDefinesLineTotal = true;
+                  if (rule.eventType == 'variant_calculation' ||
+                      rule.eventType == 'field_changed') {
+                    values['_event_line_total'] = true;
+                  }
+                }
               },
             ));
             break;
@@ -227,19 +308,16 @@ final class QuoteConfiguredCalculationEngine {
                   formulaDefinesLineTotal =
                       action.targetFieldCode == 'line_total' ||
                       formulaDefinesLineTotal;
+                  if (action.targetFieldCode == 'line_total' &&
+                      (rule.eventType == 'variant_calculation' ||
+                          rule.eventType == 'field_changed')) {
+                    values['_event_line_total'] = true;
+                  }
                 },
               ));
             }
             break;
           case 'set_field_visibility':
-            final fieldCode = action.targetFieldCode;
-            if (fieldCode != null) {
-              if (action.booleanValue == false) {
-                position.hiddenFieldCodes.add(fieldCode);
-              } else {
-                position.hiddenFieldCodes.remove(fieldCode);
-              }
-            }
             break;
         }
       }
@@ -347,10 +425,48 @@ final class QuoteConfiguredCalculationEngine {
         'Итоговая стоимость позиции не может быть отрицательной.',
       );
     }
+    position.ruleDefinesLineTotal = formulaDefinesLineTotal;
+    values.remove('variant_total');
     position.values
       ..clear()
       ..addAll(values);
     // An event activates a highlight; unrelated recalculations must not activate it.
+    final visibilityRules = _rulesFor(categoryClientId)
+        .where(
+          (rule) => rule.actions.any(
+            (action) => action.actionType == 'set_field_visibility',
+          ),
+        )
+        .toList();
+    position.activatedVisibilityRuleIds.removeWhere(
+      (id) => !visibilityRules.any((rule) => rule.clientId == id),
+    );
+    for (final rule in visibilityRules) {
+      if (rules.contains(rule)) {
+        if (_matchesAll({
+          ...values,
+          'variant_total': ?variantTotal,
+        }, rule.conditions)) {
+          position.activatedVisibilityRuleIds.add(rule.clientId);
+        } else {
+          position.activatedVisibilityRuleIds.remove(rule.clientId);
+        }
+      }
+      if (!position.activatedVisibilityRuleIds.contains(rule.clientId)) {
+        continue;
+      }
+      for (final action in rule.actions.where(
+        (action) =>
+            action.actionType == 'set_field_visibility' &&
+            action.targetFieldCode != null,
+      )) {
+        if (action.booleanValue == false) {
+          position.hiddenFieldCodes.add(action.targetFieldCode!);
+        } else {
+          position.hiddenFieldCodes.remove(action.targetFieldCode!);
+        }
+      }
+    }
     final highlightRules = _rulesFor(categoryClientId)
         .where(
           (rule) => rule.actions.any(
@@ -364,7 +480,10 @@ final class QuoteConfiguredCalculationEngine {
     );
     for (final rule in highlightRules) {
       if (rules.contains(rule)) {
-        if (_matchesAll(values, rule.conditions)) {
+        if (_matchesAll({
+          ...values,
+          'variant_total': ?variantTotal,
+        }, rule.conditions)) {
           position.activatedHighlightRuleIds.add(rule.clientId);
         } else {
           position.activatedHighlightRuleIds.remove(rule.clientId);

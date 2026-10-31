@@ -7,6 +7,32 @@ namespace SkladKomforta.Domain.Tests.Onboarding;
 /// <summary>Фиксирует серверные инварианты первичной настройки организации.</summary>
 public sealed class OnboardingValidatorTests
 {
+    [Fact]
+    public void VariantTotalCanBeAComparisonOperandAndFormulaSource()
+    {
+        var rule = new CalculationRuleDraft("variant", "Variant", "equipment", "variant_calculation", true,
+            null, [new RuleConditionDraft("base_price", "less_than", ComparisonFieldCode: "variant_total")],
+            [new RuleActionDraft("calculate_field", TargetFieldCode: "custom_total",
+                Formula: new FormulaDraft([new FormulaTokenDraft("field", FieldCode: "variant_total")]))]);
+        OnboardingValidator.Validate(ValidDraft() with {
+            Categories = [CategoryWithCalculationFields()], Rules = [rule]
+        }, false);
+    }
+
+    [Theory]
+    [InlineData("variant_calculation", "custom_total", true)]
+    [InlineData("variant_calculation", "variant_total", false)]
+    [InlineData("row_calculation", "custom_total", false)]
+    public void VariantTotalIsReadOnlyAndOnlyAvailableForVariantEvents(string eventType, string target, bool valid)
+    {
+        var rule = new CalculationRuleDraft("variant", "Variant", "equipment", eventType, true,
+            null, [new RuleConditionDraft("variant_total", "greater_than", "10")],
+            [new RuleActionDraft("set_field", TargetFieldCode: target, SourceFieldCode: "variant_total")]);
+        var draft = ValidDraft() with { Categories = [CategoryWithCalculationFields()], Rules = [rule] };
+        if (valid) OnboardingValidator.Validate(draft, false);
+        else Assert.Throws<IdentityException>(() => OnboardingValidator.Validate(draft, false));
+    }
+
     [Theory]
     [InlineData("#F59E0B", "Check", "base_price", true)]
     [InlineData("red", "Check", "base_price", false)]

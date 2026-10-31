@@ -1084,7 +1084,10 @@ final class QuoteController extends ChangeNotifier {
     String? fieldCode,
   }) async {
     _changed(position: position, fieldCode: fieldCode);
-    if (position == null) return;
+    if (position == null) {
+      await _waitForVariantBehavior();
+      return;
+    }
     final previous = _behaviorQueues[position.id] ?? Future<void>.value();
     final queued = previous.then(
       (_) => _applyBehaviorRules(position, changedFieldCode: fieldCode),
@@ -1092,6 +1095,7 @@ final class QuoteController extends ChangeNotifier {
     _behaviorQueues[position.id] = queued;
     try {
       await queued;
+      await _waitForVariantBehavior();
     } on ApiException catch (exception) {
       error = exception.message;
       notifyListeners();
@@ -1110,6 +1114,7 @@ final class QuoteController extends ChangeNotifier {
     QuotePositionDraft position, {
     String? changedFieldCode,
     String? eventType,
+    double? variantTotal,
   }) async {
     final configuration = catalog;
     final location = _locationOf(position);
@@ -1128,7 +1133,9 @@ final class QuoteController extends ChangeNotifier {
           item.categoryClientId == categoryClientId &&
           _ruleRunsFor(item, changedFieldCode, eventType),
     )) {
-      if (!evaluator.matchesRule(position, rule)) continue;
+      if (!evaluator.matchesRule(position, rule, variantTotal: variantTotal)) {
+        continue;
+      }
       for (final action in rule.actions.where(
         (item) => const {
           'add_related_cards',
@@ -1168,7 +1175,67 @@ final class QuoteController extends ChangeNotifier {
         }
       }
     }
-    if (changed) _changed();
+    if (changed) {
+      _changed(
+        consumedVariant: eventType == 'variant_calculation'
+            ? location.variant
+            : null,
+      );
+    }
+  }
+
+  void _queueVariantBehavior(QuoteVariantDraft variant, double total) {
+    if (!(catalog?.rules.any(
+          (rule) =>
+              rule.isEnabled &&
+              rule.eventType == 'variant_calculation' &&
+              rule.actions.any(
+                (action) => const {
+                  'add_related_cards',
+                  'remove_related_cards',
+                }.contains(action.actionType),
+              ),
+        ) ??
+        false)) {
+      return;
+    }
+    final key = 'variant:${variant.id}';
+    final positions = variant.positions.toList(growable: false);
+    final previous = _behaviorQueues[key] ?? Future<void>.value();
+    late final Future<void> queued;
+    queued = previous
+        .then((_) async {
+          for (final position in positions) {
+            await _applyBehaviorRules(
+              position,
+              eventType: 'variant_calculation',
+              variantTotal: total,
+            );
+          }
+        })
+        .catchError((Object exception) {
+          error = exception is ApiException
+              ? exception.message
+              : 'Не удалось применить настроенное действие для связанных карточек.';
+          notifyListeners();
+        })
+        .whenComplete(() {
+          if (identical(_behaviorQueues[key], queued)) {
+            _behaviorQueues.remove(key);
+          }
+        });
+    _behaviorQueues[key] = queued;
+  }
+
+  Future<void> _waitForVariantBehavior() async {
+    while (_behaviorQueues.keys.any((key) => key.startsWith('variant:'))) {
+      await Future.wait(
+        _behaviorQueues.entries
+            .where((entry) => entry.key.startsWith('variant:'))
+            .map((entry) => entry.value)
+            .toList(growable: false),
+      );
+    }
   }
 
   Future<void> _applyDocumentBehaviorRules(String eventType) async {
@@ -1194,8 +1261,7 @@ final class QuoteController extends ChangeNotifier {
           (rule.eventFieldCode == null ||
               rule.eventFieldCode == changedFieldCode);
     }
-    return rule.eventType == 'row_calculation' ||
-        rule.eventType == 'variant_calculation';
+    return rule.eventType == 'row_calculation';
   }
 
   Future<List<CatalogItemRelation>> _relationsFor(
@@ -1337,8 +1403,16 @@ final class QuoteController extends ChangeNotifier {
   String _relationMarker(String parentPositionId, String dependencyClientId) =>
       '$parentPositionId|$dependencyClientId';
 
-  void _changed({QuotePositionDraft? position, String? fieldCode}) {
-    _recalculateConfiguredRules(position: position, fieldCode: fieldCode);
+  void _changed({
+    QuotePositionDraft? position,
+    String? fieldCode,
+    QuoteVariantDraft? consumedVariant,
+  }) {
+    _recalculateConfiguredRules(
+      position: position,
+      fieldCode: fieldCode,
+      consumedVariant: consumedVariant,
+    );
     dirty = true;
     successMessage = null;
     notifyListeners();
@@ -1348,6 +1422,7 @@ final class QuoteController extends ChangeNotifier {
     QuotePositionDraft? position,
     String? fieldCode,
     bool saving = false,
+    QuoteVariantDraft? consumedVariant,
   }) {
     final configuration = catalog;
     final document = draft;
@@ -1361,6 +1436,8 @@ final class QuoteController extends ChangeNotifier {
         changedPosition: position,
         changedFieldCode: fieldCode,
         saving: saving,
+        consumedVariant: consumedVariant,
+        onVariantTotalChanged: _queueVariantBehavior,
       );
     } on FormatException catch (exception) {
       _calculationError = exception.message;
@@ -1389,6 +1466,7 @@ final class QuoteController extends ChangeNotifier {
       return false;
     }
     _recalculateConfiguredRules(saving: true);
+    await _waitForVariantBehavior();
     final validation = _validate(document);
     if (validation != null) {
       error = validation;
@@ -1424,6 +1502,7 @@ final class QuoteController extends ChangeNotifier {
       dirty = false;
       successMessage = 'Изменения сохранены';
       _repairActiveSelection();
+      _recalculateConfiguredRules();
       return true;
     } on ApiException catch (exception) {
       error = exception.message;

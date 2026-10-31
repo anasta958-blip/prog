@@ -43,7 +43,7 @@ public static class QuoteConfiguredCalculationEngine
                 .Select(item => item.GetString()!).ToHashSet(StringComparer.Ordinal)
             : new HashSet<string>(StringComparer.Ordinal);
         activeEffects.RemoveWhere(id => !effectRules.Any(rule => rule.ClientId == id));
-        foreach (var rule in effectRules.Where(rule => rule.EventType != "field_changed"))
+        foreach (var rule in effectRules.Where(rule => rule.EventType is "row_calculation" or "card_saving"))
         {
             if (rule.Conditions.All(condition => Matches(values, condition))) activeEffects.Add(rule.ClientId);
             else activeEffects.Remove(rule.ClientId);
@@ -66,15 +66,19 @@ public static class QuoteConfiguredCalculationEngine
             foreach (var action in rule.Actions.Where(action => action.ActionType == "block_save"))
                 throw new IdentityException(422, "quote_rule_blocked_save",
                     string.IsNullOrWhiteSpace(action.Message) ? "Сохранение запрещено настроенным правилом." : action.Message.Trim());
-        var formulaDefinesLineTotal = false;
+        var formulaDefinesLineTotal = BooleanValue(values, "_event_line_total") == true &&
+            rules.Any(rule => rule.IsEnabled && rule.CategoryClientId == categoryClientId &&
+                rule.EventType is "field_changed" or "variant_calculation" &&
+                rule.Actions.Any(action => action.TargetFieldCode == "line_total" &&
+                    action.ActionType is "set_field" or "calculate_field"));
         var calculations = new List<(string Target, HashSet<string> Inputs, Action Run)>();
         var systemInputs = new Dictionary<string, JsonElement>(values, StringComparer.Ordinal);
         var matchedRules = rules.Where(rule =>
             rule.IsEnabled &&
             rule.CategoryClientId == categoryClientId &&
-            // Field-change actions have already produced the submitted values.
-            // Saving is not another change event for every field in the document.
-            rule.EventType is "row_calculation" or "card_saving" or "variant_calculation");
+            // Change-event actions have already produced the submitted values.
+            // Saving is not another field or variant-total change event.
+            rule.EventType is "row_calculation" or "card_saving");
         foreach (var rule in matchedRules)
         {
             if (!rule.Conditions.All(condition => Matches(values, condition))) continue;

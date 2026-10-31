@@ -50,7 +50,7 @@ public sealed class QuoteConfiguredCalculationEngineTests
             ["delivery_price"] = JsonSerializer.SerializeToElement(25m),
         };
         var rule = new CalculationRuleDraft(
-            "delivery", "Доставка", "equipment", "variant_calculation", true, null,
+            "delivery", "Доставка", "equipment", "row_calculation", true, null,
             [],
             [new RuleActionDraft(
                 "aggregate_money",

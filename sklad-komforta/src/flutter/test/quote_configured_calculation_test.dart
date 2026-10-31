@@ -5,6 +5,326 @@ import 'package:sklad_komforta_app/features/quotes/quote_configured_calculation.
 import 'package:sklad_komforta_app/features/quotes/quote_models.dart';
 
 void main() {
+  test('variant event is isolated and reads totals in formulas', () {
+    final row = _position(basePrice: 10);
+    final other = _position(basePrice: 30);
+    final document = _document(row);
+    final otherVariant = _document(other).proposalTypes.single.variants.single;
+    document.proposalTypes.single.variants.add(otherVariant);
+    final engine = QuoteConfiguredCalculationEngine(
+      _configuration(
+        rules: [
+          CalculationRuleDraft(
+            clientId: 'variant',
+            name: 'Variant',
+            categoryClientId: 'equipment',
+            eventType: 'variant_calculation',
+            isEnabled: true,
+            conditions: [],
+            actions: [
+              RuleActionDraft(
+                actionType: 'calculate_field',
+                targetFieldCode: 'custom_result',
+                formula: FormulaDraft(
+                  tokens: [
+                    FormulaTokenDraft(
+                      tokenType: 'field',
+                      fieldCode: 'variant_total',
+                    ),
+                    FormulaTokenDraft(
+                      tokenType: 'operator',
+                      operator: 'divide',
+                    ),
+                    FormulaTokenDraft(tokenType: 'constant', constantValue: 2),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+    engine.calculateDocument(document);
+    row.quantity = 2;
+    engine.calculateDocument(document);
+    expect(row.values['custom_result'], 10);
+    expect(other.values['custom_result'], isNull);
+  });
+
+  test('variant changes recalculate dependent row formulas once', () {
+    final row = _position(basePrice: 10);
+    final document = _document(row);
+    final engine = QuoteConfiguredCalculationEngine(
+      _configuration(
+        rules: [
+          CalculationRuleDraft(
+            clientId: 'row',
+            name: 'Row',
+            categoryClientId: 'equipment',
+            eventType: 'row_calculation',
+            isEnabled: true,
+            conditions: [],
+            actions: [
+              RuleActionDraft(
+                actionType: 'calculate_field',
+                targetFieldCode: 'line_total',
+                formula: FormulaDraft(
+                  tokens: [
+                    FormulaTokenDraft(
+                      tokenType: 'field',
+                      fieldCode: 'base_price',
+                    ),
+                    FormulaTokenDraft(
+                      tokenType: 'operator',
+                      operator: 'multiply',
+                    ),
+                    FormulaTokenDraft(
+                      tokenType: 'field',
+                      fieldCode: 'quantity',
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          CalculationRuleDraft(
+            clientId: 'variant',
+            name: 'Variant',
+            categoryClientId: 'equipment',
+            eventType: 'variant_calculation',
+            isEnabled: true,
+            conditions: [],
+            actions: [
+              RuleActionDraft(
+                actionType: 'set_field',
+                targetFieldCode: 'base_price',
+                constantValue: '25',
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+    engine.calculateDocument(document);
+    row.quantity = 2;
+    var events = 0;
+    engine.calculateDocument(
+      document,
+      onVariantTotalChanged: (_, _) => events++,
+    );
+    expect(row.lineTotal, 50);
+    engine.calculateDocument(
+      document,
+      onVariantTotalChanged: (_, _) => events++,
+    );
+    expect(events, 1);
+  });
+
+  test('variant event reads client total with VAT only when it changes', () {
+    final row = _position(basePrice: 100);
+    final document = _document(row);
+    final variant = document.proposalTypes.single.variants.single..vatRate = 20;
+    final engine = QuoteConfiguredCalculationEngine(
+      _configuration(
+        rules: [
+          CalculationRuleDraft(
+            clientId: 'variant',
+            name: 'Variant',
+            categoryClientId: 'equipment',
+            eventType: 'variant_calculation',
+            isEnabled: true,
+            conditions: [],
+            actions: [
+              RuleActionDraft(
+                actionType: 'set_field',
+                targetFieldCode: 'custom_snapshot',
+                sourceFieldCode: 'variant_total',
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+    var events = 0;
+    void calculate({bool saving = false}) => engine.calculateDocument(
+      document,
+      saving: saving,
+      onVariantTotalChanged: (_, _) => events++,
+    );
+    calculate();
+    expect(row.values['custom_snapshot'], isNull);
+    row.quantity = 2;
+    calculate();
+    expect(row.values['custom_snapshot'], 240);
+    expect(events, 1);
+    expect(row.values.containsKey('variant_total'), isFalse);
+    row.values['custom_snapshot'] = 7;
+    calculate(saving: true);
+    expect(row.values['custom_snapshot'], 7);
+    expect(events, 1);
+    variant.vatRate = null;
+    calculate();
+    expect(row.values['custom_snapshot'], 200);
+    expect(events, 2);
+  });
+
+  test(
+    'variant conditions see the same total across rows and keep highlights',
+    () {
+      final row = _position(basePrice: 10);
+      final other = _position(basePrice: 20);
+      final document = _document(row);
+      document
+          .proposalTypes
+          .single
+          .variants
+          .single
+          .categories
+          .single
+          .sections
+          .single
+          .positions
+          .add(other);
+      final engine = QuoteConfiguredCalculationEngine(
+        _configuration(
+          rules: [
+            CalculationRuleDraft(
+              clientId: 'variant',
+              name: 'Variant',
+              categoryClientId: 'equipment',
+              eventType: 'variant_calculation',
+              isEnabled: true,
+              conditions: [
+                RuleConditionDraft(
+                  fieldCode: 'variant_total',
+                  operator: 'greater_than',
+                  comparisonValue: '35',
+                ),
+              ],
+              actions: [
+                RuleActionDraft(
+                  actionType: 'highlight_field',
+                  targetFieldCode: 'name',
+                  highlightColor: '#F59E0B',
+                  message: 'Total changed',
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+      engine.calculateDocument(document);
+      row.quantity = 2;
+      engine.calculateDocument(document);
+      expect(row.fieldHighlights['name']?.message, 'Total changed');
+      expect(other.fieldHighlights['name']?.message, 'Total changed');
+      engine.calculateDocument(document);
+      expect(row.fieldHighlights, isNotEmpty);
+      row.quantity = 1;
+      engine.calculateDocument(document);
+      expect(row.fieldHighlights, isEmpty);
+      expect(other.fieldHighlights, isEmpty);
+    },
+  );
+
+  test('variant actions do not recurse when they alter the total', () {
+    final row = _position(basePrice: 10);
+    final document = _document(row);
+    final engine = QuoteConfiguredCalculationEngine(
+      _configuration(
+        rules: [
+          CalculationRuleDraft(
+            clientId: 'variant',
+            name: 'Variant',
+            categoryClientId: 'equipment',
+            eventType: 'variant_calculation',
+            isEnabled: true,
+            conditions: [],
+            actions: [RuleActionDraft(actionType: 'exclude_row')],
+          ),
+        ],
+      ),
+    );
+    engine.calculateDocument(document);
+    row.quantity = 2;
+    var events = 0;
+    engine.calculateDocument(
+      document,
+      onVariantTotalChanged: (_, _) => events++,
+    );
+    expect(row.excludeFromTotals, isTrue);
+    engine.calculateDocument(
+      document,
+      onVariantTotalChanged: (_, _) => events++,
+    );
+    expect(events, 1);
+    expect(document.proposalTypes.single.variants.single.totalWithVat, 0);
+  });
+
+  test(
+    'variant pass preserves row formula totals without replaying row actions',
+    () {
+      final row = _position(basePrice: 10);
+      final document = _document(row);
+      final engine = QuoteConfiguredCalculationEngine(
+        _configuration(
+          rules: [
+            CalculationRuleDraft(
+              clientId: 'row',
+              name: 'Row',
+              categoryClientId: 'equipment',
+              eventType: 'row_calculation',
+              isEnabled: true,
+              conditions: [],
+              actions: [
+                RuleActionDraft(
+                  actionType: 'calculate_field',
+                  targetFieldCode: 'line_total',
+                  formula: FormulaDraft(
+                    tokens: [
+                      FormulaTokenDraft(
+                        tokenType: 'field',
+                        fieldCode: 'quantity',
+                      ),
+                      FormulaTokenDraft(
+                        tokenType: 'operator',
+                        operator: 'multiply',
+                      ),
+                      FormulaTokenDraft(
+                        tokenType: 'constant',
+                        constantValue: 25,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            CalculationRuleDraft(
+              clientId: 'variant',
+              name: 'Variant',
+              categoryClientId: 'equipment',
+              eventType: 'variant_calculation',
+              isEnabled: true,
+              conditions: [],
+              actions: [
+                RuleActionDraft(
+                  actionType: 'set_field',
+                  targetFieldCode: 'custom_snapshot',
+                  sourceFieldCode: 'variant_total',
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+      engine.calculateDocument(document);
+      row.quantity = 2;
+      engine.calculateDocument(document);
+      expect(row.lineTotal, 50);
+      expect(row.values['custom_snapshot'], 50);
+    },
+  );
+
   test('text conditions use current built-in fields and respect events', () {
     for (final code in ['name', 'marking', 'unit']) {
       final row = _position(values: {code: 'old', 'technical_note': 'пробка'})
