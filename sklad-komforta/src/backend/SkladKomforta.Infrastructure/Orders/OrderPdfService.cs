@@ -17,7 +17,8 @@ namespace SkladKomforta.Infrastructure.Orders;
 internal sealed class OrderPdfService(
     IOrderService orderService,
     ICompanyWorkspaceService companyService,
-    IKanbanService kanbanService) : IOrderPdfService
+    IKanbanService kanbanService,
+    IDocumentLayoutService layouts) : IOrderPdfService
 {
     /// <inheritdoc />
     public async Task<OrderPdfFile> GenerateAsync(
@@ -40,7 +41,8 @@ internal sealed class OrderPdfService(
             executor?.LegalName ?? executor?.Name,
             employees.FirstOrDefault(item => item.UserId == order.ManagerUserId)?.DisplayName,
             employees.FirstOrDefault(item => item.UserId == order.SalesHeadUserId)?.DisplayName,
-            cardTask.Result.Number);
+            cardTask.Result.Number,
+            await layouts.GetFieldsAsync(boardId, cancellationToken));
 
         var invalid = Path.GetInvalidFileNameChars().ToHashSet();
         var title = new string(order.Title.Where(character => !invalid.Contains(character)).ToArray()).Trim();
@@ -76,10 +78,11 @@ internal static class OrderPdfDocumentRenderer
         string? executorName,
         string? managerName,
         string? salesHeadName,
-        long? cardNumber)
+        long? cardNumber,
+        IReadOnlyDictionary<Guid, IReadOnlyList<KanbanFieldSummary>>? layouts = null)
     {
         QuotePdfFontResolver.EnsureRegistered();
-        var document = BuildDocument(order, board, clientName, executorName, managerName, salesHeadName, cardNumber);
+        var document = BuildDocument(order, board, clientName, executorName, managerName, salesHeadName, cardNumber, layouts);
         var renderer = new PdfDocumentRenderer { Document = document };
         renderer.RenderDocument();
         using var output = new MemoryStream();
@@ -94,7 +97,8 @@ internal static class OrderPdfDocumentRenderer
         string? executorName,
         string? managerName,
         string? salesHeadName,
-        long? cardNumber)
+        long? cardNumber,
+        IReadOnlyDictionary<Guid, IReadOnlyList<KanbanFieldSummary>>? layouts)
     {
         var fieldsByCategory = board.Categories.ToDictionary(
             category => category.CategoryId,
@@ -166,7 +170,8 @@ internal static class OrderPdfDocumentRenderer
                 ? fields
                 : [];
             foreach (var orderSection in category.Sections.OrderBy(item => item.SortOrder))
-                AddSectionTable(section, category.Name, orderSection, extra, contentWidth);
+                AddSectionTable(section, category.Name, orderSection, extra, contentWidth,
+                    category.CatalogCategoryId is { } categoryId && layouts is not null && layouts.TryGetValue(categoryId, out var selected) ? selected : null);
         }
 
         if (order.Categories.Count == 0)
@@ -179,7 +184,8 @@ internal static class OrderPdfDocumentRenderer
         string categoryName,
         OrderSectionDetails orderSection,
         KanbanFieldSummary[] extra,
-        double contentWidth)
+        double contentWidth,
+        IReadOnlyList<KanbanFieldSummary>? selected)
     {
         var title = string.Equals(orderSection.Name.Trim(), categoryName.Trim(), StringComparison.OrdinalIgnoreCase)
             ? categoryName
@@ -188,6 +194,25 @@ internal static class OrderPdfDocumentRenderer
         heading.Format.SpaceBefore = Unit.FromMillimeter(5);
         heading.Format.SpaceAfter = Unit.FromMillimeter(2);
         heading.Format.KeepWithNext = true;
+
+        if (selected is not null)
+        {
+            if (selected.Count == 0) return;
+            var selectedTable = CreateTable(section, Enumerable.Repeat(contentWidth / selected.Count, selected.Count));
+            selectedTable.Borders.Visible = true;
+            selectedTable.Borders.Color = PaperBorder;
+            var selectedHeader = selectedTable.AddRow();
+            selectedHeader.HeadingFormat = true;
+            selectedHeader.Shading.Color = PaperHeader;
+            for (var i = 0; i < selected.Count; i++) FillCell(selectedHeader.Cells[i], selected[i].Label, size: 7.5, bold: true);
+            foreach (var position in orderSection.Positions.OrderBy(item => item.SortOrder))
+            {
+                var row = selectedTable.AddRow();
+                if (position.IsReorder) row.Shading.Color = ReorderShade;
+                for (var i = 0; i < selected.Count; i++) FillCell(row.Cells[i], DocumentFieldValue.Order(selected[i], position), size: 7.5);
+            }
+            return;
+        }
 
         double[] fixedWeights = [8, 52, 34, 16, 12];
         var extraWeight = extra.Length == 0 ? 0 : Math.Max(18, 60.0 / extra.Length);

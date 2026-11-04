@@ -16,7 +16,8 @@ namespace SkladKomforta.Infrastructure.Quotes;
 internal sealed class QuotePdfService(
     IQuoteService quoteService,
     ICompanyWorkspaceService companyService,
-    IKanbanService kanbanService) : IQuotePdfService
+    IKanbanService kanbanService,
+    IDocumentLayoutService layouts) : IQuotePdfService
 {
     public async Task<QuotePdfFile> GenerateAsync(
         Guid actorUserId,
@@ -48,7 +49,8 @@ internal sealed class QuotePdfService(
             executor,
             manager,
             salesHead,
-            cardTask.Result.Number);
+            cardTask.Result.Number,
+            await layouts.GetFieldsAsync(boardId, cancellationToken));
         // Для печати одного варианта или одного типа в имя файла добавляются их названия.
         var printedType = variantId is null && proposalTypeId is null ? null : quote.ProposalTypes[0];
         var printedVariant = variantId is null ? null : printedType!.Variants[0];
@@ -123,10 +125,11 @@ internal static class QuotePdfDocumentRenderer
         LegalEntity? executor,
         string? managerName,
         string? salesHeadName,
-        long? cardNumber = null)
+        long? cardNumber = null,
+        IReadOnlyDictionary<Guid, IReadOnlyList<KanbanFieldSummary>>? layouts = null)
     {
         QuotePdfFontResolver.EnsureRegistered();
-        var document = BuildDocument(quote, client, executor, managerName, salesHeadName, cardNumber);
+        var document = BuildDocument(quote, client, executor, managerName, salesHeadName, cardNumber, layouts);
         var renderer = new PdfDocumentRenderer { Document = document };
         renderer.RenderDocument();
         using var output = new MemoryStream();
@@ -134,13 +137,14 @@ internal static class QuotePdfDocumentRenderer
         return output.ToArray();
     }
 
-    private static Document BuildDocument(
+    internal static Document BuildDocument(
         QuoteDetails quote,
         CompanyClient? client,
         LegalEntity? executor,
         string? managerName,
         string? salesHeadName,
-        long? cardNumber)
+        long? cardNumber,
+        IReadOnlyDictionary<Guid, IReadOnlyList<KanbanFieldSummary>>? layouts)
     {
         var document = new Document();
         var isPrequote = quote.QuoteKind == QuoteKindCodes.Prequote;
@@ -190,7 +194,7 @@ internal static class QuotePdfDocumentRenderer
         section.AddParagraph().Format.SpaceAfter = Unit.FromMillimeter(4);
         foreach (var proposalType in quote.ProposalTypes.OrderBy(item => item.SortOrder))
         {
-            AddProposalType(section, proposalType, quote.SelectionMode);
+            AddProposalType(section, proposalType, quote.SelectionMode, layouts);
         }
 
         if (Text(quote.AdditionalInformation) is { } information)
@@ -254,7 +258,8 @@ internal static class QuotePdfDocumentRenderer
         }
     }
 
-    private static void AddProposalType(Section section, QuoteProposalTypeDetails proposalType, string selectionMode)
+    private static void AddProposalType(Section section, QuoteProposalTypeDetails proposalType, string selectionMode,
+        IReadOnlyDictionary<Guid, IReadOnlyList<KanbanFieldSummary>>? layouts)
     {
         var bar = AddBar(section, PaperText, 3.2);
         bar.AddFormattedText(proposalType.Name, new Font { Size = Unit.FromPoint(13), Bold = true, Color = Colors.White });
@@ -266,7 +271,7 @@ internal static class QuotePdfDocumentRenderer
         var variants = proposalType.Variants.OrderBy(item => item.SortOrder).ToArray();
         foreach (var variant in variants)
         {
-            AddVariant(section, variant, proposalType.SelectedVariantId == variant.Id);
+            AddVariant(section, variant, proposalType.SelectedVariantId == variant.Id, layouts);
         }
 
         // При печати одного варианта сводка типа совпала бы с итогом варианта.
@@ -280,7 +285,8 @@ internal static class QuotePdfDocumentRenderer
         section.AddParagraph().Format.SpaceAfter = Unit.FromMillimeter(6);
     }
 
-    private static void AddVariant(Section section, QuoteVariantDetails variant, bool selected)
+    private static void AddVariant(Section section, QuoteVariantDetails variant, bool selected,
+        IReadOnlyDictionary<Guid, IReadOnlyList<KanbanFieldSummary>>? layouts)
     {
         var bar = AddBar(section, selected ? SelectedVariant : RegularVariant, 2.8);
         bar.AddFormattedText(variant.Name, new Font { Size = Unit.FromPoint(11.5), Bold = true });
@@ -300,7 +306,8 @@ internal static class QuotePdfDocumentRenderer
         {
             foreach (var quoteSection in category.Sections.OrderBy(item => item.SortOrder))
             {
-                AddPositionsTable(section, category.Name, quoteSection);
+                AddPositionsTable(section, category.Name, quoteSection,
+                    category.CatalogCategoryId is { } id && layouts is not null && layouts.TryGetValue(id, out var fields) ? fields : null);
             }
         }
 
@@ -314,7 +321,8 @@ internal static class QuotePdfDocumentRenderer
             clientTotal + vat);
     }
 
-    private static void AddPositionsTable(Section section, string categoryName, QuoteSectionDetails quoteSection)
+    private static void AddPositionsTable(Section section, string categoryName, QuoteSectionDetails quoteSection,
+        IReadOnlyList<KanbanFieldSummary>? fields)
     {
         // Позиции, добавленные прямо в категорию, лежат в разделе с её именем:
         // повторять название дважды не нужно.
@@ -333,6 +341,27 @@ internal static class QuotePdfDocumentRenderer
         heading.Format.SpaceBefore = Unit.FromMillimeter(4);
         heading.Format.SpaceAfter = Unit.FromMillimeter(2);
         heading.Format.KeepWithNext = true;
+
+        if (fields is not null)
+        {
+            if (fields.Count == 0) return;
+            var selectedTable = CreateTable(section, Enumerable.Repeat((ContentWidthMm - VariantInsetMm * 2) / fields.Count, fields.Count));
+            selectedTable.Rows.LeftIndent = Unit.FromMillimeter(VariantInsetMm);
+            selectedTable.Borders.Visible = true;
+            selectedTable.Borders.Color = PaperBorder;
+            var selectedHeader = selectedTable.AddRow();
+            selectedHeader.HeadingFormat = true;
+            selectedHeader.Shading.Color = PaperHeader;
+            for (var i = 0; i < fields.Count; i++) FillCell(selectedHeader.Cells[i], fields[i].Label, size: 7.5, bold: true);
+            foreach (var position in quoteSection.Positions.OrderBy(item => item.SortOrder))
+            {
+                var row = selectedTable.AddRow();
+                for (var i = 0; i < fields.Count; i++)
+                    FillCell(row.Cells[i], BreakLongWords(DocumentFieldValue.Quote(fields[i], position),
+                        (ContentWidthMm - VariantInsetMm * 2) / fields.Count - 4, 7.5), size: 7.5);
+            }
+            return;
+        }
 
         var width = ContentWidthMm - VariantInsetMm * 2;
         var totalWeight = PositionColumnWeights.Sum();

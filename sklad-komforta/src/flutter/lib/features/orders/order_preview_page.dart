@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/features/company/document_preview_fields.dart';
 import 'package:sklad_komforta_app/core/widgets/preview_table.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_models.dart';
 import 'package:sklad_komforta_app/features/orders/order_models.dart';
@@ -106,6 +107,14 @@ final class OrderPreviewPage extends StatelessWidget {
                             rows: section.positions,
                             reorderIds: order.reorderPositionIds,
                             fields: _extraFields(category.catalogCategoryId),
+                            selectedFields: board.categories
+                                .where(
+                                  (item) =>
+                                      item.categoryId ==
+                                      category.catalogCategoryId,
+                                )
+                                .firstOrNull
+                                ?.documentFields,
                           ),
                       if (order.categories.isEmpty)
                         const Padding(
@@ -173,6 +182,7 @@ final class _SectionTable extends StatelessWidget {
     required this.rows,
     required this.reorderIds,
     required this.fields,
+    this.selectedFields,
   });
 
   final String categoryName;
@@ -180,6 +190,7 @@ final class _SectionTable extends StatelessWidget {
   final List<QuotePositionDraft> rows;
   final Set<String> reorderIds;
   final List<KanbanField> fields;
+  final List<KanbanField>? selectedFields;
 
   @override
   Widget build(BuildContext context) {
@@ -202,36 +213,49 @@ final class _SectionTable extends StatelessWidget {
         children: [
           Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
           const SizedBox(height: 7),
-          PreviewTable(
-            minimumWidth: 640 + fields.length * 100.0,
-            child: Table(
-              border: TableBorder.all(color: _paperBorder, width: 0.8),
-              columnWidths: {
-                0: const FixedColumnWidth(34),
-                1: const FlexColumnWidth(2.6),
-                2: const FlexColumnWidth(1.7),
-                3: const FixedColumnWidth(62),
-                4: const FixedColumnWidth(48),
-                for (var index = 0; index < fields.length; index++)
-                  5 + index: const FlexColumnWidth(1.2),
-              },
-              children: [
-                TableRow(
-                  decoration: const BoxDecoration(color: _paperHeader),
-                  children: [for (final header in headers) _cell(header, true)],
-                ),
-                for (var index = 0; index < rows.length; index++)
-                  _row(index, rows[index]),
-                if (rows.isEmpty)
+          if (selectedFields case final selected?)
+            ConfiguredDocumentTable(
+              fields: selected,
+              rows: rows,
+              reorderIds: reorderIds,
+              order: true,
+            )
+          else
+            PreviewTable(
+              minimumWidth: 640 + fields.length * 100.0,
+              child: Table(
+                border: TableBorder.all(color: _paperBorder, width: 0.8),
+                columnWidths: {
+                  0: const FixedColumnWidth(34),
+                  1: const FlexColumnWidth(2.6),
+                  2: const FlexColumnWidth(1.7),
+                  3: const FixedColumnWidth(62),
+                  4: const FixedColumnWidth(48),
+                  for (var index = 0; index < fields.length; index++)
+                    5 + index: const FlexColumnWidth(1.2),
+                },
+                children: [
                   TableRow(
+                    decoration: const BoxDecoration(color: _paperHeader),
                     children: [
-                      for (var index = 0; index < headers.length; index++)
-                        _cell(index == 1 ? 'Позиции не добавлены' : '', false),
+                      for (final header in headers) _cell(header, true),
                     ],
                   ),
-              ],
+                  for (var index = 0; index < rows.length; index++)
+                    _row(index, rows[index]),
+                  if (rows.isEmpty)
+                    TableRow(
+                      children: [
+                        for (var index = 0; index < headers.length; index++)
+                          _cell(
+                            index == 1 ? 'Позиции не добавлены' : '',
+                            false,
+                          ),
+                      ],
+                    ),
+                ],
+              ),
             ),
-          ),
         ],
       ),
     );

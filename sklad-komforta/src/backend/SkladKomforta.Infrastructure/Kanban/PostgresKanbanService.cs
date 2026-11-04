@@ -116,13 +116,16 @@ internal sealed class PostgresKanbanService(
     {
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
         var header = await ReadHeaderAsync(connection, boardId, cancellationToken);
+        var categories = await ReadCategoriesAsync(connection, boardId, cancellationToken);
+        var layouts = await Company.PostgresDocumentLayoutService.ReadFieldsAsync(connection, boardId, cancellationToken, categories);
         return new KanbanBoard(
             header.Id,
             header.Code,
             header.Name,
             await ReadColumnsAsync(connection, boardId, cancellationToken),
             await ReadTransitionsAsync(connection, boardId, cancellationToken),
-            await ReadCategoriesAsync(connection, boardId, cancellationToken),
+            categories.Select(category => layouts.TryGetValue(category.CategoryId, out var fields)
+                ? category with { DocumentFields = fields } : category).ToArray(),
             header.Specialization,
             await ReadOrderOptionsAsync(connection, boardId, "object_type", cancellationToken));
     }
@@ -625,7 +628,7 @@ internal sealed class PostgresKanbanService(
     /// каталога и явно выбраны для этого канбана. Так рабочая карточка не имеет
     /// второго независимого набора метаданных.
     /// </summary>
-    private static async Task<IReadOnlyList<KanbanCategorySummary>> ReadCategoriesAsync(
+    internal static async Task<IReadOnlyList<KanbanCategorySummary>> ReadCategoriesAsync(
         DbConnection connection,
         Guid boardId,
         CancellationToken token)

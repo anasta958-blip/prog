@@ -74,6 +74,14 @@ public sealed class OrderDocumentTests
 
         Assert.Equal("%PDF", Encoding.ASCII.GetString(pdf, 0, 4));
         Assert.True(pdf.Length > 5_000);
+        var layout = new Dictionary<Guid, IReadOnlyList<KanbanFieldSummary>> {
+            [categoryId] = [board.Categories[0].Fields[2], board.Categories[0].Fields[0]]
+        };
+        var configuredPdf = OrderPdfDocumentRenderer.Render(order, board, "Петров", "ООО Исполнитель", "Иван", null, 15, layout);
+        Assert.Equal("%PDF", Encoding.ASCII.GetString(configuredPdf, 0, 4));
+        layout[categoryId] = [];
+        Assert.Equal("%PDF", Encoding.ASCII.GetString(
+            OrderPdfDocumentRenderer.Render(order, board, null, null, null, null, null, layout), 0, 4));
     }
 
     [Fact]

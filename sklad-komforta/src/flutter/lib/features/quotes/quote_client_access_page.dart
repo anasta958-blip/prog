@@ -771,10 +771,12 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
   /// Таблица раздела с фиксированными колонками; на узком экране она
   /// прокручивается по горизонтали, а сумма раздела стоит над колонкой «Сумма».
   Widget _positions(String category, QuoteClientSection section) {
-    final sectionTotal = section.positions.fold<double>(
-      0,
-      (total, position) => total + position.lineTotal,
-    );
+    final sectionTotal =
+        section.total ??
+        section.positions.fold<double>(
+          0,
+          (total, position) => total + position.lineTotal,
+        );
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 4),
       child: Column(
@@ -803,41 +805,68 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
             ),
           ),
           const SizedBox(height: 8),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: SizedBox(
-              width: _tableWidth,
-              child: Table(
-                defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-                border: TableBorder.all(color: _paperBorder),
-                columnWidths: {
-                  for (final (index, width) in _columnWidths.indexed)
-                    index: FixedColumnWidth(width),
-                },
-                children: [
-                  _row(const [
-                    '№',
-                    'Наименование',
-                    'Маркировка / размер',
-                    'Кол-во',
-                    'Ед.',
-                    'Цена',
-                    'Сумма',
-                  ], header: true),
-                  for (final (index, position) in section.positions.indexed)
-                    _row([
-                      '${index + 1}',
-                      position.name,
-                      position.marking,
-                      _number(position.quantity),
-                      position.unit,
-                      _money(position.unitPrice),
-                      _money(position.lineTotal),
-                    ]),
-                ],
+          if (section.columns != null && section.columns!.isNotEmpty)
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: SizedBox(
+                width: (section.columns!.length * 150.0).clamp(
+                  300.0,
+                  double.infinity,
+                ),
+                child: Table(
+                  border: TableBorder.all(color: _paperBorder),
+                  defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                  children: [
+                    _row(section.columns!, header: true),
+                    for (final position in section.positions)
+                      _row(
+                        List.generate(
+                          section.columns!.length,
+                          (index) => index < (position.cells?.length ?? 0)
+                              ? position.cells![index]
+                              : '',
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
-          ),
+          if (section.columns == null)
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: SizedBox(
+                width: _tableWidth,
+                child: Table(
+                  defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                  border: TableBorder.all(color: _paperBorder),
+                  columnWidths: {
+                    for (final (index, width) in _columnWidths.indexed)
+                      index: FixedColumnWidth(width),
+                  },
+                  children: [
+                    _row(const [
+                      '№',
+                      'Наименование',
+                      'Маркировка / размер',
+                      'Кол-во',
+                      'Ед.',
+                      'Цена',
+                      'Сумма',
+                    ], header: true),
+                    for (final (index, position) in section.positions.indexed)
+                      _row([
+                        '${index + 1}',
+                        position.name,
+                        position.marking,
+                        _number(position.quantity),
+                        position.unit,
+                        _money(position.unitPrice),
+                        _money(position.lineTotal),
+                      ]),
+                  ],
+                ),
+              ),
+            ),
         ],
       ),
     );

@@ -11,6 +11,9 @@ using SkladKomforta.Application.Abstractions.Realtime;
 using SkladKomforta.Application.Abstractions.Tenancy;
 using SkladKomforta.Application.Identity;
 using SkladKomforta.Application.Quotes;
+using SkladKomforta.Application.Company;
+using SkladKomforta.Application.Kanban;
+using SkladKomforta.Infrastructure.Company;
 using SkladKomforta.Domain.Tenancy;
 using SkladKomforta.Infrastructure.Configuration;
 using SkladKomforta.Infrastructure.Identity;
@@ -537,12 +540,13 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
     {
         await using var connection = await OpenTenantConnectionAsync(schema, cancellationToken);
         ClientHeader header;
+        Guid workflowId;
         await using (var command = new NpgsqlCommand("""
             SELECT quote.id, quote.quote_kind, quote.title,
                    COALESCE(NULLIF(btrim(company.legal_name), ''), company.name),
                    quote.selection_mode, quote.additional_information,
                    selected_type.proposal_type_id, quote.client_selection_submitted_at,
-                   quote.updated_at, client.name
+                   quote.updated_at, client.name, quote.workflow_id
               FROM quotes AS quote
               JOIN companies AS company ON company.id = quote.executor_company_id
               LEFT JOIN clients AS client ON client.id = quote.client_id
@@ -560,7 +564,10 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
                 reader.IsDBNull(6) ? null : reader.GetGuid(6),
                 reader.IsDBNull(7) ? null : ReadTimestamp(reader, 7), ReadTimestamp(reader, 8),
                 reader.IsDBNull(9) ? null : reader.GetString(9));
+            workflowId = reader.GetGuid(10);
         }
+
+        var layouts = await PostgresDocumentLayoutService.ReadFieldsAsync(connection, workflowId, cancellationToken);
 
         var types = new List<MutableClientType>();
         var typesById = new Dictionary<Guid, MutableClientType>();
@@ -606,7 +613,7 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
 
         var categoriesById = new Dictionary<Guid, MutableClientCategory>();
         await using (var command = new NpgsqlCommand("""
-            SELECT category.id, category.variant_id, category.name_snapshot
+            SELECT category.id, category.variant_id, category.name_snapshot, category.catalog_category_id
               FROM quote_variant_categories AS category
               JOIN quote_variants AS variant ON variant.id = category.variant_id
               JOIN quote_proposal_types AS type ON type.id = variant.proposal_type_id
@@ -619,6 +626,7 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
             while (await reader.ReadAsync(cancellationToken))
             {
                 var item = new MutableClientCategory(reader.GetGuid(0), reader.GetString(2));
+                if (!reader.IsDBNull(3) && layouts.TryGetValue(reader.GetGuid(3), out var fields)) item.Fields = fields;
                 variantsById[reader.GetGuid(1)].Categories.Add(item);
                 categoriesById[item.Id] = item;
             }
@@ -639,7 +647,8 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                var item = new MutableClientSection(reader.GetGuid(0), reader.GetString(2));
+                var item = new MutableClientSection(reader.GetGuid(0), reader.GetString(2))
+                    { Fields = categoriesById[reader.GetGuid(1)].Fields };
                 categoriesById[reader.GetGuid(1)].Sections.Add(item);
                 sectionsById[item.Id] = item;
             }
@@ -648,7 +657,8 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
         await using (var command = new NpgsqlCommand("""
             SELECT position.id, position.variant_section_id, position.name_snapshot,
                    position.marking_snapshot, position.unit_snapshot, position.quantity,
-                   position.line_total
+                   position.line_total, position.values::text, position.base_price, position.manual_price,
+                   position.purchase_price, position.markup_percent, position.discount_percent
               FROM quote_positions AS position
               JOIN quote_variant_sections AS section ON section.id = position.variant_section_id
               JOIN quote_variant_categories AS category ON category.id = section.variant_category_id
@@ -665,9 +675,20 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
             {
                 var quantity = reader.GetDecimal(5);
                 var total = reader.GetDecimal(6);
-                sectionsById[reader.GetGuid(1)].Positions.Add(new QuoteClientPosition(
+                var section = sectionsById[reader.GetGuid(1)];
+                IReadOnlyList<string>? cells = null;
+                if (section.Fields is { } fields)
+                {
+                    var values = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(reader.GetString(7)) ?? [];
+                    var row = new QuotePositionDetails(reader.GetGuid(0), null, reader.GetString(2), reader.GetString(3), reader.GetString(4),
+                        quantity, reader.IsDBNull(10) ? null : reader.GetDecimal(10), reader.GetDecimal(8),
+                        reader.IsDBNull(9) ? null : reader.GetDecimal(9), reader.IsDBNull(11) ? null : reader.GetDecimal(11),
+                        reader.IsDBNull(12) ? null : reader.GetDecimal(12), total, false, values, 0);
+                    cells = fields.Select(field => DocumentFieldValue.Quote(field, row)).ToArray();
+                }
+                section.Positions.Add(new QuoteClientPosition(
                     reader.GetGuid(0), reader.GetString(2), reader.GetString(3), reader.GetString(4),
-                    quantity, quantity == 0 ? 0 : decimal.Round(total / quantity, 2), total));
+                    quantity, quantity == 0 ? 0 : decimal.Round(total / quantity, 2), total, cells));
             }
         }
 
@@ -800,6 +821,7 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
     private sealed class MutableClientCategory(Guid id, string name)
     {
         public Guid Id { get; } = id;
+        public IReadOnlyList<KanbanFieldSummary>? Fields { get; set; }
         public List<MutableClientSection> Sections { get; } = [];
         public QuoteClientCategory ToDetails() =>
             new(Id, name, Sections.Select(item => item.ToDetails()).ToArray());
@@ -808,7 +830,10 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
     private sealed class MutableClientSection(Guid id, string name)
     {
         public Guid Id { get; } = id;
+        public IReadOnlyList<KanbanFieldSummary>? Fields { get; init; }
         public List<QuoteClientPosition> Positions { get; } = [];
-        public QuoteClientSection ToDetails() => new(Id, name, Positions);
+        public QuoteClientSection ToDetails() => Fields is null ? new(Id, name, Positions) :
+            QuoteClientSection.Configured(Id, name, Positions,
+                Fields.Select(field => new DocumentColumn(field.Code, field.Label)).ToArray());
     }
 }

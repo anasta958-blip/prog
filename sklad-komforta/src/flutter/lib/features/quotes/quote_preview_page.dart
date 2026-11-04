@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/features/company/document_preview_fields.dart';
+import 'package:sklad_komforta_app/features/kanban/kanban_models.dart';
 import 'package:sklad_komforta_app/core/widgets/preview_table.dart';
 import 'package:intl/intl.dart';
 import 'package:sklad_komforta_app/features/company/company_models.dart';
@@ -22,6 +24,7 @@ const _paperHeader = Color(0xFFF0F4F9);
 final class QuotePreviewPage extends StatelessWidget {
   const QuotePreviewPage({
     required this.draft,
+    this.board,
     this.client,
     this.executor,
     this.managerName,
@@ -33,6 +36,7 @@ final class QuotePreviewPage extends StatelessWidget {
   });
 
   final QuoteDraft draft;
+  final KanbanBoard? board;
   final String? proposalTypeId;
   final String? variantId;
   final CompanyClientModel? client;
@@ -81,15 +85,18 @@ final class QuotePreviewPage extends StatelessWidget {
               ),
               child: DefaultTextStyle(
                 style: const TextStyle(color: _paperText, height: 1.35),
-                child: _Document(
-                  draft: draft,
-                  visible: _visible(),
-                  client: client,
-                  executor: executor,
-                  managerName: managerName,
-                  salesHeadName: salesHeadName,
-                  cardNumber: cardNumber,
-                  compact: compact,
+                child: DocumentPreviewFields(
+                  board: board,
+                  child: _Document(
+                    draft: draft,
+                    visible: _visible(),
+                    client: client,
+                    executor: executor,
+                    managerName: managerName,
+                    salesHeadName: salesHeadName,
+                    cardNumber: cardNumber,
+                    compact: compact,
+                  ),
                 ),
               ),
             ),
@@ -394,8 +401,11 @@ final class _Variant extends StatelessWidget {
         ),
         ...variant.categories.expand(
           (category) => category.sections.map(
-            (section) =>
-                _PositionTable(categoryName: category.name, section: section),
+            (section) => _PositionTable(
+              categoryName: category.name,
+              categoryId: category.catalogCategoryId,
+              section: section,
+            ),
           ),
         ),
         _Summary(
@@ -413,7 +423,12 @@ final class _Variant extends StatelessWidget {
 const double _positionTableWidth = 38 + 205 + 145 + 70 + 65 + 100 + 75 + 105;
 
 final class _PositionTable extends StatelessWidget {
-  const _PositionTable({required this.categoryName, required this.section});
+  const _PositionTable({
+    required this.categoryName,
+    required this.section,
+    this.categoryId,
+  });
+  final String? categoryId;
 
   final String categoryName;
   final QuoteSectionDraft section;
@@ -450,49 +465,53 @@ final class _PositionTable extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 8),
-        PreviewTable(
-          minimumWidth: _positionTableWidth,
-          child: Table(
-            defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-            border: TableBorder.all(color: _paperBorder),
-            columnWidths: const {
-              0: FixedColumnWidth(38),
-              1: FixedColumnWidth(205),
-              2: FixedColumnWidth(145),
-              3: FixedColumnWidth(70),
-              4: FixedColumnWidth(65),
-              5: FixedColumnWidth(100),
-              6: FixedColumnWidth(75),
-              7: FixedColumnWidth(105),
-            },
-            children: [
-              _row(const [
-                '№',
-                'Наименование',
-                'Маркировка / размер',
-                'Кол-во',
-                'Ед.',
-                'Цена',
-                'Скидка',
-                'Сумма',
-              ], header: true),
-              ...section.positions.indexed.map(
-                (entry) => _row([
-                  '${entry.$1 + 1}',
-                  entry.$2.name,
-                  entry.$2.marking,
-                  _quantity(entry.$2.quantity),
-                  entry.$2.unit,
-                  _money(entry.$2.unitPrice),
-                  _percent(entry.$2.discountPercent),
-                  entry.$2.excludeFromTotals
-                      ? 'Не учитывается'
-                      : _money(entry.$2.lineTotal),
-                ]),
-              ),
-            ],
+        if (DocumentPreviewFields.fields(context, categoryId)
+            case final fields?)
+          ConfiguredDocumentTable(fields: fields, rows: section.positions)
+        else
+          PreviewTable(
+            minimumWidth: _positionTableWidth,
+            child: Table(
+              defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+              border: TableBorder.all(color: _paperBorder),
+              columnWidths: const {
+                0: FixedColumnWidth(38),
+                1: FixedColumnWidth(205),
+                2: FixedColumnWidth(145),
+                3: FixedColumnWidth(70),
+                4: FixedColumnWidth(65),
+                5: FixedColumnWidth(100),
+                6: FixedColumnWidth(75),
+                7: FixedColumnWidth(105),
+              },
+              children: [
+                _row(const [
+                  '№',
+                  'Наименование',
+                  'Маркировка / размер',
+                  'Кол-во',
+                  'Ед.',
+                  'Цена',
+                  'Скидка',
+                  'Сумма',
+                ], header: true),
+                ...section.positions.indexed.map(
+                  (entry) => _row([
+                    '${entry.$1 + 1}',
+                    entry.$2.name,
+                    entry.$2.marking,
+                    _quantity(entry.$2.quantity),
+                    entry.$2.unit,
+                    _money(entry.$2.unitPrice),
+                    _percent(entry.$2.discountPercent),
+                    entry.$2.excludeFromTotals
+                        ? 'Не учитывается'
+                        : _money(entry.$2.lineTotal),
+                  ]),
+                ),
+              ],
+            ),
           ),
-        ),
       ],
     ),
   );

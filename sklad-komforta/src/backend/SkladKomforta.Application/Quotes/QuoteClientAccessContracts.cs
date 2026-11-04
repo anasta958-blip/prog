@@ -1,3 +1,5 @@
+using SkladKomforta.Application.Company;
+
 namespace SkladKomforta.Application.Quotes;
 
 /// <summary>Параметры новой парольной ссылки на одно сохранённое КП или ПКП.</summary>
@@ -92,7 +94,17 @@ public sealed record QuoteClientCategory(
 public sealed record QuoteClientSection(
     Guid Id,
     string Name,
-    IReadOnlyList<QuoteClientPosition> Positions);
+    IReadOnlyList<QuoteClientPosition> Positions,
+    IReadOnlyList<DocumentColumn>? Columns = null,
+    decimal? Total = null)
+{
+    public static QuoteClientSection Configured(Guid id, string name,
+        IReadOnlyList<QuoteClientPosition> positions, IReadOnlyList<DocumentColumn> columns) =>
+        new(id, name, positions.Select(row => row with {
+            Name = string.Empty, Marking = string.Empty, Unit = string.Empty,
+            Quantity = 0, UnitPrice = 0, LineTotal = 0
+        }).ToArray(), columns, positions.Sum(row => row.LineTotal));
+}
 
 public sealed record QuoteClientPosition(
     Guid Id,
@@ -101,7 +113,8 @@ public sealed record QuoteClientPosition(
     string Unit,
     decimal Quantity,
     decimal UnitPrice,
-    decimal LineTotal);
+    decimal LineTotal,
+    IReadOnlyList<string>? Cells = null);
 
 /// <summary>Изолированный use case парольного доступа внешнего клиента.</summary>
 public interface IQuoteClientAccessService

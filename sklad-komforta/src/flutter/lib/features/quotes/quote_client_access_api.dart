@@ -357,12 +357,23 @@ final class QuoteClientCategory {
 }
 
 final class QuoteClientSection {
-  const QuoteClientSection({required this.name, required this.positions});
+  const QuoteClientSection({
+    required this.name,
+    required this.positions,
+    this.columns,
+    this.total,
+  });
   final String name;
   final List<QuoteClientPosition> positions;
+  final List<String>? columns;
+  final double? total;
 
   factory QuoteClientSection.fromJson(Map<String, dynamic> json) =>
       QuoteClientSection(
+        columns: (json['columns'] as List?)
+            ?.map((item) => (item as Map<String, dynamic>)['label'] as String)
+            .toList(),
+        total: (json['total'] as num?)?.toDouble(),
         name: json['name'] as String,
         positions: (json['positions'] as List<dynamic>? ?? const [])
             .map(
@@ -381,6 +392,7 @@ final class QuoteClientPosition {
     required this.quantity,
     required this.unitPrice,
     required this.lineTotal,
+    this.cells,
   });
   final String name;
   final String marking;
@@ -388,9 +400,11 @@ final class QuoteClientPosition {
   final double quantity;
   final double unitPrice;
   final double lineTotal;
+  final List<String>? cells;
 
   factory QuoteClientPosition.fromJson(Map<String, dynamic> json) =>
       QuoteClientPosition(
+        cells: (json['cells'] as List?)?.cast<String>(),
         name: json['name'] as String,
         marking: json['marking'] as String? ?? '',
         unit: json['unit'] as String? ?? '',

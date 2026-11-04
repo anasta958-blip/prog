@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'document_layout_models.dart';
 
 import 'package:http/http.dart' as http;
 import 'package:sklad_komforta_app/core/config/app_config.dart';
@@ -86,11 +87,38 @@ abstract interface class CompanyRegistryGateway {
 
 /// REST-клиент рабочего профиля организации.
 final class CompanyApi
-    implements CompanyGateway, CompanyWorkspaceGateway, CompanyRegistryGateway {
+    implements
+        CompanyGateway,
+        CompanyWorkspaceGateway,
+        CompanyRegistryGateway,
+        DocumentLayoutGateway {
   CompanyApi(this._config) : _client = createPlatformHttpClient();
 
   final AppConfig _config;
   final http.Client _client;
+
+  @override
+  Future<List<DocumentLayoutBoard>> getDocumentLayouts(String token) async {
+    final data = await _sendPath('GET', '/company/document-layouts', token);
+    return (data as List)
+        .map(
+          (item) => DocumentLayoutBoard.fromJson(item as Map<String, dynamic>),
+        )
+        .toList();
+  }
+
+  @override
+  Future<void> saveDocumentLayout(
+    String token,
+    DocumentLayoutBoard board,
+  ) async {
+    await _sendPath(
+      'PUT',
+      '/company/document-layouts/${board.id}',
+      token,
+      body: board.toJson(),
+    );
+  }
 
   @override
   Future<CompanyProfileDraft> getProfile(String accessToken) async {

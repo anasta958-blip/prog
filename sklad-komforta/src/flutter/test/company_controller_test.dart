@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/features/company/document_layout_models.dart';
+import 'package:sklad_komforta_app/features/company/document_layout_page.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
@@ -20,6 +22,41 @@ void main() {
     apiBaseUrl: 'https://api.example.test/api/v1',
     environment: 'test',
   );
+
+  testWidgets('document builder saves selected fields in user order', (
+    tester,
+  ) async {
+    final api = _MemoryCompanyGateway();
+    final auth = AuthController(
+      config,
+      api: _NoopAuthGateway(),
+      tokens: _MemoryTokenRepository(),
+    )..accessToken = 'access-token';
+    final controller = CompanyController(config, auth, api: api);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: DocumentLayoutPage(controller: controller)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Конструктор ссылки и PDF'), findsOneWidget);
+    await tester.tap(find.byType(SwitchListTile));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byTooltip('Переместить выше').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Переместить выше').last);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Сохранить настройки'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Сохранить настройки'));
+    await tester.pumpAndSettle();
+    expect(api.savedLayout?.categories.single.codes, ['quantity', 'name']);
+    expect(find.text('Настройки сохранены'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+    auth.dispose();
+  });
 
   testWidgets(
     'роль директора показывает полный доступ на узкой и широкой раскладке',
@@ -706,7 +743,26 @@ final class _FakeRealtime implements RealtimeSource {
   );
 }
 
-final class _MemoryCompanyGateway implements CompanyGateway {
+final class _MemoryCompanyGateway
+    implements CompanyGateway, DocumentLayoutGateway {
+  DocumentLayoutBoard? savedLayout;
+  @override
+  Future<List<DocumentLayoutBoard>> getDocumentLayouts(String token) async => [
+    DocumentLayoutBoard('board', 'Канбан КП', 'quote', [
+      DocumentLayoutCategory('category', 'Оборудование', [
+        const DocumentLayoutField('name', 'Наименование'),
+        const DocumentLayoutField('quantity', 'Количество'),
+      ], null),
+    ]),
+  ];
+  @override
+  Future<void> saveDocumentLayout(
+    String token,
+    DocumentLayoutBoard board,
+  ) async {
+    savedLayout = board;
+  }
+
   int configurationRequests = 0;
   CompanyProfileDraft? saved;
   OrganizationOnboardingDraft? savedConfiguration;

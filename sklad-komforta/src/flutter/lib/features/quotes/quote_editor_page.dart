@@ -457,6 +457,7 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => QuotePreviewPage(
+          board: widget.board,
           draft: draft,
           client: client,
           executor: executor,

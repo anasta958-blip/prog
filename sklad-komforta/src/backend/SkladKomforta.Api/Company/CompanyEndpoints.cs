@@ -17,6 +17,15 @@ internal static class CompanyEndpoints
     public static IEndpointRouteBuilder MapCompanyEndpoints(this IEndpointRouteBuilder endpoints)
     {
         var company = endpoints.MapGroup("/api/v1/company").RequireAuthorization();
+        company.MapGet("/document-layouts", async (IDocumentLayoutService service, CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.GetAsync(token))))
+            .RequireTenantPermission("company.view");
+        company.MapPut("/document-layouts/{workflowId:guid}", async (
+                HttpContext context, Guid workflowId, SaveDocumentLayout request, IDocumentLayoutService service, CancellationToken token) =>
+            {
+                await service.SaveAsync(UserId(context.User), workflowId, request, token);
+                return Results.Ok(ApiResponse.Success(true));
+            }).RequireTenantPermission("company.manage");
         // Одноразовый билет для подключения к потоку уведомлений об изменениях.
         company.MapPost("/realtime-ticket", (
                 HttpContext context,

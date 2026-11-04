@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'document_layout_page.dart';
 import 'employee_password_dialog.dart';
 import 'company_form_fields.dart';
 import 'legal_entity_fields.dart';
@@ -16,6 +17,7 @@ import 'package:sklad_komforta_app/features/onboarding/organization_onboarding_p
 /// Разделы пространства «Компания», отображаемые внутри основной навигации.
 enum CompanySection {
   settings('Настройки организации', Icons.tune_outlined),
+  documents('Конструктор ссылки и PDF', Icons.description_outlined),
   clients('Клиенты', Icons.handshake_outlined),
   employees('Сотрудники и структура', Icons.account_tree_outlined),
   access('Права доступа', Icons.admin_panel_settings_outlined),
@@ -58,6 +60,22 @@ final class CompanyPage extends StatelessWidget {
         child: Material(
           color: const Color(0xFF080E16),
           child: switch (section) {
+            CompanySection.documents => Column(
+              children: [
+                const _SectionHeader(
+                  title: 'Конструктор ссылки и PDF',
+                  subtitle:
+                      'Поля клиентских документов и порядок их отображения.',
+                ),
+                Expanded(
+                  child: DocumentLayoutPage(
+                    controller: controller,
+                    guard: configurationEditGuard,
+                    showTitle: false,
+                  ),
+                ),
+              ],
+            ),
             CompanySection.clients => _ClientsSection(controller: controller),
             CompanySection.employees => _EmployeesSection(
               controller: controller,

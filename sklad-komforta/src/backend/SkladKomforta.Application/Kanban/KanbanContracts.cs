@@ -56,7 +56,8 @@ public sealed record KanbanCategorySummary(
     int SortOrder,
     IReadOnlyList<KanbanSectionSummary> Sections,
     IReadOnlyList<KanbanFieldSummary> Fields,
-    string? SupplierFilterFieldCode = null);
+    string? SupplierFilterFieldCode = null,
+    IReadOnlyList<KanbanFieldSummary>? DocumentFields = null);
 
 /// <summary>
 /// Материализованная конфигурация рабочего пространства. Специальное содержимое

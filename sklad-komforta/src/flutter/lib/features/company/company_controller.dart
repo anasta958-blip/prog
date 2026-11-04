@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'document_layout_models.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
@@ -61,6 +62,15 @@ final class CompanyController extends ChangeNotifier {
 
   /// Авторизационный контекст нужен общему редактору onboarding-настроек.
   AuthController get authController => _auth;
+
+  Future<List<DocumentLayoutBoard>> getDocumentLayouts() => _auth
+      .executeAuthorized((_api as DocumentLayoutGateway).getDocumentLayouts);
+
+  Future<void> saveDocumentLayout(DocumentLayoutBoard board) =>
+      _auth.executeAuthorized(
+        (token) =>
+            (_api as DocumentLayoutGateway).saveDocumentLayout(token, board),
+      );
 
   CompanyProfileDraft? profile;
   OrganizationOnboardingDraft? configuration;

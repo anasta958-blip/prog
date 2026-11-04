@@ -157,6 +157,7 @@ public static class DependencyInjection
             })
             .RemoveAllLoggers();
         services.AddScoped<SkladKomforta.Application.Company.ICompanyService, Company.PostgresCompanyService>();
+        services.AddScoped<SkladKomforta.Application.Company.IDocumentLayoutService, Company.PostgresDocumentLayoutService>();
         services.AddScoped<SkladKomforta.Application.Company.ICompanyWorkspaceService, Company.PostgresCompanyWorkspaceService>();
         services.AddHttpClient<SkladKomforta.Application.Company.ICompanyRegistryLookup, Company.EgrulCompanyRegistryLookup>(client =>
         {
