@@ -8,12 +8,14 @@ class DocumentPaperSurface extends StatelessWidget {
     required this.height,
     required this.child,
     this.fitWidth = false,
+    this.fillWidth = false,
     this.zoom = 1,
     super.key,
   });
 
   final double width, height, zoom;
   final bool fitWidth;
+  final bool fillWidth;
   final Widget child;
 
   @override
@@ -22,7 +24,9 @@ class DocumentPaperSurface extends StatelessWidget {
       final available = constraints.hasBoundedWidth
           ? constraints.maxWidth
           : width;
-      final scale = (fitWidth ? math.min(1.0, available / width) : 1.0) * zoom;
+      final scale = fillWidth
+          ? math.max(zoom, available / width)
+          : (fitWidth ? math.min(1.0, available / width) : 1.0) * zoom;
       return SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         primary: false,

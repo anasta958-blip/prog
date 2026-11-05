@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import '../company/document_canvas_view.dart';
 import 'package:sklad_komforta_app/core/widgets/collapse_toggle.dart';
@@ -668,6 +670,7 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
                 ? Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      const SizedBox(height: 5),
                       for (final (index, variant) in type.variants.indexed)
                         _variantBlock(type, variant, typeMode, index),
                     ],
@@ -678,6 +681,7 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+                        const SizedBox(height: 5),
                         for (final (index, variant) in type.variants.indexed)
                           _variantBlock(type, variant, typeMode, index),
                       ],
@@ -799,10 +803,21 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
             document: variant.document!,
             compact: true,
             clientLink: true,
+            categoryTotals: {
+              for (final category in variant.categories)
+                category.name: _money(_categoryTotal(category)),
+            },
+            sectionTotals: {
+              for (final category in variant.categories)
+                for (final section in category.sections)
+                  '${category.name} / ${section.name}': _money(
+                    _sectionTotal(section),
+                  ),
+            },
           ),
         if (!collapsed && variant.document == null)
           for (final category in variant.categories) ...[
-            _categoryHeading(category.name),
+            _categoryHeading(category),
             for (final section in category.sections)
               _positions(category.name, section),
           ],
@@ -841,30 +856,49 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
 
   /// Таблица раздела с фиксированными колонками; на узком экране она
   /// прокручивается по горизонтали, а сумма раздела стоит над колонкой «Сумма».
-  Widget _categoryHeading(String name) => Container(
-    margin: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+  double _sectionTotal(QuoteClientSection section) =>
+      section.total ??
+      section.positions.fold<double>(0, (sum, row) => sum + row.lineTotal);
+
+  double _categoryTotal(QuoteClientCategory category) => category.sections
+      .fold<double>(0, (sum, section) => sum + _sectionTotal(section));
+
+  Widget _categoryHeading(QuoteClientCategory category) => Container(
+    margin: const EdgeInsets.only(top: 12),
     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
     color: const Color(0xFF243A56),
-    child: Text(
-      name,
-      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+    child: Row(
+      children: [
+        Expanded(
+          child: Text(
+            category.name,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        Text(
+          _money(_categoryTotal(category)),
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ],
     ),
   );
 
   Widget _positions(String category, QuoteClientSection section) {
-    final sectionTotal =
-        section.total ??
-        section.positions.fold<double>(
-          0,
-          (total, position) => total + position.lineTotal,
-        );
+    final sectionTotal = _sectionTotal(section);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 4),
+      padding: const EdgeInsets.fromLTRB(0, 5, 0, 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: _tableWidth),
+          Container(
+            color: const Color(0xFFDFE8F3),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -885,66 +919,69 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
               ],
             ),
           ),
-          const SizedBox(height: 8),
           if (section.columns != null && section.columns!.isNotEmpty)
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: SizedBox(
-                width: (section.columns!.length * 150.0).clamp(
-                  300.0,
-                  double.infinity,
-                ),
-                child: Table(
-                  border: TableBorder.all(color: _paperBorder),
-                  defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-                  children: [
-                    _row(section.columns!, header: true),
-                    for (final position in section.positions)
-                      _row(
-                        List.generate(
-                          section.columns!.length,
-                          (index) => index < (position.cells?.length ?? 0)
-                              ? position.cells![index]
-                              : '',
+            LayoutBuilder(
+              builder: (context, constraints) => SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(
+                  width: math.max(
+                    constraints.maxWidth,
+                    section.columns!.length * 150.0,
+                  ),
+                  child: Table(
+                    border: TableBorder.all(color: _paperBorder),
+                    defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                    children: [
+                      _row(section.columns!, header: true),
+                      for (final position in section.positions)
+                        _row(
+                          List.generate(
+                            section.columns!.length,
+                            (index) => index < (position.cells?.length ?? 0)
+                                ? position.cells![index]
+                                : '',
+                          ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
           if (section.columns == null)
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: SizedBox(
-                width: _tableWidth,
-                child: Table(
-                  defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-                  border: TableBorder.all(color: _paperBorder),
-                  columnWidths: {
-                    for (final (index, width) in _columnWidths.indexed)
-                      index: FixedColumnWidth(width),
-                  },
-                  children: [
-                    _row(const [
-                      '№',
-                      'Наименование',
-                      'Маркировка / размер',
-                      'Кол-во',
-                      'Ед.',
-                      'Цена',
-                      'Сумма',
-                    ], header: true),
-                    for (final (index, position) in section.positions.indexed)
-                      _row([
-                        '${index + 1}',
-                        position.name,
-                        position.marking,
-                        _number(position.quantity),
-                        position.unit,
-                        _money(position.unitPrice),
-                        _money(position.lineTotal),
-                      ]),
-                  ],
+            LayoutBuilder(
+              builder: (context, constraints) => SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(
+                  width: math.max(constraints.maxWidth, _tableWidth),
+                  child: Table(
+                    defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                    border: TableBorder.all(color: _paperBorder),
+                    columnWidths: {
+                      for (final (index, width) in _columnWidths.indexed)
+                        index: FlexColumnWidth(width),
+                    },
+                    children: [
+                      _row(const [
+                        '№',
+                        'Наименование',
+                        'Маркировка / размер',
+                        'Кол-во',
+                        'Ед.',
+                        'Цена',
+                        'Сумма',
+                      ], header: true),
+                      for (final (index, position) in section.positions.indexed)
+                        _row([
+                          '${index + 1}',
+                          position.name,
+                          position.marking,
+                          _number(position.quantity),
+                          position.unit,
+                          _money(position.unitPrice),
+                          _money(position.lineTotal),
+                        ]),
+                    ],
+                  ),
                 ),
               ),
             ),

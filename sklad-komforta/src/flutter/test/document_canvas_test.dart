@@ -564,6 +564,8 @@ void main() {
             child: DocumentCanvasView(
               compact: true,
               clientLink: true,
+              categoryTotals: const {'Оборудование': '100 ₽'},
+              sectionTotals: const {'Оборудование / Вентиляция': '100 ₽'},
               document: {
                 'template': template.toJson(),
                 'blocks': [
@@ -621,6 +623,18 @@ void main() {
       tester.widget<Text>(find.text('Оборудование')).style?.color,
       Colors.white,
     );
+    expect(find.text('100 ₽'), findsNWidgets(2));
+    expect(
+      tester.getSize(find.byType(DocumentCanvasView)).width,
+      closeTo(1000, .01),
+    );
+    expect(
+      tester.getTopLeft(find.text('Товар')).dx -
+          tester.getTopLeft(find.byType(DocumentCanvasView)).dx,
+      lessThan(20),
+    );
+    final sectionText = tester.widget<Text>(find.text('Вентиляция'));
+    expect(sectionText.style?.fontWeight, FontWeight.bold);
     expect(
       tester.getTopLeft(find.text('Итоги')).dy -
           tester.getTopLeft(find.text('Оборудование')).dy,

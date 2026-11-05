@@ -10,11 +10,15 @@ class DocumentCanvasView extends StatelessWidget {
     required this.document,
     this.compact = false,
     this.clientLink = false,
+    this.categoryTotals = const {},
+    this.sectionTotals = const {},
     super.key,
   });
   final Map<String, dynamic> document;
   final bool compact;
   final bool clientLink;
+  final Map<String, String> categoryTotals;
+  final Map<String, String> sectionTotals;
 
   @override
   Widget build(BuildContext context) {
@@ -62,6 +66,7 @@ class DocumentCanvasView extends StatelessWidget {
       };
       var y = block.y - topOffset;
       final party = block.kind == 'client' || block.kind == 'executor';
+      final linkTable = clientLink && block.kind == 'table';
       final rowKey = pairedParties && party ? double.negativeInfinity : block.y;
       if (clientLink) {
         if (currentRow != rowKey) {
@@ -79,12 +84,19 @@ class DocumentCanvasView extends StatelessWidget {
           }
         }
       }
-      final displayWidth = pairedParties && party ? partyWidth : block.width;
-      final displayX = pairedParties && party
+      final displayWidth = linkTable
+          ? template.width
+          : pairedParties && party
+          ? partyWidth
+          : block.width;
+      final displayX = linkTable
+          ? 0.0
+          : pairedParties && party
           ? template.margin +
                 partyBlocks.indexOf(block) * (partyWidth + partyGap)
           : block.x;
-      final width = displayWidth - block.padding * 2;
+      final displayPadding = linkTable ? 0.0 : block.padding;
+      final width = displayWidth - displayPadding * 2;
       final rows = <Widget>[];
       var contentHeight = 0.0;
       double measure(String text, double width, TextStyle textStyle) {
@@ -107,11 +119,12 @@ class DocumentCanvasView extends StatelessWidget {
         bool heading = false,
         bool border = false,
         bool category = false,
+        bool section = false,
       }) {
         if (cells.isEmpty) return;
         final textStyle = category
             ? style.copyWith(color: Colors.white, fontWeight: FontWeight.bold)
-            : heading
+            : heading || section
             ? style.copyWith(fontWeight: FontWeight.bold)
             : style;
         final total = weights.fold<double>(0, (sum, w) => sum + w);
@@ -136,6 +149,8 @@ class DocumentCanvasView extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: category
                           ? const Color(0xFF243A56)
+                          : section
+                          ? const Color(0xFFDFE8F3)
                           : heading && border
                           ? const Color(0xFFF0F4F9)
                           : null,
@@ -148,7 +163,11 @@ class DocumentCanvasView extends StatelessWidget {
                     ),
                     child: Text(
                       cells[i],
-                      textAlign: category ? TextAlign.left : align,
+                      textAlign: cells.length > 1 && i == cells.length - 1
+                          ? TextAlign.right
+                          : category || section
+                          ? TextAlign.left
+                          : align,
                       style: textStyle,
                       textScaler: TextScaler.noScaling,
                     ),
@@ -187,12 +206,27 @@ class DocumentCanvasView extends StatelessWidget {
               rows.add(const SizedBox(height: 8));
               contentHeight += 8;
             }
-            addRow([categoryName], [1], category: true);
+            final categoryTotal = categoryTotals[categoryName];
+            addRow(
+              [categoryName, ?categoryTotal],
+              categoryTotal == null ? [1] : [3, 1],
+              category: true,
+            );
             lastCategory = categoryKey;
           }
-          if (sectionName.isNotEmpty && sectionName != categoryName) {
-            addRow([sectionName], [1], heading: true);
-          }
+          rows.add(const SizedBox(height: 5));
+          contentHeight += 5;
+          final sectionTotal = sectionTotals[tableTitle];
+          addRow(
+            [
+              sectionName.isEmpty || sectionName == categoryName
+                  ? 'Позиции'
+                  : sectionName,
+              ?sectionTotal,
+            ],
+            sectionTotal == null ? [1] : [3, 1],
+            section: true,
+          );
         } else {
           addRow([tableTitle], [1], heading: true);
         }
@@ -212,7 +246,7 @@ class DocumentCanvasView extends StatelessWidget {
         contentHeight += 12;
       }
       final blockHeight = clientLink
-          ? contentHeight + block.padding * 2
+          ? contentHeight + displayPadding * 2
           : math.max(block.height, contentHeight + block.padding * 2);
       completed.add((block: block, bottom: y + blockHeight));
       if (clientLink) rowBottom = math.max(rowBottom, y + blockHeight);
@@ -226,7 +260,7 @@ class DocumentCanvasView extends StatelessWidget {
           top: y,
           width: displayWidth,
           child: Padding(
-            padding: EdgeInsets.all(block.padding),
+            padding: EdgeInsets.all(displayPadding),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: rows,
@@ -239,6 +273,7 @@ class DocumentCanvasView extends StatelessWidget {
       width: template.width,
       height: math.max(height, template.margin * 2),
       zoom: clientLink ? 1.2 : 1,
+      fillWidth: clientLink,
       child: ColoredBox(
         key: const ValueKey('document-preview-paper'),
         color: Colors.white,
