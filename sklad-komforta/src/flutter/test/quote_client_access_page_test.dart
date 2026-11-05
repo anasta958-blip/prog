@@ -365,6 +365,13 @@ void main() {
   ) async {
     await _open(tester, (_) async => _ok(_quote()));
     expect(find.text('Кондиционер'), findsOneWidget);
+    await tester.tap(find.text('Внутренние блоки'));
+    await tester.pumpAndSettle();
+    expect(find.text('Кондиционер'), findsNothing);
+    expect(find.text('Внутренние блоки'), findsOneWidget);
+    await tester.tap(find.text('Внутренние блоки'));
+    await tester.pumpAndSettle();
+    expect(find.text('Кондиционер'), findsOneWidget);
     await tester.tap(find.text('Оборудование'));
     await tester.pumpAndSettle();
     expect(find.text('Кондиционер'), findsNothing);
@@ -438,6 +445,10 @@ void main() {
         ),
       );
       await _login(tester);
+      expect(find.textContaining('100'), findsNWidgets(2));
+      await tester.tap(find.text('Внутренние блоки'));
+      await tester.pumpAndSettle();
+      expect(find.text('Кондиционер'), findsNothing);
       expect(find.textContaining('100'), findsNWidgets(2));
       expect(tester.takeException(), isNull);
     },

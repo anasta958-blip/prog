@@ -635,6 +635,14 @@ void main() {
     );
     final sectionText = tester.widget<Text>(find.text('Вентиляция'));
     expect(sectionText.style?.fontWeight, FontWeight.bold);
+    await tester.tap(find.text('Вентиляция'));
+    await tester.pumpAndSettle();
+    expect(find.text('Товар'), findsNothing);
+    expect(find.text('Вентиляция'), findsOneWidget);
+    expect(find.textContaining('100,00'), findsNWidgets(2));
+    await tester.tap(find.text('Вентиляция'));
+    await tester.pumpAndSettle();
+    expect(find.text('Товар'), findsOneWidget);
     await tester.tap(find.text('Оборудование'));
     await tester.pumpAndSettle();
     expect(find.text('Товар'), findsNothing);

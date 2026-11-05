@@ -45,6 +45,7 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
   /// Свёрнутые пользователем варианты (внутри своих типов).
   final Set<String> collapsedVariants = {};
   final Set<String> collapsedCategories = {};
+  final Set<String> collapsedSections = {};
   String? sessionToken;
   String? selectedTypeId;
   QuoteClientView? quote;
@@ -881,7 +882,7 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
         _categoryHeading(category, key, collapsed),
         if (!collapsed)
           for (final section in category.sections)
-            _positions(category.name, section),
+            _positions(variantId, category.name, section),
       ],
     );
   }
@@ -927,8 +928,14 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
     ),
   );
 
-  Widget _positions(String category, QuoteClientSection section) {
+  Widget _positions(
+    String variantId,
+    String category,
+    QuoteClientSection section,
+  ) {
     final sectionTotal = _sectionTotal(section);
+    final key = '$variantId/$category/${section.name}';
+    final collapsed = collapsedSections.contains(key);
     return Padding(
       padding: const EdgeInsets.fromLTRB(0, 5, 0, 4),
       child: Column(
@@ -936,28 +943,46 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
         children: [
           Container(
             color: const Color(0xFFDFE8F3),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Text(
-                    section.name.trim().toLowerCase() ==
-                            category.trim().toLowerCase()
-                        ? 'Позиции'
-                        : section.name,
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
+            child: InkWell(
+              onTap: () => setState(() {
+                if (!collapsedSections.remove(key)) collapsedSections.add(key);
+              }),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 9,
                 ),
-                const SizedBox(width: 12),
-                Text(
-                  _money(sectionTotal),
-                  style: const TextStyle(fontWeight: FontWeight.w800),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      collapsed ? Icons.chevron_right : Icons.expand_more,
+                      color: const Color(0xFF243A56),
+                      size: 18,
+                    ),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: Text(
+                        section.name.trim().toLowerCase() ==
+                                category.trim().toLowerCase()
+                            ? 'Позиции'
+                            : section.name,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      _money(sectionTotal),
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
-          if (section.columns != null && section.columns!.isNotEmpty)
+          if (!collapsed &&
+              section.columns != null &&
+              section.columns!.isNotEmpty)
             LayoutBuilder(
               builder: (context, constraints) => SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
@@ -985,7 +1010,7 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
                 ),
               ),
             ),
-          if (section.columns == null)
+          if (!collapsed && section.columns == null)
             LayoutBuilder(
               builder: (context, constraints) => SingleChildScrollView(
                 scrollDirection: Axis.horizontal,

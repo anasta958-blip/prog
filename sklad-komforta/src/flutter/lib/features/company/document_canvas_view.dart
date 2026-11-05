@@ -23,6 +23,7 @@ class DocumentCanvasView extends StatefulWidget {
 
 class _DocumentCanvasViewState extends State<DocumentCanvasView> {
   final Set<String> _collapsedCategories = {};
+  final Set<String> _collapsedSections = {};
 
   @override
   Widget build(BuildContext context) {
@@ -128,6 +129,7 @@ class _DocumentCanvasViewState extends State<DocumentCanvasView> {
         bool category = false,
         bool section = false,
         String? categoryKey,
+        String? sectionKey,
       }) {
         if (cells.isEmpty) return;
         final textStyle = category
@@ -142,7 +144,11 @@ class _DocumentCanvasViewState extends State<DocumentCanvasView> {
               cells.length,
               (i) => measure(
                 cells[i],
-                widths[i] - 8 - (categoryKey != null && i == 0 ? 18 : 0),
+                widths[i] -
+                    8 -
+                    ((categoryKey != null || sectionKey != null) && i == 0
+                        ? 18
+                        : 0),
                 textStyle,
               ),
             ).fold<double>(0, math.max) +
@@ -169,14 +175,20 @@ class _DocumentCanvasViewState extends State<DocumentCanvasView> {
                         ? Border.all(color: const Color(0xFFD8DEE8), width: .5)
                         : null,
                   ),
-                  child: categoryKey != null && i == 0
+                  child: (categoryKey != null || sectionKey != null) && i == 0
                       ? Row(
                           children: [
                             Icon(
-                              _collapsedCategories.contains(categoryKey)
+                              (categoryKey != null
+                                      ? _collapsedCategories.contains(
+                                          categoryKey,
+                                        )
+                                      : _collapsedSections.contains(sectionKey))
                                   ? Icons.chevron_right
                                   : Icons.expand_more,
-                              color: Colors.white,
+                              color: category
+                                  ? Colors.white
+                                  : const Color(0xFF243A56),
                               size: 18,
                             ),
                             Expanded(
@@ -203,12 +215,18 @@ class _DocumentCanvasViewState extends State<DocumentCanvasView> {
           ),
         );
         rows.add(
-          categoryKey == null
+          categoryKey == null && sectionKey == null
               ? row
               : InkWell(
                   onTap: () => setState(() {
-                    if (!_collapsedCategories.remove(categoryKey)) {
-                      _collapsedCategories.add(categoryKey);
+                    if (categoryKey != null) {
+                      if (!_collapsedCategories.remove(categoryKey)) {
+                        _collapsedCategories.add(categoryKey);
+                      }
+                    } else if (sectionKey != null) {
+                      if (!_collapsedSections.remove(sectionKey)) {
+                        _collapsedSections.add(sectionKey);
+                      }
                     }
                   }),
                   child: row,
@@ -262,6 +280,7 @@ class _DocumentCanvasViewState extends State<DocumentCanvasView> {
           rows.add(const SizedBox(height: 5));
           contentHeight += 5;
           final sectionTotal = (table['sectionTotal'] as num?)?.toDouble();
+          final sectionKey = '$categoryKey/$tableTitle';
           addRow(
             [
               sectionName.isEmpty || sectionName == categoryName
@@ -271,7 +290,11 @@ class _DocumentCanvasViewState extends State<DocumentCanvasView> {
             ],
             sectionTotal == null ? [1] : [3, 1],
             section: true,
+            sectionKey: clientLink ? sectionKey : null,
           );
+          if (clientLink && _collapsedSections.contains(sectionKey)) {
+            continue;
+          }
         } else {
           addRow([tableTitle], [1], heading: true);
         }
