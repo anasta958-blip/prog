@@ -564,8 +564,6 @@ void main() {
             child: DocumentCanvasView(
               compact: true,
               clientLink: true,
-              categoryTotals: const {'Оборудование': '100 ₽'},
-              sectionTotals: const {'Оборудование / Вентиляция': '100 ₽'},
               document: {
                 'template': template.toJson(),
                 'blocks': [
@@ -588,6 +586,8 @@ void main() {
                     'tables': [
                       {
                         'title': 'Оборудование / Вентиляция',
+                        'categoryTotal': 100,
+                        'sectionTotal': 100,
                         'columns': ['Наименование'],
                         'widths': [1],
                         'rows': [
@@ -623,7 +623,7 @@ void main() {
       tester.widget<Text>(find.text('Оборудование')).style?.color,
       Colors.white,
     );
-    expect(find.text('100 ₽'), findsNWidgets(2));
+    expect(find.textContaining('100,00'), findsNWidgets(2));
     expect(
       tester.getSize(find.byType(DocumentCanvasView)).width,
       closeTo(1000, .01),

@@ -338,8 +338,79 @@ void main() {
     );
     expect(header('variant-1').color, isNot(header('variant-2').color));
     expect((header('variant-2').shape as Border).left.width, 4);
+    final content = tester.widget<Container>(
+      find.byKey(const Key('client-quote-variant-content-variant-1')),
+    );
+    expect((content.margin as EdgeInsets).left, 5);
+    expect((content.margin as EdgeInsets).right, 5);
+    expect((content.decoration as BoxDecoration).border, isA<Border>());
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'configured link shows category and section totals from document',
+    (tester) async {
+      final quote = _quote();
+      final variant =
+          ((quote['proposalTypes'] as List).first
+                      as Map<String, dynamic>)['variants']
+                  .first
+              as Map<String, dynamic>;
+      variant['categories'] = [];
+      variant['document'] = {
+        'template': {
+          'blocks': [
+          {
+            'id': 'table',
+            'kind': 'table',
+            'x': 30,
+            'y': 30,
+            'width': 734,
+            'height': 150,
+          },
+          ],
+        },
+        'blocks': [
+          {
+            'id': 'table',
+            'title': '',
+            'lines': [],
+            'tables': [
+              {
+                'title': 'Оборудование / Внутренние блоки',
+                'columns': ['Наименование'],
+                'widths': [1],
+                'rows': [
+                  ['Кондиционер'],
+                ],
+                'categoryTotal': 100000,
+                'sectionTotal': 100000,
+              },
+            ],
+          },
+        ],
+      };
+      final client = MockClient(
+        (_) async => _ok({
+          'sessionToken': 'client-session',
+          'expiresAt': '2030-01-01T00:00:00Z',
+          'quote': quote,
+        }),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: QuoteClientAccessPage(
+            config: _config,
+            accessToken: 'test-link',
+            api: QuoteClientAccessApi(_config, client: client),
+          ),
+        ),
+      );
+      await _login(tester);
+      expect(find.textContaining('100'), findsNWidgets(2));
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('истёкшая сессия позволяет войти повторно и сохранить выбор', (
     tester,

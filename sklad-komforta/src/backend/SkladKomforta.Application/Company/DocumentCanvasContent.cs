@@ -11,7 +11,8 @@ public sealed record DocumentCanvasContent(DocumentTemplate Template, IReadOnlyL
 public sealed record DocumentCanvasBlock(string Id, string Title, IReadOnlyList<string> Lines,
     IReadOnlyList<DocumentCanvasTable> Tables);
 public sealed record DocumentCanvasTable(string Title, IReadOnlyList<string> Columns,
-    IReadOnlyList<double> Widths, IReadOnlyList<IReadOnlyList<string>> Rows, Guid? CategoryId = null);
+    IReadOnlyList<double> Widths, IReadOnlyList<IReadOnlyList<string>> Rows, Guid? CategoryId = null,
+    decimal? SectionTotal = null, decimal? CategoryTotal = null);
 
 public static class DocumentCanvasBuilder
 {

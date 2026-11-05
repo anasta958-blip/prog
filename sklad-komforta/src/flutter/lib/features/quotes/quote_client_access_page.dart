@@ -798,55 +798,55 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
             ),
           ),
         ),
-        if (!collapsed && variant.document != null)
-          DocumentCanvasView(
-            document: variant.document!,
-            compact: true,
-            clientLink: true,
-            categoryTotals: {
-              for (final category in variant.categories)
-                category.name: _money(_categoryTotal(category)),
-            },
-            sectionTotals: {
-              for (final category in variant.categories)
-                for (final section in category.sections)
-                  '${category.name} / ${section.name}': _money(
-                    _sectionTotal(section),
-                  ),
-            },
-          ),
-        if (!collapsed && variant.document == null)
-          for (final category in variant.categories) ...[
-            _categoryHeading(category),
-            for (final section in category.sections)
-              _positions(category.name, section),
-          ],
-        if (!collapsed && variant.document == null)
+        if (!collapsed)
           Container(
-            padding: const EdgeInsets.all(14),
-            decoration: const BoxDecoration(
-              color: _paperHeader,
-              border: Border(bottom: BorderSide(color: _paperBorder)),
+            key: Key('client-quote-variant-content-${variant.id}'),
+            margin: const EdgeInsets.symmetric(horizontal: 5),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border.all(color: const Color(0xFF91A6C1)),
             ),
-            child: Wrap(
-              alignment: WrapAlignment.end,
-              spacing: 22,
-              runSpacing: 6,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text(
-                  'Итого по варианту',
-                  style: TextStyle(fontWeight: FontWeight.w800),
-                ),
-                Text('Сумма без НДС: ${_money(variant.subtotal)}'),
-                Text(
-                  variant.vatRate == null
-                      ? 'Без НДС'
-                      : 'НДС ${_number(variant.vatRate!)}%: ${_money(variant.vatAmount)}',
-                ),
-                Text(
-                  'Итого: ${_money(variant.total)}',
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
+                if (variant.document case final document?)
+                  DocumentCanvasView(
+                    document: document,
+                    compact: true,
+                    clientLink: true,
+                  )
+                else ...[
+                  for (final category in variant.categories) ...[
+                    _categoryHeading(category),
+                    for (final section in category.sections)
+                      _positions(category.name, section),
+                  ],
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    color: _paperHeader,
+                    child: Wrap(
+                      alignment: WrapAlignment.end,
+                      spacing: 22,
+                      runSpacing: 6,
+                      children: [
+                        const Text(
+                          'Итого по варианту',
+                          style: TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                        Text('Сумма без НДС: ${_money(variant.subtotal)}'),
+                        Text(
+                          variant.vatRate == null
+                              ? 'Без НДС'
+                              : 'НДС ${_number(variant.vatRate!)}%: ${_money(variant.vatAmount)}',
+                        ),
+                        Text(
+                          'Итого: ${_money(variant.total)}',
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ],
             ),
           ),

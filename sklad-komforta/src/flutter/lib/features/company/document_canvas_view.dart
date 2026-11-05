@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart' show NumberFormat;
 import 'document_template.dart';
 import 'document_paper_surface.dart';
 import 'document_party_rows.dart';
@@ -10,15 +11,11 @@ class DocumentCanvasView extends StatelessWidget {
     required this.document,
     this.compact = false,
     this.clientLink = false,
-    this.categoryTotals = const {},
-    this.sectionTotals = const {},
     super.key,
   });
   final Map<String, dynamic> document;
   final bool compact;
   final bool clientLink;
-  final Map<String, String> categoryTotals;
-  final Map<String, String> sectionTotals;
 
   @override
   Widget build(BuildContext context) {
@@ -206,9 +203,9 @@ class DocumentCanvasView extends StatelessWidget {
               rows.add(const SizedBox(height: 8));
               contentHeight += 8;
             }
-            final categoryTotal = categoryTotals[categoryName];
+            final categoryTotal = (table['categoryTotal'] as num?)?.toDouble();
             addRow(
-              [categoryName, ?categoryTotal],
+              [categoryName, if (categoryTotal != null) _money(categoryTotal)],
               categoryTotal == null ? [1] : [3, 1],
               category: true,
             );
@@ -216,13 +213,13 @@ class DocumentCanvasView extends StatelessWidget {
           }
           rows.add(const SizedBox(height: 5));
           contentHeight += 5;
-          final sectionTotal = sectionTotals[tableTitle];
+          final sectionTotal = (table['sectionTotal'] as num?)?.toDouble();
           addRow(
             [
               sectionName.isEmpty || sectionName == categoryName
                   ? 'Позиции'
                   : sectionName,
-              ?sectionTotal,
+              if (sectionTotal != null) _money(sectionTotal),
             ],
             sectionTotal == null ? [1] : [3, 1],
             section: true,
@@ -282,3 +279,11 @@ class DocumentCanvasView extends StatelessWidget {
     );
   }
 }
+
+final _moneyFormat = NumberFormat.currency(
+  locale: 'ru_RU',
+  symbol: '₽',
+  decimalDigits: 2,
+);
+
+String _money(double value) => _moneyFormat.format(value);

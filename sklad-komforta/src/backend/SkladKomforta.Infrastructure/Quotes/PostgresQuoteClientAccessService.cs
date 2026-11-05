@@ -728,7 +728,9 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
                             section.Columns!.Select(c => c.Label).ToArray(),
                             DocumentCanvasBuilder.Widths(template, categoriesById[category.Id].CatalogCategoryId, section.Columns!.Select(c => c.Code)),
                             section.Positions.Select(p => p.Cells ?? (IReadOnlyList<string>)[]).ToArray(),
-                            categoriesById[category.Id].CatalogCategoryId))).ToArray(),
+                            categoriesById[category.Id].CatalogCategoryId,
+                            section.Total ?? section.Positions.Sum(position => position.LineTotal),
+                            category.Sections.Sum(part => part.Total ?? part.Positions.Sum(position => position.LineTotal))))).ToArray(),
                     DocumentCanvasBuilder.Totals(variant.Subtotal, variant.VatAmount))),
                 Categories = []
             }).ToArray() }).ToArray();
