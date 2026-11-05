@@ -696,6 +696,7 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
         }
 
         var details = types.Select(item => item.ToDetails()).ToArray();
+        DocumentCanvasContent? headerDocument = null;
         if (template is not null)
         {
             IReadOnlyDictionary<string, string?> clientValues = new Dictionary<string, string?>();
@@ -718,15 +719,17 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
                     executorValues = DocumentCanvasBuilder.JsonParty(executorJson.RootElement);
                 }
             }
+            if (template.Blocks.Any(block => block.Kind is "client" or "executor"))
+                headerDocument = DocumentCanvasBuilder.Parties(template, clientValues, executorValues);
             details = details.Select(type => type with { Variants = type.Variants.Select(variant => variant with {
-                Document = DocumentCanvasBuilder.Build(template, clientValues, executorValues,
+                Document = DocumentCanvasBuilder.WithoutParties(DocumentCanvasBuilder.Build(template, clientValues, executorValues,
                     variant.Categories.SelectMany(category => category.Sections.Where(section => section.Columns is { Count: > 0 })
                         .Select(section => new DocumentCanvasTable($"{category.Name} / {section.Name}",
                             section.Columns!.Select(c => c.Label).ToArray(),
                             DocumentCanvasBuilder.Widths(template, categoriesById[category.Id].CatalogCategoryId, section.Columns!.Select(c => c.Code)),
                             section.Positions.Select(p => p.Cells ?? (IReadOnlyList<string>)[]).ToArray(),
                             categoriesById[category.Id].CatalogCategoryId))).ToArray(),
-                    DocumentCanvasBuilder.Totals(variant.Subtotal, variant.VatAmount)),
+                    DocumentCanvasBuilder.Totals(variant.Subtotal, variant.VatAmount))),
                 Categories = []
             }).ToArray() }).ToArray();
         }
@@ -734,7 +737,7 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
             header.Id, header.Kind, header.Title, template is null ? header.ExecutorName : "", header.SelectionMode,
             header.AdditionalInformation, header.SelectedProposalTypeId,
             details, header.SubmittedAt, header.UpdatedAt,
-            template is null ? header.ClientName : null);
+            template is null ? header.ClientName : null, headerDocument);
     }
 
     private async Task<NpgsqlConnection> OpenTenantConnectionAsync(

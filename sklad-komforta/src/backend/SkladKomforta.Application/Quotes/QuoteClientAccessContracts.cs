@@ -66,7 +66,8 @@ public sealed record QuoteClientView(
     IReadOnlyList<QuoteClientProposalType> ProposalTypes,
     DateTimeOffset? SelectionSubmittedAt,
     DateTimeOffset UpdatedAt,
-    string? ClientName = null);
+    string? ClientName = null,
+    DocumentCanvasContent? HeaderDocument = null);
 
 /// <summary>Тип предложения и доступные клиенту варианты.</summary>
 public sealed record QuoteClientProposalType(

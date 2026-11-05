@@ -170,6 +170,30 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
     }
   }
 
+  Future<void> _refresh() async {
+    final token = sessionToken;
+    if (token == null || loading) return;
+    setState(() {
+      loading = true;
+      error = null;
+    });
+    try {
+      final current = await api.getCurrent(token);
+      if (mounted) _applyQuote(current);
+    } on ApiException catch (exception) {
+      if (mounted) {
+        setState(() {
+          error = exception.message;
+          if (exception.statusCode == 401) sessionToken = null;
+        });
+      }
+    } on Object {
+      if (mounted) setState(() => error = 'Не удалось обновить предложение.');
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
+  }
+
   void _applyQuote(QuoteClientView value) {
     selectedVariants
       ..clear()
@@ -284,18 +308,34 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
             const Icon(Icons.description_outlined, color: _clientAccent),
             const SizedBox(width: 10),
             Expanded(
-              child: Text(
-                value.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w800),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    value.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  if (submitted && MediaQuery.sizeOf(context).width < 400)
+                    const Text(
+                      'Выбор сохранён',
+                      style: TextStyle(color: Color(0xFF83E8AD), fontSize: 11),
+                    ),
+                ],
               ),
             ),
-            if (submitted)
+            if (submitted && MediaQuery.sizeOf(context).width >= 400)
               const _StatusBadge(
                 label: 'Выбор сохранён',
                 icon: Icons.check_circle_outline,
               ),
+            IconButton(
+              tooltip: 'Обновить предложение',
+              onPressed: loading ? null : _refresh,
+              icon: const Icon(Icons.refresh),
+            ),
           ],
         ),
       ),
@@ -429,6 +469,10 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
         ),
       ),
       const SizedBox(height: 22),
+      if (value.headerDocument case final header?) ...[
+        DocumentCanvasView(document: header, compact: true),
+        const SizedBox(height: 20),
+      ],
       if (!value.proposalTypes.any(
         (type) => type.variants.any((variant) => variant.document != null),
       ))
@@ -736,7 +780,7 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
           ),
         ),
         if (!collapsed && variant.document != null)
-          DocumentCanvasView(document: variant.document!),
+          DocumentCanvasView(document: variant.document!, compact: true),
         if (!collapsed && variant.document == null)
           for (final category in variant.categories)
             for (final section in category.sections)

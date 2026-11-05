@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../company/document_canvas_preview.dart';
 import '../company/document_canvas_view.dart';
+import '../company/document_template.dart';
 import 'package:sklad_komforta_app/features/company/document_preview_fields.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_models.dart';
 import 'package:sklad_komforta_app/core/widgets/preview_table.dart';
@@ -64,10 +65,25 @@ final class QuotePreviewPage extends StatelessWidget {
       builder: (context, constraints) {
         if (board?.documentTemplate != null) {
           final visible = _visible();
+          final template = DocumentTemplate.fromJson(board!.documentTemplate!);
           return ListView(
             padding: const EdgeInsets.all(20),
             children: [
               Text(draft.title),
+              if (template.blocks.any(
+                (block) => block.kind == 'client' || block.kind == 'executor',
+              ))
+                DocumentCanvasView(
+                  compact: true,
+                  document: documentCanvasPreview(
+                    board: board!,
+                    categories: const [],
+                    totals: const [],
+                    client: client?.toJson(),
+                    executor: executor?.toJson(),
+                    partiesOnly: true,
+                  ),
+                ),
               for (final type in visible.types)
                 for (final variant
                     in visible.onlyVariant == null
@@ -78,12 +94,14 @@ final class QuotePreviewPage extends StatelessWidget {
                     child: Text('${type.name} / ${variant.name}'),
                   ),
                   DocumentCanvasView(
+                    compact: true,
                     document: documentCanvasPreview(
                       board: board!,
                       categories: variant.categories,
                       totals: documentVariantTotals(variant),
                       client: client?.toJson(),
                       executor: executor?.toJson(),
+                      excludeParties: true,
                     ),
                   ),
                 ],

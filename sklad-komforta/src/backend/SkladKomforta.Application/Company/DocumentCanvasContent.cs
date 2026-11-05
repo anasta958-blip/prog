@@ -15,6 +15,26 @@ public sealed record DocumentCanvasTable(string Title, IReadOnlyList<string> Col
 
 public static class DocumentCanvasBuilder
 {
+    private static bool IsParty(DocumentBlock block) => block.Kind is "client" or "executor";
+
+    private static DocumentCanvasContent Filter(DocumentCanvasContent content, Func<DocumentBlock, bool> include)
+    {
+        var blocks = content.Template.Blocks.Where(include).ToArray();
+        var ids = blocks.Select(block => block.Id).ToHashSet();
+        return content with
+        {
+            Template = content.Template with { Blocks = blocks },
+            Blocks = content.Blocks.Where(block => ids.Contains(block.Id)).ToArray()
+        };
+    }
+
+    public static DocumentCanvasContent Parties(DocumentTemplate template,
+        IReadOnlyDictionary<string, string?> client, IReadOnlyDictionary<string, string?> executor) =>
+        Filter(Build(template, client, executor, [], []), IsParty);
+
+    public static DocumentCanvasContent WithoutParties(DocumentCanvasContent content) =>
+        Filter(content, block => !IsParty(block));
+
     private static readonly CultureInfo Russian = CultureInfo.GetCultureInfo("ru-RU");
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
     public static string Money(decimal value) => value.ToString("N2", Russian) + " ₽";

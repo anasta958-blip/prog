@@ -1,9 +1,64 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sklad_komforta_app/features/company/company_models.dart';
+import 'package:sklad_komforta_app/features/company/document_template.dart';
+import 'package:sklad_komforta_app/features/kanban/kanban_models.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_models.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_preview_page.dart';
 
 void main() {
+  testWidgets('configured preview shows parties once above variants', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1600, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final draft = _draft();
+    draft.proposalTypes.first.variants.add(
+      QuoteVariantDraft(id: 'variant-2', name: 'Второй', categories: []),
+    );
+    final template = DocumentTemplate(
+      blocks: [
+        DocumentBlock(id: 'client', kind: 'client', x: 30, y: 30),
+        DocumentBlock(id: 'executor', kind: 'executor', x: 400, y: 30),
+        DocumentBlock(id: 'totals', kind: 'totals', x: 30, y: 250),
+      ],
+    );
+    final board = KanbanBoard(
+      id: 'board',
+      code: 'quote',
+      name: 'КП',
+      columns: const [],
+      transitions: const [],
+      categories: const [],
+      documentTemplate: template.toJson(),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: QuotePreviewPage(
+          draft: draft,
+          board: board,
+          client: CompanyClientModel(id: 'client', name: 'Заказчик'),
+          executor: LegalEntityModel(
+            id: 'executor',
+            name: 'Исполнитель',
+            companyType: 'legal',
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Название: Заказчик'), findsOneWidget);
+    expect(find.text('Название: Исполнитель'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('Название: Заказчик')).dy,
+      lessThan(tester.getTopLeft(find.text('Кондиционеры / Оптимальный')).dy),
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('предпросмотр показывает текущий черновик и рассчитанный итог', (
     tester,
   ) async {

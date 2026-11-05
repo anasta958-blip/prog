@@ -12,8 +12,14 @@ Map<String, dynamic> documentCanvasPreview({
   Map<String, dynamic>? executor,
   bool order = false,
   Set<String> reorderIds = const {},
+  bool partiesOnly = false,
+  bool excludeParties = false,
 }) {
   final template = DocumentTemplate.fromJson(board.documentTemplate!);
+  final visibleBlocks = template.blocks.where((block) {
+    final party = block.kind == 'client' || block.kind == 'executor';
+    return partiesOnly ? party : !excludeParties || !party;
+  }).toList();
   final tableBlock = template.blocks
       .where((b) => b.kind == 'table')
       .firstOrNull;
@@ -70,9 +76,12 @@ Map<String, dynamic> documentCanvasPreview({
   }
 
   return {
-    'template': template.toJson(),
+    'template': {
+      ...template.toJson(),
+      'blocks': visibleBlocks.map((block) => block.toJson()).toList(),
+    },
     'blocks': [
-      for (final block in template.blocks)
+      for (final block in visibleBlocks)
         {
           'id': block.id,
           'title': block.kind == 'table' ? '' : documentBlockNames[block.kind],

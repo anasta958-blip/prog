@@ -150,11 +150,150 @@ void main() {
 
     await _open(tester, (_) async => _ok(_quote(selected: true)));
     expect(tester.takeException(), isNull);
+    await tester.ensureVisible(find.byType(Radio<String>).first);
     await tester.tap(find.byType(Radio<String>).first);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Подтвердить выбор'));
     await tester.pumpAndSettle();
     expect(find.text('Выбор сохранён'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('configured parties appear once before proposal types', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final quote = _quote(twoTypes: true);
+    quote['clientName'] = null;
+    quote['executorName'] = '';
+    quote['headerDocument'] = {
+      'template': {
+        'blocks': [
+          {
+            'id': 'client',
+            'kind': 'client',
+            'x': 30,
+            'y': 30,
+            'width': 320,
+            'height': 150,
+          },
+          {
+            'id': 'executor',
+            'kind': 'executor',
+            'x': 400,
+            'y': 30,
+            'width': 320,
+            'height': 150,
+          },
+        ],
+      },
+      'blocks': [
+        {
+          'id': 'client',
+          'title': 'Заказчик',
+          'lines': ['Название: Тестовый заказчик'],
+          'tables': [],
+        },
+        {
+          'id': 'executor',
+          'title': 'Исполнитель',
+          'lines': ['Название: Тестовый исполнитель'],
+          'tables': [],
+        },
+      ],
+    };
+    for (final type in quote['proposalTypes'] as List) {
+      for (final variant
+          in (type as Map<String, dynamic>)['variants'] as List) {
+        (variant as Map<String, dynamic>)['document'] = {
+          'template': {
+            'blocks': [
+              {
+                'id': 'totals',
+                'kind': 'totals',
+                'x': 30,
+                'y': 30,
+                'width': 320,
+                'height': 150,
+              },
+            ],
+          },
+          'blocks': [
+            {
+              'id': 'totals',
+              'title': 'Итоги',
+              'lines': ['Итого: 120 000 ₽'],
+              'tables': [],
+            },
+          ],
+        };
+      }
+    }
+    final client = MockClient(
+      (request) async => _ok({
+        'sessionToken': 'client-session',
+        'expiresAt': '2030-01-01T00:00:00Z',
+        'quote': quote,
+      }),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: QuoteClientAccessPage(
+          config: _config,
+          accessToken: 'test-link',
+          api: QuoteClientAccessApi(_config, client: client),
+        ),
+      ),
+    );
+    await _login(tester);
+
+    expect(find.text('Название: Тестовый заказчик'), findsOneWidget);
+    expect(find.text('Название: Тестовый исполнитель'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('Название: Тестовый заказчик')).dy,
+      lessThan(
+        tester.getTopLeft(find.byKey(const Key('client-quote-type-type-1'))).dy,
+      ),
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('refresh loads the current saved document', (tester) async {
+    var currentRequests = 0;
+    final client = MockClient((request) async {
+      if (request.url.path.endsWith('/login')) {
+        return _ok({
+          'sessionToken': 'client-session',
+          'expiresAt': '2030-01-01T00:00:00Z',
+          'quote': _quote(),
+        });
+      }
+      if (request.url.path.endsWith('/current')) {
+        currentRequests++;
+        expect(request.headers['X-Quote-Client-Session'], 'client-session');
+        return _ok({..._quote(), 'title': 'Обновлённое предложение'});
+      }
+      return _failure(404, 'Неизвестный запрос');
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: QuoteClientAccessPage(
+          config: _config,
+          accessToken: 'test-link',
+          api: QuoteClientAccessApi(_config, client: client),
+        ),
+      ),
+    );
+    await _login(tester);
+    await tester.tap(find.byTooltip('Обновить предложение'));
+    await tester.pumpAndSettle();
+
+    expect(currentRequests, 1);
+    expect(find.text('Обновлённое предложение'), findsWidgets);
     expect(tester.takeException(), isNull);
   });
 

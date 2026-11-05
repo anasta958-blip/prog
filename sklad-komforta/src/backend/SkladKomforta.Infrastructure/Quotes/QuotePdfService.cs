@@ -49,7 +49,8 @@ internal sealed class QuotePdfService(
         var content = template is not null ? DocumentCanvasPdfRenderer.Render(quote.Title,
             quote.ProposalTypes.OrderBy(t => t.SortOrder).SelectMany(t => t.Variants.OrderBy(v => v.SortOrder)
                 .Select(v => DocumentCanvasBuilder.Quote(template, v, client, executor, fields)
-                    with { Caption = $"{quote.Title} / {t.Name} / {v.Name}" })).ToArray()) : QuotePdfDocumentRenderer.Render(
+                    with { Caption = $"{quote.Title} / {t.Name} / {v.Name}" })).Select((document, index) =>
+                index == 0 ? document : DocumentCanvasBuilder.WithoutParties(document)).ToArray()) : QuotePdfDocumentRenderer.Render(
             quote,
             client,
             executor,

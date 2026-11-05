@@ -6,8 +6,13 @@ import 'document_party_rows.dart';
 
 /// Read-only rendering of server-projected, explicitly selected document data.
 class DocumentCanvasView extends StatelessWidget {
-  const DocumentCanvasView({required this.document, super.key});
+  const DocumentCanvasView({
+    required this.document,
+    this.compact = false,
+    super.key,
+  });
   final Map<String, dynamic> document;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -22,7 +27,10 @@ class DocumentCanvasView extends StatelessWidget {
       });
     final children = <Widget>[];
     final completed = <({DocumentBlock block, double bottom})>[];
-    var height = template.height;
+    var height = compact ? 0.0 : template.height;
+    final topOffset = compact && blocks.isNotEmpty
+        ? blocks.map((block) => block.y).reduce(math.min) - template.margin
+        : 0.0;
     for (final block in blocks) {
       final content = data.where((item) => item['id'] == block.id).firstOrNull;
       if (content == null) continue;
@@ -37,7 +45,7 @@ class DocumentCanvasView extends StatelessWidget {
         'right' => TextAlign.right,
         _ => TextAlign.left,
       };
-      var y = block.y;
+      var y = block.y - topOffset;
       for (final previous in completed) {
         final prior = previous.block;
         if (prior.y + prior.height <= block.y + .01 &&
@@ -165,7 +173,7 @@ class DocumentCanvasView extends StatelessWidget {
     }
     return DocumentPaperSurface(
       width: template.width,
-      height: height,
+      height: math.max(height, template.margin * 2),
       child: ColoredBox(
         key: const ValueKey('document-preview-paper'),
         color: Colors.white,

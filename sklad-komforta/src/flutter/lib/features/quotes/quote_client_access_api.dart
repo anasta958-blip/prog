@@ -135,6 +135,19 @@ final class QuoteClientAccessApi {
     );
   }
 
+  Future<QuoteClientView> getCurrent(String sessionToken) async {
+    final response = await _client.get(
+      Uri.parse('${_config.apiBaseUrl}/client/quotes/current'),
+      headers: {
+        'X-Quote-Client-Session': sessionToken,
+        'Accept': 'application/json',
+      },
+    );
+    return QuoteClientView.fromJson(
+      decodeApiResponse(response) as Map<String, dynamic>,
+    );
+  }
+
   void close() => _client.close();
 }
 
@@ -233,6 +246,7 @@ final class QuoteClientView {
     required this.selectionSubmittedAt,
     required this.updatedAt,
     this.clientName,
+    this.headerDocument,
   });
 
   final String id;
@@ -242,6 +256,7 @@ final class QuoteClientView {
 
   /// Заказчик для шапки документа; отсутствует у старых версий API.
   final String? clientName;
+  final Map<String, dynamic>? headerDocument;
   final String selectionMode;
   final String? additionalInformation;
   final String? selectedProposalTypeId;
@@ -256,6 +271,7 @@ final class QuoteClientView {
         title: json['title'] as String,
         executorName: json['executorName'] as String,
         clientName: json['clientName'] as String?,
+        headerDocument: json['headerDocument'] as Map<String, dynamic>?,
         selectionMode: json['selectionMode'] as String? ?? 'variant',
         additionalInformation: json['additionalInformation'] as String?,
         selectedProposalTypeId: json['selectedProposalTypeId'] as String?,

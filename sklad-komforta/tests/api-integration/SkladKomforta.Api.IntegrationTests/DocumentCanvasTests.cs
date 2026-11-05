@@ -34,6 +34,28 @@ public sealed class DocumentCanvasTests
     }
 
     [Fact]
+    public void PartyHeaderAndVariantBodyDoNotDuplicatePartyDetails()
+    {
+        var template = Template() with { Blocks = [
+            Block("client") with { Fields = ["name"] },
+            Block("executor") with { Fields = ["name"] },
+            Block("table"),
+            Block("totals")
+        ] };
+        var client = new Dictionary<string, string?> { ["name"] = "Заказчик" };
+        var executor = new Dictionary<string, string?> { ["name"] = "Исполнитель" };
+        var header = DocumentCanvasBuilder.Parties(template, client, executor);
+        var body = DocumentCanvasBuilder.WithoutParties(DocumentCanvasBuilder.Build(template,
+            client, executor, [new("Категория", ["Наименование"], [1], [["Товар"]])], ["Итого: 100 ₽"]));
+
+        Assert.Equal(["client", "executor"], header.Template.Blocks.Select(block => block.Kind));
+        Assert.Equal(["table", "totals"], body.Template.Blocks.Select(block => block.Kind));
+        Assert.Contains("Заказчик", System.Text.Json.JsonSerializer.Serialize(header));
+        Assert.DoesNotContain("Заказчик", System.Text.Json.JsonSerializer.Serialize(body));
+        Assert.DoesNotContain("Исполнитель", System.Text.Json.JsonSerializer.Serialize(body));
+    }
+
+    [Fact]
     public void CategoryOrderKeepsSectionsStableAndAppendsNewCategories()
     {
         var first = Guid.NewGuid();
