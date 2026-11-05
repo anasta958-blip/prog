@@ -38,6 +38,7 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
     private readonly IDatabase _redis;
     private readonly ITenantContext _tenantContext;
     private readonly IQuoteService _quoteService;
+    private readonly IDocumentLayoutService _layouts;
     private readonly IRealtimeNotifier _realtime;
     private readonly PasswordHasher<string> _passwordHasher = new();
     private readonly byte[] _secretKey;
@@ -47,6 +48,7 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
         IConnectionMultiplexer redis,
         ITenantContext tenantContext,
         IQuoteService quoteService,
+        IDocumentLayoutService layouts,
         IRealtimeNotifier realtime,
         IOptions<SecurityOptions> securityOptions)
     {
@@ -55,6 +57,7 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
         _redis = redis.GetDatabase();
         _tenantContext = tenantContext;
         _quoteService = quoteService;
+        _layouts = layouts;
         _secretKey = IdentitySecurity.DeriveKey(
             Convert.FromBase64String(securityOptions.Value.TotpEncryptionKey),
             SecretKeyPurpose);
@@ -72,6 +75,9 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
             throw Failure(400, "quote_client_link_lifetime_invalid", "Срок ссылки должен быть от 1 до 30 дней.");
 
         var quote = await _quoteService.GetAsync(actorUserId, boardId, cardId, cancellationToken);
+        if (await _layouts.GetTemplateAsync(boardId, cancellationToken) is null)
+            throw Failure(409, "document_layout_required",
+                "Настройте внешний вид ссылки и PDF для этого канбана в разделе «Компания → Конструктор ссылки и PDF».");
         if (quote.ProposalTypes.Count == 0 || quote.ProposalTypes.Any(type => type.Variants.Count == 0))
             throw Failure(
                 409,
@@ -569,6 +575,9 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
 
         var layouts = await PostgresDocumentLayoutService.ReadFieldsAsync(connection, workflowId, cancellationToken);
         var template = await PostgresDocumentLayoutService.ReadTemplateAsync(connection, workflowId, cancellationToken);
+        if (template is null)
+            throw Failure(409, "document_layout_required",
+                "Внешний вид предложения пока не настроен. Обратитесь к отправителю ссылки.");
 
         var types = new List<MutableClientType>();
         var typesById = new Dictionary<Guid, MutableClientType>();

@@ -5,6 +5,7 @@ using MigraDoc.Rendering;
 using PdfSharp.Fonts;
 using SkladKomforta.Application.Company;
 using SkladKomforta.Application.Kanban;
+using SkladKomforta.Application.Identity;
 using SkladKomforta.Application.Quotes;
 using SkladKomforta.Infrastructure.Company;
 
@@ -17,7 +18,6 @@ namespace SkladKomforta.Infrastructure.Quotes;
 internal sealed class QuotePdfService(
     IQuoteService quoteService,
     ICompanyWorkspaceService companyService,
-    IKanbanService kanbanService,
     IDocumentLayoutService layouts) : IQuotePdfService
 {
     public async Task<QuotePdfFile> GenerateAsync(
@@ -34,30 +34,21 @@ internal sealed class QuotePdfService(
             variantId);
         var clientsTask = companyService.GetClientsAsync(cancellationToken);
         var companiesTask = companyService.GetLegalEntitiesAsync(cancellationToken);
-        var employeesTask = companyService.GetEmployeesAsync(cancellationToken);
-        var cardTask = kanbanService.GetCardAsync(actorUserId, boardId, cardId, cancellationToken);
-        await Task.WhenAll(clientsTask, companiesTask, employeesTask, cardTask);
+        await Task.WhenAll(clientsTask, companiesTask);
 
         var client = clientsTask.Result.FirstOrDefault(item => item.Id == quote.ClientId);
         var executor = companiesTask.Result.FirstOrDefault(item => item.Id == quote.ExecutorCompanyId);
-        var employees = employeesTask.Result;
-        var manager = employees.FirstOrDefault(item => item.UserId == quote.ManagerUserId)?.DisplayName;
-        var salesHead = employees.FirstOrDefault(item => item.UserId == quote.SalesHeadUserId)?.DisplayName;
 
         var template = await layouts.GetTemplateAsync(boardId, cancellationToken);
+        if (template is null)
+            throw new IdentityException(409, "document_layout_required",
+                "Настройте внешний вид ссылки и PDF для этого канбана в разделе «Компания → Конструктор ссылки и PDF».");
         var fields = await layouts.GetFieldsAsync(boardId, cancellationToken);
-        var content = template is not null ? DocumentCanvasPdfRenderer.Render(quote.Title,
+        var content = DocumentCanvasPdfRenderer.Render(quote.Title,
             quote.ProposalTypes.OrderBy(t => t.SortOrder).SelectMany(t => t.Variants.OrderBy(v => v.SortOrder)
                 .Select(v => DocumentCanvasBuilder.Quote(template, v, client, executor, fields)
                     with { Caption = $"{quote.Title} / {t.Name} / {v.Name}" })).Select((document, index) =>
-                index == 0 ? document : DocumentCanvasBuilder.WithoutParties(document)).ToArray()) : QuotePdfDocumentRenderer.Render(
-            quote,
-            client,
-            executor,
-            manager,
-            salesHead,
-            cardTask.Result.Number,
-            fields);
+                index == 0 ? document : DocumentCanvasBuilder.WithoutParties(document)).ToArray());
         // Для печати одного варианта или одного типа в имя файла добавляются их названия.
         var printedType = variantId is null && proposalTypeId is null ? null : quote.ProposalTypes[0];
         var printedVariant = variantId is null ? null : printedType!.Variants[0];

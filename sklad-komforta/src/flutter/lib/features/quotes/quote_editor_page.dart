@@ -7,6 +7,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:sklad_komforta_app/core/widgets/document_command_bar.dart';
+import 'package:sklad_komforta_app/core/widgets/document_layout_required.dart';
 import 'package:sklad_komforta_app/core/widgets/collapse_toggle.dart';
 import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
 import 'package:flutter/services.dart';
@@ -54,6 +55,7 @@ final class QuoteEditorPage extends StatefulWidget {
     this.creationColumnId,
     this.createKind,
     required this.onBack,
+    this.onOpenDocumentSettings,
     this.controller,
     this.outboundGatewayFactory,
     this.backRequest = 0,
@@ -67,6 +69,7 @@ final class QuoteEditorPage extends StatefulWidget {
   final String? creationColumnId;
   final QuoteKind? createKind;
   final VoidCallback onBack;
+  final Future<void> Function()? onOpenDocumentSettings;
 
   /// Изменение счётчика вызывает тот же выход, что и кнопка «Назад».
   final int backRequest;
@@ -142,6 +145,8 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
   /// Отправляет PDF — тот же, что при печати. Несохранённые правки сначала
   /// сохраняются с согласия пользователя: сервер отправляет сохранённую версию.
   Future<void> _sendDocument(OutboundChannel channel) async {
+    if (!await _requireDocumentLayout()) return;
+    if (!mounted) return;
     if (sending || controller.saving) return;
     if (controller.dirty ||
         (controller.persistedCardId ?? widget.card?.id) == null) {
@@ -435,6 +440,8 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
   }
 
   Future<void> _openPreview() async {
+    if (!await _requireDocumentLayout()) return;
+    if (!mounted) return;
     final draft = controller.draft;
     if (draft == null) return;
     final scope = await _askPrintScope(title: 'Что показать?');
@@ -472,6 +479,8 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
   }
 
   Future<void> _printPdf() async {
+    if (!await _requireDocumentLayout()) return;
+    if (!mounted) return;
     // Сначала проверяем, что печать возможна, чтобы не спрашивать зря.
     if (controller.printing || !controller.ensurePrintable(card: widget.card)) {
       return;
@@ -501,6 +510,8 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
   }
 
   Future<void> _manageClientAccess() async {
+    if (!await _requireDocumentLayout()) return;
+    if (!mounted) return;
     if (controller.dirty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const AppSnackBar(
@@ -548,6 +559,22 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
     } finally {
       if (mounted) setState(() => creatingClientAccess = false);
     }
+  }
+
+  Future<bool> _requireDocumentLayout() async {
+    if (widget.board.documentTemplate != null) return true;
+    await showDocumentLayoutRequiredDialog(
+      context,
+      documentName: 'ссылки и PDF',
+      onOpenSettings: widget.onOpenDocumentSettings == null
+          ? null
+          : () async {
+              if (controller.dirty && !await _writeLocalDraft()) return;
+              if (!mounted) return;
+              await widget.onOpenDocumentSettings!();
+            },
+    );
+    return false;
   }
 
   void _toggleCategory(String id) {

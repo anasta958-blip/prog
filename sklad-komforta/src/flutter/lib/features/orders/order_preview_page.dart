@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/widgets/document_layout_required.dart';
 import '../company/document_canvas_preview.dart';
 import '../company/document_canvas_view.dart';
 import 'package:sklad_komforta_app/features/company/document_preview_fields.dart';
@@ -42,6 +43,16 @@ final class OrderPreviewPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (board.documentTemplate == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Предпросмотр комплектации')),
+        body: const Center(
+          child: Text(
+            'Внешний вид не настроен. Откройте «$documentLayoutSettingsPath» и сохраните настройку.',
+          ),
+        ),
+      );
+    }
     if (board.documentTemplate != null) {
       return Scaffold(
         appBar: AppBar(title: const Text('Предпросмотр комплектации')),

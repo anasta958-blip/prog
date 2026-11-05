@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:sklad_komforta_app/core/widgets/workspace_header.dart';
 import 'package:sklad_komforta_app/core/widgets/collapse_toggle.dart';
 import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
+import 'package:sklad_komforta_app/core/widgets/document_layout_required.dart';
 import 'package:intl/intl.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/core/models/workflow_specialization.dart';
@@ -26,6 +27,7 @@ final class KanbanPage extends StatefulWidget {
     this.config,
     this.authController,
     this.outboundGatewayFactory,
+    this.onOpenDocumentSettings,
     this.backRequest = 0,
     super.key,
   });
@@ -39,6 +41,7 @@ final class KanbanPage extends StatefulWidget {
 
   /// Транспорт внешней отправки; в тестах — память.
   final OutboundGatewayFactory? outboundGatewayFactory;
+  final Future<void> Function()? onOpenDocumentSettings;
 
   @override
   State<KanbanPage> createState() => _KanbanPageState();
@@ -78,6 +81,8 @@ final class _KanbanPageState extends State<KanbanPage> {
   Future<void> _sendCard(KanbanCard card, OutboundChannel channel) async {
     final auth = widget.authController;
     if (auth == null || _sendingDocument) return;
+    if (!await _requireDocumentLayout(card.workflowId)) return;
+    if (!mounted) return;
     setState(() => _sendingDocument = true);
     try {
       await sendCardDocument(
@@ -103,6 +108,8 @@ final class _KanbanPageState extends State<KanbanPage> {
     final config = widget.config;
     final auth = widget.authController;
     if (_openingClientLink || config == null || auth == null) return;
+    if (!await _requireDocumentLayout(card.workflowId)) return;
+    if (!mounted) return;
     setState(() => _openingClientLink = true);
     try {
       await showQuoteClientAccessDialog(
@@ -115,6 +122,19 @@ final class _KanbanPageState extends State<KanbanPage> {
     } finally {
       if (mounted) setState(() => _openingClientLink = false);
     }
+  }
+
+  Future<bool> _requireDocumentLayout(String boardId) async {
+    final board = widget.controller.board;
+    if (board?.id == boardId && board?.documentTemplate != null) return true;
+    await showDocumentLayoutRequiredDialog(
+      context,
+      documentName: board?.specialization == WorkflowSpecialization.order
+          ? 'PDF комплектации'
+          : 'ссылки и PDF',
+      onOpenSettings: widget.onOpenDocumentSettings,
+    );
+    return false;
   }
 
   KanbanCard? _openedQuoteCard;
@@ -405,6 +425,7 @@ final class _KanbanPageState extends State<KanbanPage> {
         card: _openedQuoteCard,
         creationColumnId: _newQuoteColumnId,
         outboundGatewayFactory: widget.outboundGatewayFactory,
+        onOpenDocumentSettings: widget.onOpenDocumentSettings,
         onBack: () => unawaited(_closeQuoteEditor()),
       );
     }
@@ -421,6 +442,7 @@ final class _KanbanPageState extends State<KanbanPage> {
         creationColumnId: _newQuoteColumnId,
         createKind: _newQuoteKind,
         outboundGatewayFactory: widget.outboundGatewayFactory,
+        onOpenDocumentSettings: widget.onOpenDocumentSettings,
         onBack: () => unawaited(_closeQuoteEditor()),
       );
     }

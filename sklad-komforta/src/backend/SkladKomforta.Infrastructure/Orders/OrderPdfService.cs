@@ -6,6 +6,7 @@ using MigraDoc.Rendering;
 using SkladKomforta.Application.Company;
 using SkladKomforta.Application.Kanban;
 using SkladKomforta.Application.Orders;
+using SkladKomforta.Application.Identity;
 using SkladKomforta.Infrastructure.Quotes;
 using SkladKomforta.Infrastructure.Company;
 
@@ -18,7 +19,6 @@ namespace SkladKomforta.Infrastructure.Orders;
 internal sealed class OrderPdfService(
     IOrderService orderService,
     ICompanyWorkspaceService companyService,
-    IKanbanService kanbanService,
     IDocumentLayoutService layouts) : IOrderPdfService
 {
     /// <inheritdoc />
@@ -28,25 +28,16 @@ internal sealed class OrderPdfService(
         var order = await orderService.GetAsync(actorUserId, boardId, cardId, cancellationToken);
         var clientsTask = companyService.GetClientsAsync(cancellationToken);
         var companiesTask = companyService.GetLegalEntitiesAsync(cancellationToken);
-        var employeesTask = companyService.GetEmployeesAsync(cancellationToken);
-        var cardTask = kanbanService.GetCardAsync(actorUserId, boardId, cardId, cancellationToken);
-        var boardTask = kanbanService.GetBoardAsync(boardId, cancellationToken);
-        await Task.WhenAll(clientsTask, companiesTask, employeesTask, cardTask, boardTask);
+        await Task.WhenAll(clientsTask, companiesTask);
 
-        var employees = employeesTask.Result;
         var executor = companiesTask.Result.FirstOrDefault(item => item.Id == order.ExecutorCompanyId);
         var template = await layouts.GetTemplateAsync(boardId, cancellationToken);
+        if (template is null)
+            throw new IdentityException(409, "document_layout_required",
+                "Настройте внешний вид PDF для этого канбана в разделе «Компания → Конструктор ссылки и PDF».");
         var fields = await layouts.GetFieldsAsync(boardId, cancellationToken);
-        var content = template is not null ? DocumentCanvasPdfRenderer.Render(order.Title,
-            [DocumentCanvasBuilder.Order(template, order, clientsTask.Result.FirstOrDefault(c => c.Id == order.ClientId), executor, fields)]) : OrderPdfDocumentRenderer.Render(
-            order,
-            boardTask.Result,
-            clientsTask.Result.FirstOrDefault(item => item.Id == order.ClientId)?.Name,
-            executor?.LegalName ?? executor?.Name,
-            employees.FirstOrDefault(item => item.UserId == order.ManagerUserId)?.DisplayName,
-            employees.FirstOrDefault(item => item.UserId == order.SalesHeadUserId)?.DisplayName,
-            cardTask.Result.Number,
-            fields);
+        var content = DocumentCanvasPdfRenderer.Render(order.Title,
+            [DocumentCanvasBuilder.Order(template, order, clientsTask.Result.FirstOrDefault(c => c.Id == order.ClientId), executor, fields)]);
 
         var invalid = Path.GetInvalidFileNameChars().ToHashSet();
         var title = new string(order.Title.Where(character => !invalid.Contains(character)).ToArray()).Trim();

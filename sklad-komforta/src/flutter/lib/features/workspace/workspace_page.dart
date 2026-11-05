@@ -149,6 +149,8 @@ class _WorkspacePageState extends State<WorkspacePage> {
                 controller: kanbanController,
                 config: widget.config,
                 authController: widget.authController,
+                onOpenDocumentSettings: () =>
+                    _selectCompanySection(CompanySection.documents),
               ),
             };
             final content = KeyedSubtree(key: _contentKey, child: page);

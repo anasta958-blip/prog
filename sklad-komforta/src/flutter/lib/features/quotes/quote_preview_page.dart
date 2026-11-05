@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../company/document_canvas_preview.dart';
+import 'package:sklad_komforta_app/core/widgets/document_layout_required.dart';
 import '../company/document_canvas_view.dart';
 import '../company/document_template.dart';
 import 'package:sklad_komforta_app/features/company/document_preview_fields.dart';
@@ -49,110 +50,123 @@ final class QuotePreviewPage extends StatelessWidget {
   final int? cardNumber;
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    key: const Key('quote-preview-page'),
-    backgroundColor: _previewBackground,
-    appBar: AppBar(
-      backgroundColor: const Color(0xFF0F1722),
-      foregroundColor: Colors.white,
-      title: Text(
-        cardNumber == null
-            ? 'Предпросмотр ${draft.kind.label}'
-            : 'Предпросмотр ${draft.kind.label} №$cardNumber',
-      ),
-    ),
-    body: LayoutBuilder(
-      builder: (context, constraints) {
-        if (board?.documentTemplate != null) {
-          final visible = _visible();
-          final template = DocumentTemplate.fromJson(board!.documentTemplate!);
-          return ListView(
-            padding: const EdgeInsets.all(20),
-            children: [
-              Text(draft.title),
-              if (template.blocks.any(
-                (block) => block.kind == 'client' || block.kind == 'executor',
-              ))
-                DocumentCanvasView(
-                  compact: true,
-                  document: documentCanvasPreview(
-                    board: board!,
-                    categories: const [],
-                    totals: const [],
-                    client: client?.toJson(),
-                    executor: executor?.toJson(),
-                    partiesOnly: true,
-                  ),
-                ),
-              for (final type in visible.types)
-                for (final variant
-                    in visible.onlyVariant == null
-                        ? type.variants
-                        : [visible.onlyVariant!]) ...[
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    child: Text('${type.name} / ${variant.name}'),
-                  ),
-                  DocumentCanvasView(
-                    compact: true,
-                    document: documentCanvasPreview(
-                      board: board!,
-                      categories: variant.categories,
-                      totals: documentVariantTotals(variant),
-                      client: client?.toJson(),
-                      executor: executor?.toJson(),
-                      excludeParties: true,
-                    ),
-                  ),
-                ],
-            ],
-          );
-        }
-        final compact = constraints.maxWidth < 720;
-        return SingleChildScrollView(
-          padding: EdgeInsets.fromLTRB(
-            compact ? 12 : 28,
-            24,
-            compact ? 12 : 28,
-            48,
-          ),
-          child: Center(
-            child: Container(
-              constraints: const BoxConstraints(maxWidth: 1040),
-              padding: EdgeInsets.all(compact ? 20 : 48),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(compact ? 8 : 12),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color(0x55000000),
-                    blurRadius: 28,
-                    offset: Offset(0, 12),
-                  ),
-                ],
-              ),
-              child: DefaultTextStyle(
-                style: const TextStyle(color: _paperText, height: 1.35),
-                child: DocumentPreviewFields(
-                  board: board,
-                  child: _Document(
-                    draft: draft,
-                    visible: _visible(),
-                    client: client,
-                    executor: executor,
-                    managerName: managerName,
-                    salesHeadName: salesHeadName,
-                    cardNumber: cardNumber,
-                    compact: compact,
-                  ),
-                ),
-              ),
+  Widget build(BuildContext context) =>
+      board != null && board!.documentTemplate == null
+      ? Scaffold(
+          appBar: AppBar(title: const Text('Предпросмотр предложения')),
+          body: const Center(
+            child: Text(
+              'Внешний вид не настроен. Откройте «$documentLayoutSettingsPath» и сохраните настройку.',
             ),
           ),
+        )
+      : Scaffold(
+          key: const Key('quote-preview-page'),
+          backgroundColor: _previewBackground,
+          appBar: AppBar(
+            backgroundColor: const Color(0xFF0F1722),
+            foregroundColor: Colors.white,
+            title: Text(
+              cardNumber == null
+                  ? 'Предпросмотр ${draft.kind.label}'
+                  : 'Предпросмотр ${draft.kind.label} №$cardNumber',
+            ),
+          ),
+          body: LayoutBuilder(
+            builder: (context, constraints) {
+              if (board?.documentTemplate != null) {
+                final visible = _visible();
+                final template = DocumentTemplate.fromJson(
+                  board!.documentTemplate!,
+                );
+                return ListView(
+                  padding: const EdgeInsets.all(20),
+                  children: [
+                    Text(draft.title),
+                    if (template.blocks.any(
+                      (block) =>
+                          block.kind == 'client' || block.kind == 'executor',
+                    ))
+                      DocumentCanvasView(
+                        compact: true,
+                        document: documentCanvasPreview(
+                          board: board!,
+                          categories: const [],
+                          totals: const [],
+                          client: client?.toJson(),
+                          executor: executor?.toJson(),
+                          partiesOnly: true,
+                        ),
+                      ),
+                    for (final type in visible.types)
+                      for (final variant
+                          in visible.onlyVariant == null
+                              ? type.variants
+                              : [visible.onlyVariant!]) ...[
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          child: Text('${type.name} / ${variant.name}'),
+                        ),
+                        DocumentCanvasView(
+                          compact: true,
+                          document: documentCanvasPreview(
+                            board: board!,
+                            categories: variant.categories,
+                            totals: documentVariantTotals(variant),
+                            client: client?.toJson(),
+                            executor: executor?.toJson(),
+                            excludeParties: true,
+                          ),
+                        ),
+                      ],
+                  ],
+                );
+              }
+              final compact = constraints.maxWidth < 720;
+              return SingleChildScrollView(
+                padding: EdgeInsets.fromLTRB(
+                  compact ? 12 : 28,
+                  24,
+                  compact ? 12 : 28,
+                  48,
+                ),
+                child: Center(
+                  child: Container(
+                    constraints: const BoxConstraints(maxWidth: 1040),
+                    padding: EdgeInsets.all(compact ? 20 : 48),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(compact ? 8 : 12),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color(0x55000000),
+                          blurRadius: 28,
+                          offset: Offset(0, 12),
+                        ),
+                      ],
+                    ),
+                    child: DefaultTextStyle(
+                      style: const TextStyle(color: _paperText, height: 1.35),
+                      child: DocumentPreviewFields(
+                        board: board,
+                        child: _Document(
+                          draft: draft,
+                          visible: _visible(),
+                          client: client,
+                          executor: executor,
+                          managerName: managerName,
+                          salesHeadName: salesHeadName,
+                          cardNumber: cardNumber,
+                          compact: compact,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
         );
-      },
-    ),
-  );
 
   /// Показываемые типы и, если выбран вариант, единственный вариант типа.
   _Visible _visible() {

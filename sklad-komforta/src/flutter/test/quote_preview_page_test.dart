@@ -7,6 +7,27 @@ import 'package:sklad_komforta_app/features/quotes/quote_models.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_preview_page.dart';
 
 void main() {
+  testWidgets(
+    'quote preview does not show a default layout for an unconfigured board',
+    (tester) async {
+      final board = KanbanBoard(
+        id: 'board',
+        code: 'quote',
+        name: 'КП',
+        columns: const [],
+        transitions: const [],
+        categories: const [],
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: QuotePreviewPage(draft: _draft(), board: board),
+        ),
+      );
+      expect(find.textContaining('Внешний вид не настроен'), findsOneWidget);
+      expect(find.text('Кассетный кондиционер'), findsNothing);
+    },
+  );
+
   testWidgets('configured preview shows parties once above variants', (
     tester,
   ) async {

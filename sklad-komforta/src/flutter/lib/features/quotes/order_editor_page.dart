@@ -14,6 +14,7 @@ final class OrderEditorPage extends StatefulWidget {
     this.card,
     this.creationColumnId,
     required this.onBack,
+    this.onOpenDocumentSettings,
     this.controller,
     this.pdfViewerBuilder,
     this.outboundGatewayFactory,
@@ -30,6 +31,7 @@ final class OrderEditorPage extends StatefulWidget {
   final KanbanCard? card;
   final String? creationColumnId;
   final VoidCallback onBack;
+  final Future<void> Function()? onOpenDocumentSettings;
 
   /// Изменение счётчика вызывает тот же выход, что и кнопка «Назад».
   final int backRequest;
@@ -105,6 +107,8 @@ final class _OrderEditorPageState extends State<OrderEditorPage> {
 
   /// Отправляет PDF комплектации — тот же, что при печати.
   Future<void> _sendDocument(OutboundChannel channel) async {
+    if (!await _requireDocumentLayout()) return;
+    if (!mounted) return;
     if (sending || controller.saving) return;
     if (controller.dirty || controller.persistedCardId == null) {
       if (!await _confirmSaveAndSend(context)) return;
@@ -328,6 +332,8 @@ final class _OrderEditorPageState extends State<OrderEditorPage> {
   );
 
   Future<void> _openPreview() async {
+    if (!await _requireDocumentLayout()) return;
+    if (!mounted) return;
     final order = controller.snapshot;
     if (order == null) return;
     String? employee(String? id) => controller.employees
@@ -361,9 +367,27 @@ final class _OrderEditorPageState extends State<OrderEditorPage> {
   }
 
   Future<void> _printPdf() async {
+    if (!await _requireDocumentLayout()) return;
+    if (!mounted) return;
     final file = await controller.downloadOrderPdf();
     if (file == null || !mounted) return;
     await _saveFile(file.fileName, file.bytes);
+  }
+
+  Future<bool> _requireDocumentLayout() async {
+    if (widget.board.documentTemplate != null) return true;
+    await showDocumentLayoutRequiredDialog(
+      context,
+      documentName: 'PDF комплектации',
+      onOpenSettings: widget.onOpenDocumentSettings == null
+          ? null
+          : () async {
+              if (controller.dirty && !await _writeLocalDraft()) return;
+              if (!mounted) return;
+              await widget.onOpenDocumentSettings!();
+            },
+    );
+    return false;
   }
 
   Future<void> _saveFile(String fileName, Uint8List bytes) async {
