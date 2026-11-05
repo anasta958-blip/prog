@@ -668,8 +668,8 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
                 ? Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      for (final variant in type.variants)
-                        _variantBlock(type, variant, typeMode),
+                      for (final (index, variant) in type.variants.indexed)
+                        _variantBlock(type, variant, typeMode, index),
                     ],
                   )
                 : RadioGroup<String>(
@@ -678,8 +678,8 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        for (final variant in type.variants)
-                          _variantBlock(type, variant, typeMode),
+                        for (final (index, variant) in type.variants.indexed)
+                          _variantBlock(type, variant, typeMode, index),
                       ],
                     ),
                   ),
@@ -692,6 +692,7 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
     QuoteClientProposalType type,
     QuoteClientVariant variant,
     bool typeMode,
+    int index,
   ) {
     final selected =
         (!typeMode && selectedVariants[type.id] == variant.id) ||
@@ -702,7 +703,21 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Material(
-          color: selected ? _paperSelectedBackground : _paperVariant,
+          color: selected
+              ? _paperSelectedBackground
+              : index.isEven
+              ? const Color(0xFFF1F5FB)
+              : const Color(0xFFE5EDF7),
+          shape: Border(
+            left: BorderSide(
+              color: selected ? _paperSelected : const Color(0xFF91A6C1),
+              width: 4,
+            ),
+            top: BorderSide(
+              color: index == 0 ? _paperBorder : const Color(0xFF91A6C1),
+              width: index == 0 ? 1 : 2,
+            ),
+          ),
           child: InkWell(
             onTap: loading
                 ? null
@@ -786,9 +801,11 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
             clientLink: true,
           ),
         if (!collapsed && variant.document == null)
-          for (final category in variant.categories)
+          for (final category in variant.categories) ...[
+            _categoryHeading(category.name),
             for (final section in category.sections)
               _positions(category.name, section),
+          ],
         if (!collapsed && variant.document == null)
           Container(
             padding: const EdgeInsets.all(14),
@@ -824,6 +841,16 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
 
   /// Таблица раздела с фиксированными колонками; на узком экране она
   /// прокручивается по горизонтали, а сумма раздела стоит над колонкой «Сумма».
+  Widget _categoryHeading(String name) => Container(
+    margin: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+    color: const Color(0xFF243A56),
+    child: Text(
+      name,
+      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+    ),
+  );
+
   Widget _positions(String category, QuoteClientSection section) {
     final sectionTotal =
         section.total ??
@@ -845,8 +872,8 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
                   child: Text(
                     section.name.trim().toLowerCase() ==
                             category.trim().toLowerCase()
-                        ? category
-                        : '$category · ${section.name}',
+                        ? 'Позиции'
+                        : section.name,
                     style: const TextStyle(fontWeight: FontWeight.w800),
                   ),
                 ),
@@ -931,7 +958,6 @@ const _paperText = Color(0xFF172033);
 const _paperMuted = Color(0xFF5E6B7E);
 const _paperBorder = Color(0xFFD8DEE8);
 const _paperHeader = Color(0xFFF0F4F9);
-const _paperVariant = Color(0xFFF8FAFC);
 const _paperSelected = Color(0xFF2368C4);
 const _paperSelectedBackground = Color(0xFFE8F1FF);
 

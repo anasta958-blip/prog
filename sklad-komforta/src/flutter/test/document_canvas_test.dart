@@ -531,6 +531,14 @@ void main() {
           height: 300,
         ),
         DocumentBlock(
+          id: 'executor',
+          kind: 'executor',
+          x: 400,
+          y: 80,
+          width: 350,
+          height: 300,
+        ),
+        DocumentBlock(
           id: 'table',
           kind: 'table',
           x: 30,
@@ -566,12 +574,18 @@ void main() {
                     'tables': <Object>[],
                   },
                   {
+                    'id': 'executor',
+                    'title': 'Исполнитель',
+                    'lines': ['Название: Поставщик'],
+                    'tables': <Object>[],
+                  },
+                  {
                     'id': 'table',
                     'title': '',
                     'lines': <String>[],
                     'tables': [
                       {
-                        'title': 'Оборудование',
+                        'title': 'Оборудование / Вентиляция',
                         'columns': ['Наименование'],
                         'widths': [1],
                         'rows': [
@@ -598,6 +612,14 @@ void main() {
     expect(
       tester.getSize(find.byType(DocumentCanvasView)).height,
       lessThan(500),
+    );
+    expect(
+      tester.getTopLeft(find.text('Заказчик')).dy,
+      tester.getTopLeft(find.text('Исполнитель')).dy,
+    );
+    expect(
+      tester.widget<Text>(find.text('Оборудование')).style?.color,
+      Colors.white,
     );
     expect(
       tester.getTopLeft(find.text('Итоги')).dy -

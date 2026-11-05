@@ -27,6 +27,16 @@ class DocumentCanvasView extends StatelessWidget {
         final y = a.y.compareTo(b.y);
         return y == 0 ? a.x.compareTo(b.x) : y;
       });
+    final partyBlocks =
+        blocks
+            .where(
+              (block) => block.kind == 'client' || block.kind == 'executor',
+            )
+            .toList()
+          ..sort((a, b) => a.x.compareTo(b.x));
+    final pairedParties = clientLink && partyBlocks.length == 2;
+    const partyGap = 16.0;
+    final partyWidth = (template.width - template.margin * 2 - partyGap) / 2;
     final children = <Widget>[];
     final completed = <({DocumentBlock block, double bottom})>[];
     var height = compact ? 0.0 : template.height;
@@ -51,10 +61,12 @@ class DocumentCanvasView extends StatelessWidget {
         _ => TextAlign.left,
       };
       var y = block.y - topOffset;
+      final party = block.kind == 'client' || block.kind == 'executor';
+      final rowKey = pairedParties && party ? double.negativeInfinity : block.y;
       if (clientLink) {
-        if (currentRow != block.y) {
+        if (currentRow != rowKey) {
           if (currentRow != null) rowTop = rowBottom + 12;
-          currentRow = block.y;
+          currentRow = rowKey;
         }
         y = rowTop;
       } else {
@@ -67,7 +79,12 @@ class DocumentCanvasView extends StatelessWidget {
           }
         }
       }
-      final width = block.width - block.padding * 2;
+      final displayWidth = pairedParties && party ? partyWidth : block.width;
+      final displayX = pairedParties && party
+          ? template.margin +
+                partyBlocks.indexOf(block) * (partyWidth + partyGap)
+          : block.x;
+      final width = displayWidth - block.padding * 2;
       final rows = <Widget>[];
       var contentHeight = 0.0;
       double measure(String text, double width, TextStyle textStyle) {
@@ -89,9 +106,12 @@ class DocumentCanvasView extends StatelessWidget {
         List<double> weights, {
         bool heading = false,
         bool border = false,
+        bool category = false,
       }) {
         if (cells.isEmpty) return;
-        final textStyle = heading
+        final textStyle = category
+            ? style.copyWith(color: Colors.white, fontWeight: FontWeight.bold)
+            : heading
             ? style.copyWith(fontWeight: FontWeight.bold)
             : style;
         final total = weights.fold<double>(0, (sum, w) => sum + w);
@@ -114,7 +134,11 @@ class DocumentCanvasView extends StatelessWidget {
                     width: widths[i],
                     padding: const EdgeInsets.all(4),
                     decoration: BoxDecoration(
-                      color: heading && border ? const Color(0xFFF0F4F9) : null,
+                      color: category
+                          ? const Color(0xFF243A56)
+                          : heading && border
+                          ? const Color(0xFFF0F4F9)
+                          : null,
                       border: border
                           ? Border.all(
                               color: const Color(0xFFD8DEE8),
@@ -124,7 +148,7 @@ class DocumentCanvasView extends StatelessWidget {
                     ),
                     child: Text(
                       cells[i],
-                      textAlign: align,
+                      textAlign: category ? TextAlign.left : align,
                       style: textStyle,
                       textScaler: TextScaler.noScaling,
                     ),
@@ -145,9 +169,33 @@ class DocumentCanvasView extends StatelessWidget {
       )) {
         addRow(row.cells, row.widths);
       }
+      String? lastCategory;
       for (final raw in content['tables'] as List) {
         final table = raw as Map<String, dynamic>;
-        addRow([table['title'] as String], [1], heading: true);
+        final tableTitle = table['title'] as String;
+        if (clientLink && block.kind == 'table') {
+          final separator = tableTitle.indexOf(' / ');
+          final categoryName = separator < 0
+              ? tableTitle
+              : tableTitle.substring(0, separator);
+          final sectionName = separator < 0
+              ? ''
+              : tableTitle.substring(separator + 3);
+          final categoryKey = '${table['categoryId'] ?? categoryName}';
+          if (lastCategory != categoryKey) {
+            if (lastCategory != null) {
+              rows.add(const SizedBox(height: 8));
+              contentHeight += 8;
+            }
+            addRow([categoryName], [1], category: true);
+            lastCategory = categoryKey;
+          }
+          if (sectionName.isNotEmpty && sectionName != categoryName) {
+            addRow([sectionName], [1], heading: true);
+          }
+        } else {
+          addRow([tableTitle], [1], heading: true);
+        }
         final widths = (table['widths'] as List)
             .map((v) => (v as num).toDouble())
             .toList();
@@ -174,9 +222,9 @@ class DocumentCanvasView extends StatelessWidget {
       );
       children.add(
         Positioned(
-          left: block.x,
+          left: displayX,
           top: y,
-          width: block.width,
+          width: displayWidth,
           child: Padding(
             padding: EdgeInsets.all(block.padding),
             child: Column(

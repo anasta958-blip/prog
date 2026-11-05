@@ -185,7 +185,7 @@ void main() {
             'id': 'executor',
             'kind': 'executor',
             'x': 400,
-            'y': 30,
+            'y': 75,
             'width': 320,
             'height': 150,
           },
@@ -254,6 +254,10 @@ void main() {
     expect(find.text('Название: Тестовый заказчик'), findsOneWidget);
     expect(find.text('Название: Тестовый исполнитель'), findsOneWidget);
     expect(
+      tester.getTopLeft(find.text('Заказчик')).dy,
+      tester.getTopLeft(find.text('Исполнитель')).dy,
+    );
+    expect(
       tester.getTopLeft(find.text('Название: Тестовый заказчик')).dy,
       lessThan(
         tester.getTopLeft(find.byKey(const Key('client-quote-type-type-1'))).dy,
@@ -294,6 +298,46 @@ void main() {
 
     expect(currentRequests, 1);
     expect(find.text('Обновлённое предложение'), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('variants in one type have distinct headers', (tester) async {
+    final quote = _quote();
+    final type = (quote['proposalTypes'] as List).first as Map<String, dynamic>;
+    final variants = type['variants'] as List;
+    variants.add(
+      Map<String, Object>.from(variants.first as Map)
+        ..['id'] = 'variant-2'
+        ..['name'] = 'Базовый',
+    );
+    final client = MockClient(
+      (_) async => _ok({
+        'sessionToken': 'client-session',
+        'expiresAt': '2030-01-01T00:00:00Z',
+        'quote': quote,
+      }),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: QuoteClientAccessPage(
+          config: _config,
+          accessToken: 'test-link',
+          api: QuoteClientAccessApi(_config, client: client),
+        ),
+      ),
+    );
+    await _login(tester);
+
+    Material header(String id) => tester.widget<Material>(
+      find
+          .descendant(
+            of: find.byKey(Key('client-quote-variant-$id')),
+            matching: find.byType(Material),
+          )
+          .first,
+    );
+    expect(header('variant-1').color, isNot(header('variant-2').color));
+    expect((header('variant-2').shape as Border).left.width, 4);
     expect(tester.takeException(), isNull);
   });
 
