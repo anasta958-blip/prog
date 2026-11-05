@@ -117,9 +117,8 @@ internal static class DocumentCanvasPdfRenderer
                 }
 
                 if (data.Title.Length > 0) Row([data.Title], [1], true, false);
-                foreach (var row in PartyRows(data.Lines, width,
-                    text => text.Split('\n').Max(line => Graphics((int)(cursor / pageHeight)).MeasureString(line, font).Width),
-                    block.FlowFields && block.Kind is "client" or "executor"))
+                foreach (var row in PartyRows(data.Lines,
+                    block.Kind is "client" or "executor" ? block.EffectiveFieldColumns : 1))
                     Row(row.Cells, row.Widths, false, false);
                 foreach (var table in data.Tables)
                 {
@@ -136,23 +135,15 @@ internal static class DocumentCanvasPdfRenderer
     }
 
     internal static IReadOnlyList<(IReadOnlyList<string> Cells, IReadOnlyList<double> Widths)> PartyRows(
-        IReadOnlyList<string> lines, double width, Func<string, double> measure, bool flow)
+        IReadOnlyList<string> lines, int columns)
     {
         var rows = new List<(IReadOnlyList<string>, IReadOnlyList<double>)>();
-        var cells = new List<string>();
-        var widths = new List<double>();
-        var used = 0.0;
-        foreach (var line in lines)
+        for (var start = 0; start < lines.Count; start += columns)
         {
-            var size = flow ? Math.Min(width, measure(line) + 16) : width;
-            if (cells.Count > 0 && used + size > width)
-            {
-                rows.Add((cells, widths));
-                cells = []; widths = []; used = 0;
-            }
-            cells.Add(line); widths.Add(size); used += size;
+            rows.Add((Enumerable.Range(0, columns)
+                .Select(i => start + i < lines.Count ? lines[start + i] : "").ToArray(),
+                Enumerable.Repeat(1.0, columns).ToArray()));
         }
-        if (cells.Count > 0) rows.Add((cells, widths));
         return rows;
     }
 

@@ -118,10 +118,9 @@ class DocumentCanvasView extends StatelessWidget {
       if (title.isNotEmpty) addRow([title], [1], heading: true);
       for (final row in documentPartyRows(
         (content['lines'] as List).cast<String>(),
-        width,
-        style,
-        block.flowFields &&
-            (block.kind == 'client' || block.kind == 'executor'),
+        (block.kind == 'client' || block.kind == 'executor')
+            ? block.effectiveFieldColumns
+            : 1,
       )) {
         addRow(row.cells, row.widths);
       }

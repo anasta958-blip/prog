@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
+import 'package:flutter/gestures.dart';
 import 'document_field_picker.dart';
 import 'document_layout_models.dart';
 import 'document_template.dart';
@@ -21,7 +23,7 @@ class DocumentCanvasEditor extends StatefulWidget {
 }
 
 class _DocumentCanvasEditorState extends State<DocumentCanvasEditor> {
-  double zoomFactor = 1;
+  double zoomFactor = 1.25;
   final propertiesScroll = ScrollController();
   final paperScroll = ScrollController();
   @override
@@ -134,15 +136,21 @@ class _DocumentCanvasEditorState extends State<DocumentCanvasEditor> {
             constraints: BoxConstraints(
               maxHeight: math.max(120, panelHeight - 80),
             ),
-            child: Scrollbar(
-              controller: propertiesScroll,
-              thumbVisibility: true,
-              child: SingleChildScrollView(
-                key: const ValueKey('document-properties-scroll'),
+            child: Listener(
+              onPointerSignal: containScroll,
+              child: Scrollbar(
                 controller: propertiesScroll,
-                primary: false,
-                padding: const EdgeInsets.only(right: 12),
-                child: properties(),
+                thumbVisibility: true,
+                child: SingleChildScrollView(
+                  key: const ValueKey('document-properties-scroll'),
+                  controller: propertiesScroll,
+                  primary: false,
+                  physics: const AlwaysScrollableScrollPhysics(
+                    parent: ClampingScrollPhysics(),
+                  ),
+                  padding: const EdgeInsets.only(right: 12),
+                  child: properties(),
+                ),
               ),
             ),
           ),
@@ -151,24 +159,6 @@ class _DocumentCanvasEditorState extends State<DocumentCanvasEditor> {
           'Холст документа',
           Column(
             children: [
-              Wrap(
-                children: [
-                  IconButton(
-                    tooltip: 'Уменьшить',
-                    onPressed: () => zoom(.8),
-                    icon: const Icon(Icons.zoom_out),
-                  ),
-                  IconButton(
-                    tooltip: 'Увеличить',
-                    onPressed: () => zoom(1.25),
-                    icon: const Icon(Icons.zoom_in),
-                  ),
-                  TextButton(
-                    onPressed: () => setState(() => selectedId = null),
-                    child: const Text('Параметры страницы'),
-                  ),
-                ],
-              ),
               paperViewport(
                 bounded,
                 DocumentPaperSurface(
@@ -218,6 +208,29 @@ class _DocumentCanvasEditorState extends State<DocumentCanvasEditor> {
             ],
           ),
           expand: bounded,
+          actions: [
+            IconButton(
+              tooltip: 'Уменьшить',
+              onPressed: () => zoom(.8),
+              icon: const Icon(Icons.zoom_out),
+            ),
+            IconButton(
+              tooltip: 'Увеличить',
+              onPressed: () => zoom(1.25),
+              icon: const Icon(Icons.zoom_in),
+            ),
+            if (constraints.maxWidth >= 500)
+              TextButton(
+                onPressed: () => setState(() => selectedId = null),
+                child: const Text('Параметры страницы'),
+              )
+            else
+              IconButton(
+                tooltip: 'Параметры страницы',
+                onPressed: () => setState(() => selectedId = null),
+                icon: const Icon(Icons.tune),
+              ),
+          ],
         );
         if (!desktop) {
           final stacked = Column(
@@ -256,22 +269,45 @@ class _DocumentCanvasEditorState extends State<DocumentCanvasEditor> {
     setState(() => zoomFactor = (zoomFactor * factor).clamp(.25, 2.0));
   }
 
-  Widget paperViewport(bool bounded, Widget paper) => bounded
-      ? Expanded(
-          child: Scrollbar(
-            controller: paperScroll,
-            thumbVisibility: true,
-            child: SingleChildScrollView(
-              key: const ValueKey('document-paper-scroll'),
-              controller: paperScroll,
-              primary: false,
-              child: paper,
-            ),
+  Widget paperViewport(bool bounded, Widget paper) {
+    final viewport = Listener(
+      onPointerSignal: containScroll,
+      child: Scrollbar(
+        controller: paperScroll,
+        thumbVisibility: true,
+        child: SingleChildScrollView(
+          key: const ValueKey('document-paper-scroll'),
+          controller: paperScroll,
+          primary: false,
+          physics: const AlwaysScrollableScrollPhysics(
+            parent: ClampingScrollPhysics(),
           ),
-        )
-      : paper;
+          child: paper,
+        ),
+      ),
+    );
+    return bounded
+        ? Expanded(child: viewport)
+        : SizedBox(
+            height: MediaQuery.sizeOf(context).height * .7,
+            child: viewport,
+          );
+  }
 
-  Widget panel(String title, Widget child, {bool expand = false}) => Container(
+  void containScroll(PointerSignalEvent event) {
+    if (event is PointerScrollEvent) {
+      // The inner scrollable gets first refusal. At its edges, consume the
+      // wheel rather than letting an ancestor scroll the whole page.
+      GestureBinding.instance.pointerSignalResolver.register(event, (_) {});
+    }
+  }
+
+  Widget panel(
+    String title,
+    Widget child, {
+    bool expand = false,
+    List<Widget> actions = const [],
+  }) => Container(
     margin: const EdgeInsets.only(bottom: 12),
     padding: const EdgeInsets.all(14),
     decoration: BoxDecoration(
@@ -282,8 +318,18 @@ class _DocumentCanvasEditorState extends State<DocumentCanvasEditor> {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
-        const SizedBox(height: 14),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+            ...actions,
+          ],
+        ),
+        SizedBox(height: actions.isEmpty ? 14 : 8),
         if (expand) Expanded(child: child) else child,
       ],
     ),
@@ -517,16 +563,10 @@ class _DocumentCanvasEditorState extends State<DocumentCanvasEditor> {
         ] else
           LayoutBuilder(
             builder: (context, constraints) {
-              final style = DefaultTextStyle.of(context).style;
-              final rows = documentPartyRows(
-                [
-                  for (final code in block.fields)
-                    '${documentPartyFields.firstWhere((f) => f.code == code).label}: …',
-                ],
-                constraints.maxWidth,
-                style,
-                block.flowFields,
-              );
+              final rows = documentPartyRows([
+                for (final code in block.fields)
+                  '${documentPartyFields.firstWhere((f) => f.code == code).label}: …',
+              ], block.effectiveFieldColumns);
               return Column(
                 children: [
                   for (final row in rows)
@@ -582,12 +622,12 @@ class _DocumentCanvasEditorState extends State<DocumentCanvasEditor> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          DropdownButtonFormField<bool>(
-            initialValue: template.landscape,
-            decoration: const InputDecoration(labelText: 'Формат листа'),
-            items: const [
-              DropdownMenuItem(value: false, child: Text('A4, книжный')),
-              DropdownMenuItem(value: true, child: Text('A4, альбомный')),
+          AppSelectField<bool>(
+            value: template.landscape,
+            label: 'Формат листа',
+            options: const [
+              AppSelectOption(value: false, label: 'A4, книжный'),
+              AppSelectOption(value: true, label: 'A4, альбомный'),
             ],
             onChanged: (value) => change(() {
               template.landscape = value!;
@@ -603,12 +643,12 @@ class _DocumentCanvasEditorState extends State<DocumentCanvasEditor> {
               constrain(b);
             }
           }),
-          DropdownButtonFormField<String>(
-            initialValue: template.fontFamily,
-            decoration: const InputDecoration(labelText: 'Шрифт'),
-            items: const [
-              DropdownMenuItem(value: 'sans', child: Text('Без засечек')),
-              DropdownMenuItem(value: 'serif', child: Text('С засечками')),
+          AppSelectField<String>(
+            value: template.fontFamily,
+            label: 'Шрифт',
+            options: const [
+              AppSelectOption(value: 'sans', label: 'Без засечек'),
+              AppSelectOption(value: 'serif', label: 'С засечками'),
             ],
             onChanged: (v) => change(() => template.fontFamily = v!),
           ),
@@ -664,25 +704,29 @@ class _DocumentCanvasEditorState extends State<DocumentCanvasEditor> {
           36,
           (v) => block.fontSize = v,
         ),
-        DropdownButtonFormField<String>(
+        AppSelectField<String>(
           key: ValueKey(block.id),
-          initialValue: block.align,
-          decoration: const InputDecoration(labelText: 'Выравнивание'),
-          items: const [
-            DropdownMenuItem(value: 'left', child: Text('Слева')),
-            DropdownMenuItem(value: 'center', child: Text('По центру')),
-            DropdownMenuItem(value: 'right', child: Text('Справа')),
+          value: block.align,
+          label: 'Выравнивание',
+          options: const [
+            AppSelectOption(value: 'left', label: 'Слева'),
+            AppSelectOption(value: 'center', label: 'По центру'),
+            AppSelectOption(value: 'right', label: 'Справа'),
           ],
           onChanged: (v) => change(() => block.align = v!),
         ),
         const SizedBox(height: 12),
         if (block.kind == 'executor' || block.kind == 'client') ...[
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Заполнять по ширине'),
-            subtitle: const Text('Размещать поля рядом, если хватает места'),
-            value: block.flowFields,
-            onChanged: (value) => change(() => block.flowFields = value),
+          _NumberInput(
+            key: ValueKey('party-columns-${block.id}'),
+            value: block.effectiveFieldColumns.toDouble(),
+            label: 'Количество столбцов',
+            min: 1,
+            max: documentPartyFields.length.toDouble(),
+            integerOnly: true,
+            onChanged: (value) {
+              change(() => block.fieldColumns = value.toInt());
+            },
           ),
           DocumentFieldPicker(
             fields: documentPartyFieldsFor(block.kind),
@@ -757,25 +801,31 @@ class _NumberInput extends StatefulWidget {
     required this.min,
     required this.max,
     required this.onChanged,
+    this.integerOnly = false,
     super.key,
   });
   final String label;
   final double value, min, max;
   final ValueChanged<double> onChanged;
+  final bool integerOnly;
   @override
   State<_NumberInput> createState() => _NumberInputState();
 }
 
 class _NumberInputState extends State<_NumberInput> {
   late final controller = TextEditingController(
-    text: widget.value.toStringAsFixed(2),
+    text: widget.value.toStringAsFixed(widget.integerOnly ? 0 : 2),
   );
   final focus = FocusNode();
   @override
   void didUpdateWidget(_NumberInput oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!focus.hasFocus && oldWidget.value != widget.value) {
-      controller.text = widget.value.toStringAsFixed(2);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || focus.hasFocus) return;
+        final text = widget.value.toStringAsFixed(widget.integerOnly ? 0 : 2);
+        if (controller.text != text) controller.text = text;
+      });
     }
   }
 
@@ -791,18 +841,20 @@ class _NumberInputState extends State<_NumberInput> {
     controller: controller,
     focusNode: focus,
     decoration: InputDecoration(labelText: widget.label),
-    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+    keyboardType: TextInputType.numberWithOptions(decimal: !widget.integerOnly),
     validator: (text) {
-      final value = double.tryParse((text ?? '').replaceAll(',', '.'));
+      final value = parse(text ?? '');
       return value == null ||
               !value.isFinite ||
               value < widget.min ||
               value > widget.max
-          ? 'От ${widget.min} до ${widget.max}'
+          ? widget.integerOnly
+                ? 'Целое число от ${widget.min.toInt()} до ${widget.max.toInt()}'
+                : 'От ${widget.min} до ${widget.max}'
           : null;
     },
     onChanged: (text) {
-      final value = double.tryParse(text.replaceAll(',', '.'));
+      final value = parse(text);
       if (value != null &&
           value.isFinite &&
           value >= widget.min &&
@@ -812,4 +864,8 @@ class _NumberInputState extends State<_NumberInput> {
     },
     onTapOutside: (_) => focus.unfocus(),
   );
+
+  double? parse(String text) => widget.integerOnly
+      ? int.tryParse(text.trim())?.toDouble()
+      : double.tryParse(text.replaceAll(',', '.'));
 }

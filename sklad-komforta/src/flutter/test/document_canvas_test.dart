@@ -22,21 +22,21 @@ void main() {
       'Очень длинное поле с адресом объекта',
       'Телефон: 123',
     ];
-    final rows = documentPartyRows(
-      lines,
-      240,
-      const TextStyle(fontSize: 12),
-      true,
-    );
+    final rows = documentPartyRows(lines, 2);
     expect(rows.first.cells.length, 2);
     expect(rows.expand((r) => r.cells), lines);
     expect(
       rows.every((r) => r.widths.fold<double>(0, (a, b) => a + b) <= 240),
       isTrue,
     );
+    expect(documentPartyRows(lines, 1), hasLength(4));
+    final grid = documentPartyRows(lines, 3);
+    expect(grid.last.cells, ['Телефон: 123', '', '']);
     expect(
-      documentPartyRows(lines, 240, const TextStyle(fontSize: 12), false),
-      hasLength(4),
+      grid.every(
+        (row) => row.widths.every((w) => w == 1) && row.widths.length == 3,
+      ),
+      isTrue,
     );
     final block = DocumentBlock(
       id: 'table',
@@ -44,16 +44,20 @@ void main() {
       x: 30,
       y: 30,
       flowFields: true,
+      fieldColumns: 3,
       categoryOrder: ['b', 'a'],
     );
     final restored = DocumentBlock.fromJson(block.toJson());
     expect(restored.flowFields, isTrue);
+    expect(restored.effectiveFieldColumns, 3);
     expect(restored.categoryOrder, ['b', 'a']);
     expect(restored.categoryRank('new'), 2);
     final old = block.toJson()
       ..remove('flowFields')
+      ..remove('fieldColumns')
       ..remove('categoryOrder');
     expect(DocumentBlock.fromJson(old).flowFields, isFalse);
+    expect(DocumentBlock.fromJson(old).effectiveFieldColumns, 1);
     expect(DocumentBlock.fromJson(old).categoryOrder, isEmpty);
   });
   setUpAll(() async {
@@ -176,9 +180,11 @@ void main() {
           body: RepaintBoundary(
             key: capture,
             child: SingleChildScrollView(
-              child: DocumentCanvasEditor(
-                board: board,
-                onChanged: () => changes++,
+              child: Form(
+                child: DocumentCanvasEditor(
+                  board: board,
+                  onChanged: () => changes++,
+                ),
               ),
             ),
           ),
@@ -188,7 +194,7 @@ void main() {
     await tester.pumpAndSettle();
     final paper = find.byKey(const ValueKey('document-editor-paper'));
     final surface = tester.getRect(paper);
-    expect(surface.width, closeTo(board.template!.width, .01));
+    expect(surface.width, closeTo(board.template!.width * 1.25, .01));
     expect(
       surface.center.dx,
       closeTo(tester.getRect(find.byType(DocumentPaperSurface)).center.dx, .01),
@@ -268,13 +274,20 @@ void main() {
     await tester.pumpAndSettle();
     expect(block.y, greaterThan(start));
     expect(changes, greaterThan(0));
-    tester
-        .widget<SwitchListTile>(
-          find.widgetWithText(SwitchListTile, 'Заполнять по ширине'),
-        )
-        .onChanged!(true);
+    final columnsInput = find.descendant(
+      of: find.byKey(const ValueKey('party-columns-executor')),
+      matching: find.byType(TextFormField),
+    );
+    // Invalid input must not alter the grid or pass form validation.
+    final input = tester.widget<TextFormField>(columnsInput);
+    for (final invalid in ['0', '23', '2.5', 'abc', '']) {
+      expect(input.validator!(invalid), isNotNull);
+      input.onChanged!(invalid);
+    }
+    expect(block.effectiveFieldColumns, 1);
+    input.onChanged!('3');
     await tester.pumpAndSettle();
-    expect(block.flowFields, isTrue);
+    expect(block.effectiveFieldColumns, 3);
     expect(tester.takeException(), isNull);
     final touchStart = block.y;
     final touch = await tester.startGesture(
@@ -367,6 +380,10 @@ void main() {
     expect(pageScroll.offset, pageOffset);
     expect(tester.getRect(paper), fixedPaper);
     final paperViewport = find.byKey(const ValueKey('document-paper-scroll'));
+    expect(
+      tester.getCenter(find.text('Холст документа')).dy,
+      closeTo(tester.getCenter(find.byTooltip('Увеличить')).dy, 1),
+    );
     tester.binding.handlePointerEvent(
       PointerScrollEvent(
         position: tester.getCenter(paperViewport),
@@ -379,6 +396,50 @@ void main() {
       greaterThan(0),
     );
     expect(pageScroll.offset, pageOffset);
+    final inner = tester
+        .widget<SingleChildScrollView>(paperViewport)
+        .controller!;
+    inner.jumpTo(0);
+    await tester.pumpAndSettle();
+    tester.binding.handlePointerEvent(
+      PointerScrollEvent(
+        position: tester.getCenter(paperViewport),
+        scrollDelta: const Offset(0, -250),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(inner.offset, 0);
+    expect(pageScroll.offset, pageOffset);
+    pageScroll.jumpTo(pageOffset / 2);
+    await tester.pumpAndSettle();
+    inner.jumpTo(inner.position.maxScrollExtent);
+    await tester.pumpAndSettle();
+    tester.binding.handlePointerEvent(
+      PointerScrollEvent(
+        position: tester.getCenter(paperViewport),
+        scrollDelta: const Offset(0, 250),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(inner.offset, inner.position.maxScrollExtent);
+    expect(pageScroll.offset, pageOffset / 2);
+    for (final delta in [-250.0, 250.0]) {
+      final propertiesController = propsWidget.controller!;
+      propertiesController.jumpTo(
+        delta < 0 ? 0 : propertiesController.position.maxScrollExtent,
+      );
+      await tester.pumpAndSettle();
+      final before = propertiesController.offset;
+      tester.binding.handlePointerEvent(
+        PointerScrollEvent(
+          position: tester.getCenter(props),
+          scrollDelta: Offset(0, delta),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(propertiesController.offset, before);
+      expect(pageScroll.offset, pageOffset / 2);
+    }
     expect(tester.takeException(), isNull);
     tester.view.physicalSize = const Size(360, 900);
     await tester.pumpAndSettle();

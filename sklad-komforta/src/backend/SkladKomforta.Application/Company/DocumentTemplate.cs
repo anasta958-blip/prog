@@ -25,6 +25,7 @@ public sealed record DocumentTemplate(bool Landscape, double Margin, double Font
                 || !Between(b.FontSize, 8, 36) || !Between(b.Padding, 0, 24) || b.Align is not ("left" or "center" or "right")
                 || b.Fields is null || b.Fields.Count > PartyFields.Count
                 || b.Fields.Distinct().Count() != b.Fields.Count || b.Fields.Any(f => !PartyFields.Contains(f))
+                || b.FieldColumns is { } columns && (columns < 1 || columns > PartyFields.Count)
                 || b.ColumnWidths is null || b.ColumnWidths.Count > 1000
                 || b.ColumnWidths.Any(p => p.Key.Length > 200 || !Between(p.Value, .2, 20))
                 || b.CategoryOrder is { } order && (order.Count > 1000 || order.Distinct().Count() != order.Count)) throw Invalid();
@@ -41,8 +42,9 @@ public sealed record DocumentTemplate(bool Landscape, double Margin, double Font
 public sealed record DocumentBlock(string Id, string Kind, double X, double Y, double Width,
     double Height, double FontSize, double Padding, string Align, IReadOnlyList<string> Fields,
     IReadOnlyDictionary<string, double> ColumnWidths, bool FlowFields = false,
-    IReadOnlyList<Guid>? CategoryOrder = null)
+    IReadOnlyList<Guid>? CategoryOrder = null, int? FieldColumns = null)
 {
+    public int EffectiveFieldColumns => FieldColumns ?? (FlowFields ? 2 : 1);
     public int CategoryRank(Guid? id) => CategoryOrder is null ? 0 :
         CategoryOrder.Select((value, index) => (value, index)).Where(p => p.value == id)
             .Select(p => p.index).DefaultIfEmpty(CategoryOrder.Count).First();

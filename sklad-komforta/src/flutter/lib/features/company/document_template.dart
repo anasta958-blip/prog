@@ -102,6 +102,7 @@ class DocumentBlock {
     this.padding = 10,
     this.align = 'left',
     this.flowFields = false,
+    this.fieldColumns,
     List<String>? categoryOrder,
     List<String>? fields,
     Map<String, double>? columnWidths,
@@ -113,6 +114,8 @@ class DocumentBlock {
   double x, y, width, height, fontSize, padding;
   String align;
   bool flowFields;
+  int? fieldColumns;
+  int get effectiveFieldColumns => fieldColumns ?? (flowFields ? 2 : 1);
   List<String> categoryOrder;
   int categoryRank(String? id) {
     final index = categoryOrder.indexOf(id ?? '');
@@ -132,6 +135,10 @@ class DocumentBlock {
     padding: (json['padding'] as num?)?.toDouble() ?? 10,
     align: json['align'] as String? ?? 'left',
     flowFields: json['flowFields'] == true,
+    fieldColumns: (json['fieldColumns'] as num?)?.toInt().clamp(
+      1,
+      documentPartyFields.length,
+    ),
     categoryOrder: (json['categoryOrder'] as List? ?? [])
         .cast<String>()
         .toList(),
@@ -151,6 +158,7 @@ class DocumentBlock {
     'padding': padding,
     'align': align,
     'flowFields': flowFields,
+    'fieldColumns': effectiveFieldColumns,
     'categoryOrder': categoryOrder,
     'fields': fields,
     'columnWidths': columnWidths,

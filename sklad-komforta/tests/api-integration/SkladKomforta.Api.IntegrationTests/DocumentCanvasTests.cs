@@ -52,12 +52,16 @@ public sealed class DocumentCanvasTests
     public void PartyFieldsFlowAcrossWidthAndWrapWithoutLosingValues()
     {
         string[] lines = ["ИНН: 123", "КПП: 456", new string('Ж', 100), "Телефон: 123"];
-        var rows = DocumentCanvasPdfRenderer.PartyRows(lines, 220, s => s.Length * 8, true);
+        var rows = DocumentCanvasPdfRenderer.PartyRows(lines, 2);
         Assert.Equal(2, rows[0].Cells.Count);
         Assert.Equal(lines, rows.SelectMany(r => r.Cells));
-        Assert.All(rows, row => Assert.True(row.Widths.Sum() <= 220));
-        Assert.Equal(4, DocumentCanvasPdfRenderer.PartyRows(lines, 220, s => s.Length * 8, false).Count);
-        var template = Template(Block("client") with { FlowFields = true, Fields = ["inn", "kpp"] });
+        Assert.All(rows, row => Assert.Equal([1.0, 1.0], row.Widths));
+        Assert.Equal(4, DocumentCanvasPdfRenderer.PartyRows(lines, 1).Count);
+        var grid = DocumentCanvasPdfRenderer.PartyRows(lines, 3);
+        Assert.Equal([lines[3], "", ""], grid[1].Cells);
+        Assert.Equal([1.0, 1.0, 1.0], grid[1].Widths);
+        Assert.Throws<IdentityException>(() => Template(Block() with { FieldColumns = 0 }).Validate());
+        var template = Template(Block("client") with { FieldColumns = 3, Fields = ["inn", "kpp"] });
         var content = DocumentCanvasBuilder.Build(template,
             new Dictionary<string, string?> { ["inn"] = "123", ["kpp"] = "456" }, new Dictionary<string, string?>(), [], []);
         Assert.True(DocumentCanvasPdfRenderer.Render("Реквизиты", [content]).Length > 1000);

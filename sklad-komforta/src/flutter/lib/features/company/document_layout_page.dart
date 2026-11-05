@@ -174,34 +174,73 @@ final class _DocumentLayoutPageState extends State<DocumentLayoutPage> {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                  const SizedBox(height: 16),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: [
-                      ChoiceChip(
-                        label: const Text('КП / ПКП'),
-                        selected: !order,
-                        onSelected: saving
-                            ? null
-                            : (_) => _select(nextOrder: false),
-                      ),
-                      ChoiceChip(
-                        label: const Text('Комплектация'),
-                        selected: order,
-                        onSelected: saving
-                            ? null
-                            : (_) => _select(nextOrder: true),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    order
-                        ? 'Настройте макет и состав PDF комплектации.'
-                        : 'Настройте общий макет клиентской ссылки и PDF КП/ПКП.',
+                  if (widget.showTitle) const SizedBox(height: 12),
+                  LayoutBuilder(
+                    builder: (context, constraints) => Wrap(
+                      spacing: 10,
+                      runSpacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        ChoiceChip(
+                          label: const Text('КП / ПКП'),
+                          selected: !order,
+                          onSelected: saving
+                              ? null
+                              : (_) => _select(nextOrder: false),
+                        ),
+                        ChoiceChip(
+                          label: const Text('Комплектация'),
+                          selected: order,
+                          onSelected: saving
+                              ? null
+                              : (_) => _select(nextOrder: true),
+                        ),
+                        if (available.isNotEmpty) ...[
+                          SizedBox(
+                            width: constraints.maxWidth >= 1000
+                                ? (constraints.maxWidth - 800).clamp(
+                                    240.0,
+                                    480.0,
+                                  )
+                                : constraints.maxWidth.clamp(0.0, 320.0),
+                            child: AbsorbPointer(
+                              absorbing: saving,
+                              child: AppSelectField<String>(
+                                value: boardId,
+                                label: 'Канбан',
+                                isDense: true,
+                                options: available
+                                    .map(
+                                      (item) => AppSelectOption(
+                                        value: item.id,
+                                        label: item.name,
+                                      ),
+                                    )
+                                    .toList(),
+                                onChanged: (value) => _select(nextBoard: value),
+                              ),
+                            ),
+                          ),
+                          FilledButton.icon(
+                            onPressed: saving || board == null ? null : _save,
+                            icon: const Icon(Icons.save_outlined),
+                            label: Text(
+                              saving ? 'Сохранение…' : 'Сохранить настройки',
+                            ),
+                          ),
+                          if (saved) const Text('Настройки сохранены'),
+                          if (dirty) const Text('Есть несохранённые изменения'),
+                        ],
+                      ],
+                    ),
                   ),
                   const SizedBox(height: 8),
+                  Text(
+                    order
+                        ? 'Макет PDF комплектации.'
+                        : 'Макет ссылки и PDF. Выбранные поля будут доступны клиенту, включая закупочные данные, если вы их включите.',
+                    style: const TextStyle(fontSize: 12),
+                  ),
 
                   if (error != null)
                     Padding(
@@ -222,28 +261,6 @@ final class _DocumentLayoutPageState extends State<DocumentLayoutPage> {
                       child: Text('Канбаны этого типа не настроены.'),
                     ),
                   if (available.isNotEmpty) ...[
-                    const SizedBox(height: 20),
-                    AbsorbPointer(
-                      absorbing: saving,
-                      child: AppSelectField<String>(
-                        value: boardId,
-                        label: 'Канбан',
-                        options: available
-                            .map(
-                              (item) => AppSelectOption(
-                                value: item.id,
-                                label: item.name,
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (value) => _select(nextBoard: value),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    if (!order)
-                      const Text(
-                        'Внимание: выбранные поля КП/ПКП будут доступны внешнему клиенту, в том числе закупочные данные, если вы их включите.',
-                      ),
                     if (board?.categories.isEmpty ?? false)
                       const Padding(
                         padding: EdgeInsets.all(20),
@@ -256,24 +273,8 @@ final class _DocumentLayoutPageState extends State<DocumentLayoutPage> {
                           'Выберите канбан, чтобы открыть холст документа.',
                         ),
                       ),
-                    const SizedBox(height: 16),
-                    Wrap(
-                      spacing: 12,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        FilledButton.icon(
-                          onPressed: saving || board == null ? null : _save,
-                          icon: const Icon(Icons.save_outlined),
-                          label: Text(
-                            saving ? 'Сохранение…' : 'Сохранить настройки',
-                          ),
-                        ),
-                        if (saved) const Text('Настройки сохранены'),
-                        if (dirty) const Text('Есть несохранённые изменения'),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
                   ],
+                  const SizedBox(height: 12),
                 ],
               ),
             ),

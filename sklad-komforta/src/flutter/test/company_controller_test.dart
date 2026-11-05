@@ -40,6 +40,31 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Конструктор ссылки и PDF'), findsOneWidget);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    for (final width in [1600.0, 360.0, 800.0]) {
+      tester.view.physicalSize = Size(width, 900);
+      await tester.pumpAndSettle();
+      if (width == 1600) {
+        expect(
+          tester.getCenter(find.byType(AppSelectField<String>)).dy,
+          closeTo(
+            tester
+                .getCenter(
+                  find.ancestor(
+                    of: find.text('Сохранить настройки'),
+                    matching: find.byWidgetPredicate(
+                      (widget) => widget is FilledButton,
+                    ),
+                  ),
+                )
+                .dy,
+            2,
+          ),
+        );
+      }
+      expect(tester.takeException(), isNull);
+    }
     tester
         .widget<AppSelectField<String>>(find.byType(AppSelectField<String>))
         .onChanged!('board');
