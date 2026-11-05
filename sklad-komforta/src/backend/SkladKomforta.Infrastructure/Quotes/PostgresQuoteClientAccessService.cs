@@ -568,6 +568,7 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
         }
 
         var layouts = await PostgresDocumentLayoutService.ReadFieldsAsync(connection, workflowId, cancellationToken);
+        var template = await PostgresDocumentLayoutService.ReadTemplateAsync(connection, workflowId, cancellationToken);
 
         var types = new List<MutableClientType>();
         var typesById = new Dictionary<Guid, MutableClientType>();
@@ -626,7 +627,9 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
             while (await reader.ReadAsync(cancellationToken))
             {
                 var item = new MutableClientCategory(reader.GetGuid(0), reader.GetString(2));
+                item.CatalogCategoryId = reader.IsDBNull(3) ? null : reader.GetGuid(3);
                 if (!reader.IsDBNull(3) && layouts.TryGetValue(reader.GetGuid(3), out var fields)) item.Fields = fields;
+                if (template is not null) item.Fields ??= [];
                 variantsById[reader.GetGuid(1)].Categories.Add(item);
                 categoriesById[item.Id] = item;
             }
@@ -692,11 +695,45 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
             }
         }
 
+        var details = types.Select(item => item.ToDetails()).ToArray();
+        if (template is not null)
+        {
+            IReadOnlyDictionary<string, string?> clientValues = new Dictionary<string, string?>();
+            IReadOnlyDictionary<string, string?> executorValues = new Dictionary<string, string?>();
+            await using (var command = new NpgsqlCommand("""
+                SELECT to_jsonb(client)::text, to_jsonb(company)::text
+                FROM quotes AS quote
+                JOIN companies AS company ON company.id = quote.executor_company_id
+                LEFT JOIN clients AS client ON client.id = quote.client_id
+                WHERE quote.id = @quote
+                """, connection))
+            {
+                command.Parameters.AddWithValue("quote", quoteId);
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                if (await reader.ReadAsync(cancellationToken))
+                {
+                    using var clientJson = JsonDocument.Parse(reader.IsDBNull(0) ? "{}" : reader.GetString(0));
+                    using var executorJson = JsonDocument.Parse(reader.GetString(1));
+                    clientValues = DocumentCanvasBuilder.JsonParty(clientJson.RootElement);
+                    executorValues = DocumentCanvasBuilder.JsonParty(executorJson.RootElement);
+                }
+            }
+            details = details.Select(type => type with { Variants = type.Variants.Select(variant => variant with {
+                Document = DocumentCanvasBuilder.Build(template, clientValues, executorValues,
+                    variant.Categories.SelectMany(category => category.Sections.Where(section => section.Columns is { Count: > 0 })
+                        .Select(section => new DocumentCanvasTable($"{category.Name} / {section.Name}",
+                            section.Columns!.Select(c => c.Label).ToArray(),
+                            DocumentCanvasBuilder.Widths(template, categoriesById[category.Id].CatalogCategoryId, section.Columns!.Select(c => c.Code)),
+                            section.Positions.Select(p => p.Cells ?? (IReadOnlyList<string>)[]).ToArray()))).ToArray(),
+                    DocumentCanvasBuilder.Totals(variant.Subtotal, variant.VatAmount)),
+                Categories = []
+            }).ToArray() }).ToArray();
+        }
         return new QuoteClientView(
-            header.Id, header.Kind, header.Title, header.ExecutorName, header.SelectionMode,
+            header.Id, header.Kind, header.Title, template is null ? header.ExecutorName : "", header.SelectionMode,
             header.AdditionalInformation, header.SelectedProposalTypeId,
-            types.Select(item => item.ToDetails()).ToArray(), header.SubmittedAt, header.UpdatedAt,
-            header.ClientName);
+            details, header.SubmittedAt, header.UpdatedAt,
+            template is null ? header.ClientName : null);
     }
 
     private async Task<NpgsqlConnection> OpenTenantConnectionAsync(
@@ -821,6 +858,7 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
     private sealed class MutableClientCategory(Guid id, string name)
     {
         public Guid Id { get; } = id;
+        public Guid? CatalogCategoryId { get; set; }
         public IReadOnlyList<KanbanFieldSummary>? Fields { get; set; }
         public List<MutableClientSection> Sections { get; } = [];
         public QuoteClientCategory ToDetails() =>

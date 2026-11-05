@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../company/document_canvas_view.dart';
 import 'package:sklad_komforta_app/core/widgets/collapse_toggle.dart';
 import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
 import 'package:flutter/services.dart';
@@ -428,14 +429,17 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
         ),
       ),
       const SizedBox(height: 22),
-      Wrap(
-        spacing: 40,
-        runSpacing: 12,
-        children: [
-          _metadata('Заказчик', value.clientName),
-          _metadata('Исполнитель', value.executorName),
-        ],
-      ),
+      if (!value.proposalTypes.any(
+        (type) => type.variants.any((variant) => variant.document != null),
+      ))
+        Wrap(
+          spacing: 40,
+          runSpacing: 12,
+          children: [
+            _metadata('Заказчик', value.clientName),
+            _metadata('Исполнитель', value.executorName),
+          ],
+        ),
       if (value.additionalInformation case final text?
           when text.trim().isNotEmpty) ...[
         const SizedBox(height: 20),
@@ -731,11 +735,13 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
             ),
           ),
         ),
-        if (!collapsed)
+        if (!collapsed && variant.document != null)
+          DocumentCanvasView(document: variant.document!),
+        if (!collapsed && variant.document == null)
           for (final category in variant.categories)
             for (final section in category.sections)
               _positions(category.name, section),
-        if (!collapsed)
+        if (!collapsed && variant.document == null)
           Container(
             padding: const EdgeInsets.all(14),
             decoration: const BoxDecoration(

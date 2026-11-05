@@ -10,6 +10,7 @@ namespace SkladKomforta.Infrastructure.Company;
 
 internal sealed class PostgresDocumentLayoutService(IDatabaseConnectionFactory factory) : IDocumentLayoutService
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     public async Task<IReadOnlyList<DocumentLayoutBoard>> GetAsync(CancellationToken token)
     {
         await using var connection = await factory.OpenTenantConnectionAsync(token);
@@ -28,16 +29,19 @@ internal sealed class PostgresDocumentLayoutService(IDatabaseConnectionFactory f
             result.Add(new(board.Id, board.Name, board.Kind, categories.Select(category => new DocumentLayoutCategory(
                 category.CategoryId, category.Name, category.Fields,
                 selected.TryGetValue(category.CategoryId, out var codes)
-                    ? codes.Where(code => category.Fields.Any(field => field.Code == code)).ToArray() : null)).ToArray()));
+                    ? codes.Where(code => category.Fields.Any(field => field.Code == code)).ToArray() : null)).ToArray(),
+                await ReadTemplateAsync(connection, board.Id, token)));
         }
         return result;
     }
 
     public async Task SaveAsync(Guid actorId, Guid workflowId, SaveDocumentLayout request, CancellationToken token)
     {
+        request.Template?.Validate();
         var board = (await GetAsync(token)).FirstOrDefault(item => item.WorkflowId == workflowId)
             ?? throw new IdentityException(404, "document_layout_board_missing", "Канбан не найден.");
-        if (request.Categories is null || request.Categories.Select(item => item.CategoryId).Distinct().Count() != request.Categories.Count)
+        if (request.Categories is null || request.Categories.Any(item => item is null)
+            || request.Categories.Select(item => item.CategoryId).Distinct().Count() != request.Categories.Count)
             throw new IdentityException(400, "document_layout_invalid", "Категории не должны повторяться.");
         foreach (var item in request.Categories)
         {
@@ -49,6 +53,15 @@ internal sealed class PostgresDocumentLayoutService(IDatabaseConnectionFactory f
         }
         await using var connection = await factory.OpenTenantConnectionAsync(token);
         await using var transaction = await connection.BeginTransactionAsync(token);
+        if (request.Template is not null)
+        {
+            await using var template = connection.CreateCommand();
+            template.Transaction = transaction;
+            template.CommandText = "INSERT INTO document_templates (workflow_id, template) VALUES (@workflow, CAST(@template AS jsonb)) ON CONFLICT (workflow_id) DO UPDATE SET template = EXCLUDED.template, updated_at = now()";
+            Add(template, "workflow", workflowId);
+            Add(template, "template", JsonSerializer.Serialize(request.Template, JsonOptions));
+            await template.ExecuteNonQueryAsync(token);
+        }
         foreach (var item in request.Categories)
         {
             await using var command = connection.CreateCommand();
@@ -76,6 +89,21 @@ internal sealed class PostgresDocumentLayoutService(IDatabaseConnectionFactory f
     {
         await using var connection = await factory.OpenTenantConnectionAsync(token);
         return await ReadFieldsAsync(connection, workflowId, token);
+    }
+
+    public async Task<DocumentTemplate?> GetTemplateAsync(Guid workflowId, CancellationToken token)
+    {
+        await using var connection = await factory.OpenTenantConnectionAsync(token);
+        return await ReadTemplateAsync(connection, workflowId, token);
+    }
+
+    internal static async Task<DocumentTemplate?> ReadTemplateAsync(DbConnection connection, Guid workflowId, CancellationToken token)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT template::text FROM document_templates WHERE workflow_id = @workflow";
+        Add(command, "workflow", workflowId);
+        return await command.ExecuteScalarAsync(token) is string json
+            ? JsonSerializer.Deserialize<DocumentTemplate>(json, JsonOptions) : null;
     }
 
     internal static async Task<IReadOnlyDictionary<Guid, IReadOnlyList<KanbanFieldSummary>>> ReadFieldsAsync(

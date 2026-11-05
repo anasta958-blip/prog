@@ -127,7 +127,8 @@ internal sealed class PostgresKanbanService(
             categories.Select(category => layouts.TryGetValue(category.CategoryId, out var fields)
                 ? category with { DocumentFields = fields } : category).ToArray(),
             header.Specialization,
-            await ReadOrderOptionsAsync(connection, boardId, "object_type", cancellationToken));
+            await ReadOrderOptionsAsync(connection, boardId, "object_type", cancellationToken),
+            await Company.PostgresDocumentLayoutService.ReadTemplateAsync(connection, boardId, cancellationToken));
     }
 
     /// <summary>Значения справочника канбана комплектации в заданном порядке.</summary>

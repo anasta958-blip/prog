@@ -7,6 +7,7 @@ using SkladKomforta.Application.Company;
 using SkladKomforta.Application.Kanban;
 using SkladKomforta.Application.Orders;
 using SkladKomforta.Infrastructure.Quotes;
+using SkladKomforta.Infrastructure.Company;
 
 namespace SkladKomforta.Infrastructure.Orders;
 
@@ -34,7 +35,10 @@ internal sealed class OrderPdfService(
 
         var employees = employeesTask.Result;
         var executor = companiesTask.Result.FirstOrDefault(item => item.Id == order.ExecutorCompanyId);
-        var content = OrderPdfDocumentRenderer.Render(
+        var template = await layouts.GetTemplateAsync(boardId, cancellationToken);
+        var fields = await layouts.GetFieldsAsync(boardId, cancellationToken);
+        var content = template is not null ? DocumentCanvasPdfRenderer.Render(order.Title,
+            [DocumentCanvasBuilder.Order(template, order, clientsTask.Result.FirstOrDefault(c => c.Id == order.ClientId), executor, fields)]) : OrderPdfDocumentRenderer.Render(
             order,
             boardTask.Result,
             clientsTask.Result.FirstOrDefault(item => item.Id == order.ClientId)?.Name,
@@ -42,7 +46,7 @@ internal sealed class OrderPdfService(
             employees.FirstOrDefault(item => item.UserId == order.ManagerUserId)?.DisplayName,
             employees.FirstOrDefault(item => item.UserId == order.SalesHeadUserId)?.DisplayName,
             cardTask.Result.Number,
-            await layouts.GetFieldsAsync(boardId, cancellationToken));
+            fields);
 
         var invalid = Path.GetInvalidFileNameChars().ToHashSet();
         var title = new string(order.Title.Where(character => !invalid.Contains(character)).ToArray()).Trim();

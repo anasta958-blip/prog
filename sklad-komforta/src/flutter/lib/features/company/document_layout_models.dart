@@ -1,3 +1,5 @@
+import 'document_template.dart';
+
 final class DocumentLayoutField {
   const DocumentLayoutField(this.code, this.label);
   final String code;
@@ -28,7 +30,14 @@ final class DocumentLayoutCategory {
 }
 
 final class DocumentLayoutBoard {
-  DocumentLayoutBoard(this.id, this.name, this.specialization, this.categories);
+  DocumentLayoutBoard(
+    this.id,
+    this.name,
+    this.specialization,
+    this.categories, {
+    this.template,
+  });
+  DocumentTemplate? template;
   final String id;
   final String name;
   final String specialization;
@@ -44,9 +53,15 @@ final class DocumentLayoutBoard {
                   DocumentLayoutCategory.fromJson(item as Map<String, dynamic>),
             )
             .toList(),
+        template: json['template'] is Map<String, dynamic>
+            ? DocumentTemplate.fromJson(
+                json['template'] as Map<String, dynamic>,
+              )
+            : null,
       );
   Map<String, dynamic> toJson() => {
     'categories': categories.map((item) => item.toJson()).toList(),
+    'template': template?.toJson(),
   };
 }
 

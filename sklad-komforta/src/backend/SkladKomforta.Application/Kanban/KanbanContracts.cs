@@ -72,7 +72,8 @@ public sealed record KanbanBoard(
     IReadOnlyList<KanbanTransitionSummary> Transitions,
     IReadOnlyList<KanbanCategorySummary> Categories,
     string? Specialization = null,
-    IReadOnlyList<string>? ObjectTypes = null);
+    IReadOnlyList<string>? ObjectTypes = null,
+    SkladKomforta.Application.Company.DocumentTemplate? DocumentTemplate = null);
 
 /// <summary>Одна универсальная карточка рабочего канбана.</summary>
 /// <param name="UpdatedBy">Кто последним изменил содержимое карточки (не перенос).</param>

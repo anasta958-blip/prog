@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../company/document_canvas_preview.dart';
+import '../company/document_canvas_view.dart';
 import 'package:sklad_komforta_app/features/company/document_preview_fields.dart';
 import 'package:sklad_komforta_app/core/widgets/preview_table.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_models.dart';
@@ -24,6 +26,8 @@ final class OrderPreviewPage extends StatelessWidget {
     this.managerName,
     this.salesHeadName,
     this.cardNumber,
+    this.clientData,
+    this.executorData,
     super.key,
   });
 
@@ -34,9 +38,34 @@ final class OrderPreviewPage extends StatelessWidget {
   final String? managerName;
   final String? salesHeadName;
   final int? cardNumber;
+  final Map<String, dynamic>? clientData, executorData;
 
   @override
   Widget build(BuildContext context) {
+    if (board.documentTemplate != null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Предпросмотр комплектации')),
+        body: ListView(
+          padding: const EdgeInsets.all(18),
+          children: [
+            Text(order.title),
+            DocumentCanvasView(
+              document: documentCanvasPreview(
+                board: board,
+                categories: order.categories,
+                client: clientData ?? {'name': clientName},
+                executor: executorData ?? {'name': executorName},
+                order: true,
+                reorderIds: order.reorderPositionIds,
+                totals: [
+                  'Позиций: ${order.categories.expand((c) => c.sections).fold<int>(0, (sum, s) => sum + s.positions.length)}',
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     final subtitle = [
       if (cardNumber != null) '№ $cardNumber',
       if (order.objectType?.trim().isNotEmpty ?? false)

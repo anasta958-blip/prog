@@ -310,6 +310,7 @@ final class QuoteClientVariant {
     required this.vatAmount,
     required this.total,
     required this.categories,
+    this.document,
   });
 
   final String id;
@@ -320,6 +321,7 @@ final class QuoteClientVariant {
   final double vatAmount;
   final double total;
   final List<QuoteClientCategory> categories;
+  final Map<String, dynamic>? document;
 
   factory QuoteClientVariant.fromJson(Map<String, dynamic> json) =>
       QuoteClientVariant(
@@ -330,6 +332,7 @@ final class QuoteClientVariant {
         subtotal: (json['subtotal'] as num).toDouble(),
         vatAmount: (json['vatAmount'] as num).toDouble(),
         total: (json['total'] as num).toDouble(),
+        document: json['document'] as Map<String, dynamic>?,
         categories: (json['categories'] as List<dynamic>? ?? const [])
             .map(
               (item) =>

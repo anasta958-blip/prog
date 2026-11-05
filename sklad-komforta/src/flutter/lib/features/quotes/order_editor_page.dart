@@ -342,6 +342,11 @@ final class _OrderEditorPageState extends State<OrderEditorPage> {
         builder: (_) => OrderPreviewPage(
           order: order,
           board: widget.board,
+          clientData: controller.clients
+              .where((c) => c.id == order.clientId)
+              .firstOrNull
+              ?.toJson(),
+          executorData: executor?.toJson(),
           clientName: controller.clients
               .where((item) => item.id == order.clientId)
               .firstOrNull

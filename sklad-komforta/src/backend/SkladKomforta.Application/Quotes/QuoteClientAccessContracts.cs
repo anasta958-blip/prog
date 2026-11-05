@@ -84,7 +84,8 @@ public sealed record QuoteClientVariant(
     decimal Subtotal,
     decimal VatAmount,
     decimal Total,
-    IReadOnlyList<QuoteClientCategory> Categories);
+    IReadOnlyList<QuoteClientCategory> Categories,
+    DocumentCanvasContent? Document = null);
 
 public sealed record QuoteClientCategory(
     Guid Id,

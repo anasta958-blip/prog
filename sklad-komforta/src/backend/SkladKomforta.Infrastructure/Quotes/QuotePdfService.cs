@@ -6,6 +6,7 @@ using PdfSharp.Fonts;
 using SkladKomforta.Application.Company;
 using SkladKomforta.Application.Kanban;
 using SkladKomforta.Application.Quotes;
+using SkladKomforta.Infrastructure.Company;
 
 namespace SkladKomforta.Infrastructure.Quotes;
 
@@ -43,14 +44,19 @@ internal sealed class QuotePdfService(
         var manager = employees.FirstOrDefault(item => item.UserId == quote.ManagerUserId)?.DisplayName;
         var salesHead = employees.FirstOrDefault(item => item.UserId == quote.SalesHeadUserId)?.DisplayName;
 
-        var content = QuotePdfDocumentRenderer.Render(
+        var template = await layouts.GetTemplateAsync(boardId, cancellationToken);
+        var fields = await layouts.GetFieldsAsync(boardId, cancellationToken);
+        var content = template is not null ? DocumentCanvasPdfRenderer.Render(quote.Title,
+            quote.ProposalTypes.OrderBy(t => t.SortOrder).SelectMany(t => t.Variants.OrderBy(v => v.SortOrder)
+                .Select(v => DocumentCanvasBuilder.Quote(template, v, client, executor, fields)
+                    with { Caption = $"{quote.Title} / {t.Name} / {v.Name}" })).ToArray()) : QuotePdfDocumentRenderer.Render(
             quote,
             client,
             executor,
             manager,
             salesHead,
             cardTask.Result.Number,
-            await layouts.GetFieldsAsync(boardId, cancellationToken));
+            fields);
         // Для печати одного варианта или одного типа в имя файла добавляются их названия.
         var printedType = variantId is null && proposalTypeId is null ? null : quote.ProposalTypes[0];
         var printedVariant = variantId is null ? null : printedType!.Variants[0];
@@ -557,12 +563,17 @@ internal sealed class QuotePdfFontResolver : IFontResolver
     }
 
     public FontResolverInfo ResolveTypeface(string familyName, bool isBold, bool isItalic) =>
-        new(isBold ? BoldFace : RegularFace);
+        new(familyName == "QuoteSerif" ? (isBold ? "QuoteSerif-Bold" : "QuoteSerif-Regular") : isBold ? BoldFace : RegularFace);
 
     public byte[]? GetFont(string faceName)
     {
-        var bold = faceName == BoldFace;
-        var path = ResolveFontPath(bold);
+        var bold = faceName.EndsWith("-Bold", StringComparison.Ordinal);
+        var serif = faceName.StartsWith("QuoteSerif", StringComparison.Ordinal);
+        var path = serif
+            ? (OperatingSystem.IsWindows()
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Fonts), bold ? "timesbd.ttf" : "times.ttf")
+                : $"/usr/share/fonts/truetype/noto/NotoSerif-{(bold ? "Bold" : "Regular")}.ttf")
+            : ResolveFontPath(bold);
         return path == null ? null : File.ReadAllBytes(path);
     }
 

@@ -40,18 +40,52 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Конструктор ссылки и PDF'), findsOneWidget);
-    await tester.tap(find.byType(SwitchListTile));
+    tester
+        .widget<AppSelectField<String>>(find.byType(AppSelectField<String>))
+        .onChanged!('board');
+    await tester.pumpAndSettle();
+    expect(find.byType(SwitchListTile), findsNothing);
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('canvas-block-table')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('canvas-block-table')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(
+      find.widgetWithText(ExpansionTile, 'Оборудование'),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ExpansionTile, 'Оборудование'));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.byTooltip('Переместить выше').last);
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Переместить выше').last);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Комплектация'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Комплектация'));
+    await tester.pumpAndSettle();
+    expect(find.text('Изменения не сохранены'), findsOneWidget);
+    await tester.tap(find.text('Остаться'));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Сохранить настройки'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Сохранить настройки'));
     await tester.pumpAndSettle();
     expect(api.savedLayout?.categories.single.codes, ['quantity', 'name']);
+    expect(api.savedLayout?.template?.blocks.length, 4);
     expect(find.text('Настройки сохранены'), findsOneWidget);
+    await tester.ensureVisible(find.byTooltip('Переместить выше').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Переместить выше').last);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Комплектация'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Комплектация'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Выйти без сохранения'));
+    await tester.pumpAndSettle();
+    expect(find.text('Канбаны этого типа не настроены.'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
     controller.dispose();

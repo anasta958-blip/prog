@@ -577,6 +577,7 @@ final class KanbanBoard {
     required this.transitions,
     required this.categories,
     this.objectTypes = const [],
+    this.documentTemplate,
   });
 
   final String id;
@@ -589,6 +590,7 @@ final class KanbanBoard {
 
   /// Канбан комплектации: справочник «Тип объекта».
   final List<String> objectTypes;
+  final Map<String, dynamic>? documentTemplate;
 
   factory KanbanBoard.fromJson(Map<String, dynamic> json) => KanbanBoard(
     id: json['id'] as String,
@@ -609,5 +611,6 @@ final class KanbanBoard {
     objectTypes: ((json['objectTypes'] as List<dynamic>?) ?? const [])
         .map((item) => '$item')
         .toList(growable: false),
+    documentTemplate: json['documentTemplate'] as Map<String, dynamic>?,
   );
 }
