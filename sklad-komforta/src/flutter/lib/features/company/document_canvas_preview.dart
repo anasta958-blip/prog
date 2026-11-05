@@ -38,9 +38,15 @@ Map<String, dynamic> documentCanvasPreview({
             ?.documentFields ??
         [];
     if (fields.isEmpty) continue;
+    final categoryTotal = category.sections.fold<double>(
+      0,
+      (sum, section) => sum + section.clientTotal,
+    );
     for (final section in category.sections) {
       tables.add({
         'title': '${category.name} / ${section.name}',
+        if (!order) 'categoryTotal': categoryTotal,
+        if (!order) 'sectionTotal': section.clientTotal,
         'columns': fields.map((f) => f.label).toList(),
         'widths': fields
             .map(

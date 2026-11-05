@@ -6,7 +6,7 @@ import 'document_paper_surface.dart';
 import 'document_party_rows.dart';
 
 /// Read-only rendering of server-projected, explicitly selected document data.
-class DocumentCanvasView extends StatelessWidget {
+class DocumentCanvasView extends StatefulWidget {
   const DocumentCanvasView({
     required this.document,
     this.compact = false,
@@ -18,7 +18,17 @@ class DocumentCanvasView extends StatelessWidget {
   final bool clientLink;
 
   @override
+  State<DocumentCanvasView> createState() => _DocumentCanvasViewState();
+}
+
+class _DocumentCanvasViewState extends State<DocumentCanvasView> {
+  final Set<String> _collapsedCategories = {};
+
+  @override
   Widget build(BuildContext context) {
+    final document = widget.document;
+    final compact = widget.compact;
+    final clientLink = widget.clientLink;
     final template = DocumentTemplate.fromJson(
       document['template'] as Map<String, dynamic>,
     );
@@ -117,6 +127,7 @@ class DocumentCanvasView extends StatelessWidget {
         bool border = false,
         bool category = false,
         bool section = false,
+        String? categoryKey,
       }) {
         if (cells.isEmpty) return;
         final textStyle = category
@@ -129,49 +140,79 @@ class DocumentCanvasView extends StatelessWidget {
         final h =
             List.generate(
               cells.length,
-              (i) => measure(cells[i], widths[i] - 8, textStyle),
+              (i) => measure(
+                cells[i],
+                widths[i] - 8 - (categoryKey != null && i == 0 ? 18 : 0),
+                textStyle,
+              ),
             ).fold<double>(0, math.max) +
             8;
         contentHeight += h;
-        rows.add(
-          SizedBox(
-            height: h,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (var i = 0; i < cells.length; i++)
-                  Container(
-                    width: widths[i],
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: category
-                          ? const Color(0xFF243A56)
-                          : section
-                          ? const Color(0xFFDFE8F3)
-                          : heading && border
-                          ? const Color(0xFFF0F4F9)
-                          : null,
-                      border: border
-                          ? Border.all(
-                              color: const Color(0xFFD8DEE8),
-                              width: .5,
-                            )
-                          : null,
-                    ),
-                    child: Text(
-                      cells[i],
-                      textAlign: cells.length > 1 && i == cells.length - 1
-                          ? TextAlign.right
-                          : category || section
-                          ? TextAlign.left
-                          : align,
-                      style: textStyle,
-                      textScaler: TextScaler.noScaling,
-                    ),
+        final row = SizedBox(
+          height: h,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var i = 0; i < cells.length; i++)
+                Container(
+                  width: widths[i],
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: category
+                        ? const Color(0xFF243A56)
+                        : section
+                        ? const Color(0xFFDFE8F3)
+                        : heading && border
+                        ? const Color(0xFFF0F4F9)
+                        : null,
+                    border: border
+                        ? Border.all(color: const Color(0xFFD8DEE8), width: .5)
+                        : null,
                   ),
-              ],
-            ),
+                  child: categoryKey != null && i == 0
+                      ? Row(
+                          children: [
+                            Icon(
+                              _collapsedCategories.contains(categoryKey)
+                                  ? Icons.chevron_right
+                                  : Icons.expand_more,
+                              color: Colors.white,
+                              size: 18,
+                            ),
+                            Expanded(
+                              child: Text(
+                                cells[i],
+                                style: textStyle,
+                                textScaler: TextScaler.noScaling,
+                              ),
+                            ),
+                          ],
+                        )
+                      : Text(
+                          cells[i],
+                          textAlign: cells.length > 1 && i == cells.length - 1
+                              ? TextAlign.right
+                              : category || section
+                              ? TextAlign.left
+                              : align,
+                          style: textStyle,
+                          textScaler: TextScaler.noScaling,
+                        ),
+                ),
+            ],
           ),
+        );
+        rows.add(
+          categoryKey == null
+              ? row
+              : InkWell(
+                  onTap: () => setState(() {
+                    if (!_collapsedCategories.remove(categoryKey)) {
+                      _collapsedCategories.add(categoryKey);
+                    }
+                  }),
+                  child: row,
+                ),
         );
       }
 
@@ -189,7 +230,10 @@ class DocumentCanvasView extends StatelessWidget {
       for (final raw in content['tables'] as List) {
         final table = raw as Map<String, dynamic>;
         final tableTitle = table['title'] as String;
-        if (clientLink && block.kind == 'table') {
+        if (block.kind == 'table' &&
+            (clientLink ||
+                table['categoryTotal'] != null ||
+                table['sectionTotal'] != null)) {
           final separator = tableTitle.indexOf(' / ');
           final categoryName = separator < 0
               ? tableTitle
@@ -208,8 +252,12 @@ class DocumentCanvasView extends StatelessWidget {
               [categoryName, if (categoryTotal != null) _money(categoryTotal)],
               categoryTotal == null ? [1] : [3, 1],
               category: true,
+              categoryKey: clientLink ? categoryKey : null,
             );
             lastCategory = categoryKey;
+          }
+          if (clientLink && _collapsedCategories.contains(categoryKey)) {
+            continue;
           }
           rows.add(const SizedBox(height: 5));
           contentHeight += 5;

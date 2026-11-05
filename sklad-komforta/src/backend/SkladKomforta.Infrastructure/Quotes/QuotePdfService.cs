@@ -311,6 +311,17 @@ internal static class QuotePdfDocumentRenderer
 
         foreach (var category in variant.Categories.OrderBy(item => item.SortOrder))
         {
+            var categoryTotal = category.Sections.SelectMany(item => item.Positions)
+                .Where(item => !item.ExcludeFromTotals).Sum(item => item.LineTotal);
+            var categoryBar = AddBar(section, Color.FromRgb(36, 58, 86), 2.8);
+            categoryBar.Format.SpaceBefore = Unit.FromMillimeter(3);
+            categoryBar.Format.TabStops.AddTabStop(
+                Unit.FromMillimeter(ContentWidthMm - VariantInsetMm), TabAlignment.Right);
+            categoryBar.AddFormattedText(category.Name,
+                new Font { Size = Unit.FromPoint(9.5), Bold = true, Color = Colors.White });
+            categoryBar.AddTab();
+            categoryBar.AddFormattedText(Money(categoryTotal),
+                new Font { Size = Unit.FromPoint(9.5), Bold = true, Color = Colors.White });
             foreach (var quoteSection in category.Sections.OrderBy(item => item.SortOrder))
             {
                 AddPositionsTable(section, category.Name, quoteSection,
@@ -334,8 +345,8 @@ internal static class QuotePdfDocumentRenderer
         // Позиции, добавленные прямо в категорию, лежат в разделе с её именем:
         // повторять название дважды не нужно.
         var title = string.Equals(quoteSection.Name.Trim(), categoryName.Trim(), StringComparison.OrdinalIgnoreCase)
-            ? categoryName
-            : $"{categoryName} · {quoteSection.Name}";
+            ? "Позиции"
+            : quoteSection.Name;
         var heading = AddText(section, title, size: 9.5, bold: true);
         heading.Format.LeftIndent = Unit.FromMillimeter(VariantInsetMm);
         // Сумма раздела прижата к правому краю таблицы позиций; табуляция

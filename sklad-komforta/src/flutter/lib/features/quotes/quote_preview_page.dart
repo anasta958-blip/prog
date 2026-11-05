@@ -447,15 +447,44 @@ final class _Variant extends StatelessWidget {
             ],
           ),
         ),
-        ...variant.categories.expand(
-          (category) => category.sections.map(
-            (section) => _PositionTable(
+        for (final category in variant.categories) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 9),
+            color: const Color(0xFF243A56),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    category.name,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                Text(
+                  _money(
+                    category.sections.fold<double>(
+                      0,
+                      (sum, section) => sum + section.clientTotal,
+                    ),
+                  ),
+                  key: Key('quote-preview-category-total-${category.id}'),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          for (final section in category.sections)
+            _PositionTable(
               categoryName: category.name,
               categoryId: category.catalogCategoryId,
               section: section,
             ),
-          ),
-        ),
+        ],
         _Summary(
           title: 'Итого по варианту',
           clientTotal: variant.clientTotal,
@@ -498,8 +527,8 @@ final class _PositionTable extends StatelessWidget {
                 child: Text(
                   section.name.trim().toLowerCase() ==
                           categoryName.trim().toLowerCase()
-                      ? categoryName
-                      : '$categoryName · ${section.name}',
+                      ? 'Позиции'
+                      : section.name,
                   style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
               ),

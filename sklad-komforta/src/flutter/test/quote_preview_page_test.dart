@@ -76,6 +76,14 @@ void main() {
     expect(
       tester
           .widget<Text>(
+            find.byKey(const Key('quote-preview-category-total-category-1')),
+          )
+          .data,
+      '24\u00A0000,00 ₽',
+    );
+    expect(
+      tester
+          .widget<Text>(
             find.byKey(const Key('quote-preview-section-total-section-1')),
           )
           .data,

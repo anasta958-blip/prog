@@ -635,11 +635,66 @@ void main() {
     );
     final sectionText = tester.widget<Text>(find.text('Вентиляция'));
     expect(sectionText.style?.fontWeight, FontWeight.bold);
+    await tester.tap(find.text('Оборудование'));
+    await tester.pumpAndSettle();
+    expect(find.text('Товар'), findsNothing);
+    expect(find.textContaining('100,00'), findsOneWidget);
+    await tester.tap(find.text('Оборудование'));
+    await tester.pumpAndSettle();
+    expect(find.text('Товар'), findsOneWidget);
     expect(
       tester.getTopLeft(find.text('Итоги')).dy -
           tester.getTopLeft(find.text('Оборудование')).dy,
       lessThan(250),
     );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('configured quote preview shows category and section totals', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final template = DocumentTemplate(
+      blocks: [
+        DocumentBlock(id: 'table', kind: 'table', x: 30, y: 30, width: 734),
+      ],
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: DocumentCanvasView(
+            document: {
+              'template': template.toJson(),
+              'blocks': [
+                {
+                  'id': 'table',
+                  'title': '',
+                  'lines': <String>[],
+                  'tables': [
+                    {
+                      'title': 'Оборудование / Вентиляция',
+                      'columns': ['Наименование'],
+                      'widths': [1],
+                      'rows': [
+                        ['Товар'],
+                      ],
+                      'categoryTotal': 100,
+                      'sectionTotal': 100,
+                    },
+                  ],
+                },
+              ],
+            },
+          ),
+        ),
+      ),
+    );
+    expect(find.text('Оборудование'), findsOneWidget);
+    expect(find.text('Вентиляция'), findsOneWidget);
+    expect(find.textContaining('100,00'), findsNWidgets(2));
     expect(tester.takeException(), isNull);
   });
 }

@@ -85,10 +85,13 @@ public static class DocumentCanvasBuilder
             // A visual template is fail-closed: never fall back to hidden legacy columns.
             var selected = category.CatalogCategoryId is { } id ? fields.GetValueOrDefault(id) : null;
             if (selected is null || selected.Count == 0) continue;
+            var categoryTotal = category.Sections.SelectMany(s => s.Positions)
+                .Where(p => !p.ExcludeFromTotals).Sum(p => p.LineTotal);
             foreach (var section in category.Sections.OrderBy(s => s.SortOrder))
                 tables.Add(new($"{category.Name} / {section.Name}", selected.Select(f => f.Label).ToArray(),
                     Widths(template, category.CatalogCategoryId, selected.Select(f => f.Code)),
-                    section.Positions.OrderBy(p => p.SortOrder).Select(p => (IReadOnlyList<string>)selected.Select(f => DocumentFieldValue.Quote(f, p)).ToArray()).ToArray(), category.CatalogCategoryId));
+                    section.Positions.OrderBy(p => p.SortOrder).Select(p => (IReadOnlyList<string>)selected.Select(f => DocumentFieldValue.Quote(f, p)).ToArray()).ToArray(), category.CatalogCategoryId,
+                    section.Positions.Where(p => !p.ExcludeFromTotals).Sum(p => p.LineTotal), categoryTotal));
         }
         var subtotal = variant.Categories.SelectMany(c => c.Sections).SelectMany(s => s.Positions).Where(p => !p.ExcludeFromTotals).Sum(p => p.LineTotal);
         var vat = QuoteVatCalculator.Calculate(subtotal, variant.VatRate);

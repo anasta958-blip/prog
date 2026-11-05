@@ -44,6 +44,7 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
 
   /// Свёрнутые пользователем варианты (внутри своих типов).
   final Set<String> collapsedVariants = {};
+  final Set<String> collapsedCategories = {};
   String? sessionToken;
   String? selectedTypeId;
   QuoteClientView? quote;
@@ -672,7 +673,10 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
                     children: [
                       const SizedBox(height: 5),
                       for (final (index, variant) in type.variants.indexed)
-                        _variantBlock(type, variant, typeMode, index),
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: _variantBlock(type, variant, typeMode, index),
+                        ),
                     ],
                   )
                 : RadioGroup<String>(
@@ -683,7 +687,15 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
                       children: [
                         const SizedBox(height: 5),
                         for (final (index, variant) in type.variants.indexed)
-                          _variantBlock(type, variant, typeMode, index),
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: _variantBlock(
+                              type,
+                              variant,
+                              typeMode,
+                              index,
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -816,11 +828,8 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
                     clientLink: true,
                   )
                 else ...[
-                  for (final category in variant.categories) ...[
-                    _categoryHeading(category),
-                    for (final section in category.sections)
-                      _positions(category.name, section),
-                  ],
+                  for (final category in variant.categories)
+                    _categoryBlock(variant.id, category),
                   Container(
                     padding: const EdgeInsets.all(14),
                     color: _paperHeader,
@@ -863,29 +872,58 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
   double _categoryTotal(QuoteClientCategory category) => category.sections
       .fold<double>(0, (sum, section) => sum + _sectionTotal(section));
 
-  Widget _categoryHeading(QuoteClientCategory category) => Container(
+  Widget _categoryBlock(String variantId, QuoteClientCategory category) {
+    final key = '$variantId/${category.name}';
+    final collapsed = collapsedCategories.contains(key);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _categoryHeading(category, key, collapsed),
+        if (!collapsed)
+          for (final section in category.sections)
+            _positions(category.name, section),
+      ],
+    );
+  }
+
+  Widget _categoryHeading(
+    QuoteClientCategory category,
+    String key,
+    bool collapsed,
+  ) => Container(
     margin: const EdgeInsets.only(top: 12),
     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
     color: const Color(0xFF243A56),
-    child: Row(
-      children: [
-        Expanded(
-          child: Text(
-            category.name,
+    child: InkWell(
+      onTap: () => setState(() {
+        if (!collapsedCategories.remove(key)) collapsedCategories.add(key);
+      }),
+      child: Row(
+        children: [
+          Icon(
+            collapsed ? Icons.chevron_right : Icons.expand_more,
+            color: Colors.white,
+            size: 18,
+          ),
+          const SizedBox(width: 5),
+          Expanded(
+            child: Text(
+              category.name,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          Text(
+            _money(_categoryTotal(category)),
             style: const TextStyle(
               color: Colors.white,
               fontWeight: FontWeight.w800,
             ),
           ),
-        ),
-        Text(
-          _money(_categoryTotal(category)),
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-      ],
+        ],
+      ),
     ),
   );
 

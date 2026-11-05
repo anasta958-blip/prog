@@ -338,6 +338,19 @@ void main() {
     );
     expect(header('variant-1').color, isNot(header('variant-2').color));
     expect((header('variant-2').shape as Border).left.width, 4);
+    expect(
+      tester
+              .getTopLeft(
+                find.byKey(const Key('client-quote-variant-variant-2')),
+              )
+              .dy -
+          tester
+              .getBottomLeft(
+                find.byKey(const Key('client-quote-variant-variant-1')),
+              )
+              .dy,
+      closeTo(8, .01),
+    );
     final content = tester.widget<Container>(
       find.byKey(const Key('client-quote-variant-content-variant-1')),
     );
@@ -345,6 +358,24 @@ void main() {
     expect((content.margin as EdgeInsets).right, 5);
     expect((content.decoration as BoxDecoration).border, isA<Border>());
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('client can collapse category and variant independently', (
+    tester,
+  ) async {
+    await _open(tester, (_) async => _ok(_quote()));
+    expect(find.text('Кондиционер'), findsOneWidget);
+    await tester.tap(find.text('Оборудование'));
+    await tester.pumpAndSettle();
+    expect(find.text('Кондиционер'), findsNothing);
+    await tester.tap(find.text('Оборудование'));
+    await tester.pumpAndSettle();
+    expect(find.text('Кондиционер'), findsOneWidget);
+    await tester.tap(
+      find.byKey(const Key('client-quote-variant-toggle-variant-1')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Оборудование'), findsNothing);
   });
 
   testWidgets(
@@ -360,14 +391,14 @@ void main() {
       variant['document'] = {
         'template': {
           'blocks': [
-          {
-            'id': 'table',
-            'kind': 'table',
-            'x': 30,
-            'y': 30,
-            'width': 734,
-            'height': 150,
-          },
+            {
+              'id': 'table',
+              'kind': 'table',
+              'x': 30,
+              'y': 30,
+              'width': 734,
+              'height': 150,
+            },
           ],
         },
         'blocks': [
