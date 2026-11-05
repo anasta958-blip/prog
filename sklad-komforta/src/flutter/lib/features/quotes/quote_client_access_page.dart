@@ -354,7 +354,7 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
                 alignment: Alignment.topCenter,
                 child: Container(
                   constraints: const BoxConstraints(maxWidth: 1040),
-                  padding: EdgeInsets.all(compact ? 16 : 40),
+                  padding: EdgeInsets.all(compact ? 12 : 24),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(compact ? 8 : 12),
@@ -468,10 +468,10 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
           height: 1.15,
         ),
       ),
-      const SizedBox(height: 22),
+      const SizedBox(height: 12),
       if (value.headerDocument case final header?) ...[
-        DocumentCanvasView(document: header, compact: true),
-        const SizedBox(height: 20),
+        DocumentCanvasView(document: header, compact: true, clientLink: true),
+        const SizedBox(height: 8),
       ],
       if (!value.proposalTypes.any(
         (type) => type.variants.any((variant) => variant.document != null),
@@ -509,7 +509,7 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
           ),
         ),
       ],
-      const SizedBox(height: 26),
+      const SizedBox(height: 14),
       RadioGroup<String>(
         groupValue: selectedTypeId,
         onChanged: _selectType,
@@ -518,7 +518,7 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
           children: [
             for (final type in value.proposalTypes)
               Padding(
-                padding: const EdgeInsets.only(bottom: 22),
+                padding: const EdgeInsets.only(bottom: 14),
                 child: _typeBlock(value, type),
               ),
           ],
@@ -780,7 +780,11 @@ final class _QuoteClientAccessPageState extends State<QuoteClientAccessPage> {
           ),
         ),
         if (!collapsed && variant.document != null)
-          DocumentCanvasView(document: variant.document!, compact: true),
+          DocumentCanvasView(
+            document: variant.document!,
+            compact: true,
+            clientLink: true,
+          ),
         if (!collapsed && variant.document == null)
           for (final category in variant.categories)
             for (final section in category.sections)

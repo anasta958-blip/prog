@@ -512,4 +512,98 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('client link keeps PDF columns without empty A4 gaps', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final template = DocumentTemplate(
+      blocks: [
+        DocumentBlock(
+          id: 'client',
+          kind: 'client',
+          x: 30,
+          y: 30,
+          width: 350,
+          height: 300,
+        ),
+        DocumentBlock(
+          id: 'table',
+          kind: 'table',
+          x: 30,
+          y: 350,
+          width: 734,
+          height: 380,
+        ),
+        DocumentBlock(
+          id: 'totals',
+          kind: 'totals',
+          x: 30,
+          y: 750,
+          width: 350,
+          height: 150,
+        ),
+      ],
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 1000,
+            child: DocumentCanvasView(
+              compact: true,
+              clientLink: true,
+              document: {
+                'template': template.toJson(),
+                'blocks': [
+                  {
+                    'id': 'client',
+                    'title': 'Заказчик',
+                    'lines': ['Название: Компания'],
+                    'tables': <Object>[],
+                  },
+                  {
+                    'id': 'table',
+                    'title': '',
+                    'lines': <String>[],
+                    'tables': [
+                      {
+                        'title': 'Оборудование',
+                        'columns': ['Наименование'],
+                        'widths': [1],
+                        'rows': [
+                          ['Товар'],
+                        ],
+                      },
+                    ],
+                  },
+                  {
+                    'id': 'totals',
+                    'title': 'Итоги',
+                    'lines': ['Итого: 100 ₽'],
+                    'tables': <Object>[],
+                  },
+                ],
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.getSize(find.byType(DocumentCanvasView)).height,
+      lessThan(500),
+    );
+    expect(
+      tester.getTopLeft(find.text('Итоги')).dy -
+          tester.getTopLeft(find.text('Оборудование')).dy,
+      lessThan(250),
+    );
+    expect(tester.takeException(), isNull);
+  });
 }

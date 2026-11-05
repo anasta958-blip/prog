@@ -9,10 +9,12 @@ class DocumentCanvasView extends StatelessWidget {
   const DocumentCanvasView({
     required this.document,
     this.compact = false,
+    this.clientLink = false,
     super.key,
   });
   final Map<String, dynamic> document;
   final bool compact;
+  final bool clientLink;
 
   @override
   Widget build(BuildContext context) {
@@ -28,9 +30,12 @@ class DocumentCanvasView extends StatelessWidget {
     final children = <Widget>[];
     final completed = <({DocumentBlock block, double bottom})>[];
     var height = compact ? 0.0 : template.height;
-    final topOffset = compact && blocks.isNotEmpty
+    final topOffset = compact && !clientLink && blocks.isNotEmpty
         ? blocks.map((block) => block.y).reduce(math.min) - template.margin
         : 0.0;
+    double? currentRow;
+    var rowTop = 12.0;
+    var rowBottom = 12.0;
     for (final block in blocks) {
       final content = data.where((item) => item['id'] == block.id).firstOrNull;
       if (content == null) continue;
@@ -46,12 +51,20 @@ class DocumentCanvasView extends StatelessWidget {
         _ => TextAlign.left,
       };
       var y = block.y - topOffset;
-      for (final previous in completed) {
-        final prior = previous.block;
-        if (prior.y + prior.height <= block.y + .01 &&
-            prior.x < block.x + block.width &&
-            prior.x + prior.width > block.x) {
-          y = math.max(y, previous.bottom + block.y - prior.y - prior.height);
+      if (clientLink) {
+        if (currentRow != block.y) {
+          if (currentRow != null) rowTop = rowBottom + 12;
+          currentRow = block.y;
+        }
+        y = rowTop;
+      } else {
+        for (final previous in completed) {
+          final prior = previous.block;
+          if (prior.y + prior.height <= block.y + .01 &&
+              prior.x < block.x + block.width &&
+              prior.x + prior.width > block.x) {
+            y = math.max(y, previous.bottom + block.y - prior.y - prior.height);
+          }
         }
       }
       final width = block.width - block.padding * 2;
@@ -150,12 +163,15 @@ class DocumentCanvasView extends StatelessWidget {
         rows.add(const SizedBox(height: 12));
         contentHeight += 12;
       }
-      final blockHeight = math.max(
-        block.height,
-        contentHeight + block.padding * 2,
-      );
+      final blockHeight = clientLink
+          ? contentHeight + block.padding * 2
+          : math.max(block.height, contentHeight + block.padding * 2);
       completed.add((block: block, bottom: y + blockHeight));
-      height = math.max(height, y + blockHeight + template.margin);
+      if (clientLink) rowBottom = math.max(rowBottom, y + blockHeight);
+      height = math.max(
+        height,
+        y + blockHeight + (clientLink ? 12 : template.margin),
+      );
       children.add(
         Positioned(
           left: block.x,
@@ -174,6 +190,7 @@ class DocumentCanvasView extends StatelessWidget {
     return DocumentPaperSurface(
       width: template.width,
       height: math.max(height, template.margin * 2),
+      zoom: clientLink ? 1.2 : 1,
       child: ColoredBox(
         key: const ValueKey('document-preview-paper'),
         color: Colors.white,
