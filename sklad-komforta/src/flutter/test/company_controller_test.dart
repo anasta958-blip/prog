@@ -61,14 +61,16 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Переместить выше').last);
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Комплектация'));
+    await tester.ensureVisible(find.text('Комплектация', skipOffstage: false));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Комплектация'));
     await tester.pumpAndSettle();
     expect(find.text('Изменения не сохранены'), findsOneWidget);
     await tester.tap(find.text('Остаться'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Сохранить настройки'));
+    await tester.ensureVisible(
+      find.text('Сохранить настройки', skipOffstage: false),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.text('Сохранить настройки'));
     await tester.pumpAndSettle();
@@ -79,7 +81,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Переместить выше').last);
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Комплектация'));
+    await tester.ensureVisible(find.text('Комплектация', skipOffstage: false));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Комплектация'));
     await tester.pumpAndSettle();

@@ -18,7 +18,13 @@ Map<String, dynamic> documentCanvasPreview({
       .where((b) => b.kind == 'table')
       .firstOrNull;
   final tables = <Map<String, dynamic>>[];
-  for (final category in categories) {
+  final ordered = categories.indexed.toList()
+    ..sort((a, b) {
+      final rank = (tableBlock?.categoryRank(a.$2.catalogCategoryId) ?? 0)
+          .compareTo(tableBlock?.categoryRank(b.$2.catalogCategoryId) ?? 0);
+      return rank == 0 ? a.$1.compareTo(b.$1) : rank;
+    });
+  for (final (_, category) in ordered) {
     final fields =
         board.categories
             .where((c) => c.categoryId == category.catalogCategoryId)

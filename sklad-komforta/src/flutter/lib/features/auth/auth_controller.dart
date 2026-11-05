@@ -93,7 +93,7 @@ final class AuthController extends ChangeNotifier {
     challengeToken = data['challengeToken'] as String?;
     stage = _stageFromServer(data['step'] as int);
     if (stage == AuthStage.setupTotp) await beginTotpSetup();
-  });
+  }, signingIn: true);
 
   /// Меняет одноразовый пароль и немедленно запускает настройку TOTP.
   Future<void> changePassword(String password) => _run(() async {
@@ -374,7 +374,10 @@ final class AuthController extends ChangeNotifier {
     organizationProvisioned = data['organizationId'] != null;
   }
 
-  Future<void> _run(Future<void> Function() action) async {
+  Future<void> _run(
+    Future<void> Function() action, {
+    bool signingIn = false,
+  }) async {
     if (busy) return;
     busy = true;
     error = null;
@@ -387,7 +390,11 @@ final class AuthController extends ChangeNotifier {
         accessToken = null;
         sessions = const [];
         stage = AuthStage.login;
-        error = 'Сессия истекла. Войдите снова.';
+        error = signingIn
+            ? exception.code == 'session_expired'
+                  ? 'Сервер отклонил запрос входа (HTTP 401). Проверьте адрес сервера и данные для входа.'
+                  : exception.message
+            : 'Сессия истекла. Войдите снова.';
       } else {
         error = exception.message;
       }

@@ -724,7 +724,8 @@ internal sealed class PostgresQuoteClientAccessService : IQuoteClientAccessServi
                         .Select(section => new DocumentCanvasTable($"{category.Name} / {section.Name}",
                             section.Columns!.Select(c => c.Label).ToArray(),
                             DocumentCanvasBuilder.Widths(template, categoriesById[category.Id].CatalogCategoryId, section.Columns!.Select(c => c.Code)),
-                            section.Positions.Select(p => p.Cells ?? (IReadOnlyList<string>)[]).ToArray()))).ToArray(),
+                            section.Positions.Select(p => p.Cells ?? (IReadOnlyList<string>)[]).ToArray(),
+                            categoriesById[category.Id].CatalogCategoryId))).ToArray(),
                     DocumentCanvasBuilder.Totals(variant.Subtotal, variant.VatAmount)),
                 Categories = []
             }).ToArray() }).ToArray();

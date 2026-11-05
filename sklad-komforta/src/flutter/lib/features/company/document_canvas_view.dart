@@ -1,6 +1,8 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'document_template.dart';
+import 'document_paper_surface.dart';
+import 'document_party_rows.dart';
 
 /// Read-only rendering of server-projected, explicitly selected document data.
 class DocumentCanvasView extends StatelessWidget {
@@ -114,8 +116,14 @@ class DocumentCanvasView extends StatelessWidget {
 
       final title = content['title'] as String;
       if (title.isNotEmpty) addRow([title], [1], heading: true);
-      for (final line in (content['lines'] as List).cast<String>()) {
-        addRow([line], [1]);
+      for (final row in documentPartyRows(
+        (content['lines'] as List).cast<String>(),
+        width,
+        style,
+        block.flowFields &&
+            (block.kind == 'client' || block.kind == 'executor'),
+      )) {
+        addRow(row.cells, row.widths);
       }
       for (final raw in content['tables'] as List) {
         final table = raw as Map<String, dynamic>;
@@ -156,15 +164,13 @@ class DocumentCanvasView extends StatelessWidget {
         ),
       );
     }
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: SizedBox(
-        width: template.width,
-        height: height,
-        child: ColoredBox(
-          color: Colors.white,
-          child: Stack(children: children),
-        ),
+    return DocumentPaperSurface(
+      width: template.width,
+      height: height,
+      child: ColoredBox(
+        key: const ValueKey('document-preview-paper'),
+        color: Colors.white,
+        child: Stack(children: children),
       ),
     );
   }

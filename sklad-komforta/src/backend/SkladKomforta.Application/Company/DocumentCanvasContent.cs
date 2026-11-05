@@ -11,7 +11,7 @@ public sealed record DocumentCanvasContent(DocumentTemplate Template, IReadOnlyL
 public sealed record DocumentCanvasBlock(string Id, string Title, IReadOnlyList<string> Lines,
     IReadOnlyList<DocumentCanvasTable> Tables);
 public sealed record DocumentCanvasTable(string Title, IReadOnlyList<string> Columns,
-    IReadOnlyList<double> Widths, IReadOnlyList<IReadOnlyList<string>> Rows);
+    IReadOnlyList<double> Widths, IReadOnlyList<IReadOnlyList<string>> Rows, Guid? CategoryId = null);
 
 public static class DocumentCanvasBuilder
 {
@@ -36,7 +36,7 @@ public static class DocumentCanvasBuilder
             block.Kind is "client" or "executor"
                 ? block.Fields.Where(Labels.ContainsKey).Select(code => $"{Labels[code]}: {(block.Kind == "client" ? client : executor).GetValueOrDefault(code) ?? "—"}").ToArray()
                 : block.Kind == "totals" ? totals : [],
-            block.Kind == "table" ? tables : [])).ToArray(), caption);
+            block.Kind == "table" ? tables.OrderBy(t => block.CategoryRank(t.CategoryId)).ToArray() : [])).ToArray(), caption);
 
     public static IReadOnlyDictionary<string, string?> Party(object? value)
     {
@@ -67,7 +67,7 @@ public static class DocumentCanvasBuilder
             foreach (var section in category.Sections.OrderBy(s => s.SortOrder))
                 tables.Add(new($"{category.Name} / {section.Name}", selected.Select(f => f.Label).ToArray(),
                     Widths(template, category.CatalogCategoryId, selected.Select(f => f.Code)),
-                    section.Positions.OrderBy(p => p.SortOrder).Select(p => (IReadOnlyList<string>)selected.Select(f => DocumentFieldValue.Quote(f, p)).ToArray()).ToArray()));
+                    section.Positions.OrderBy(p => p.SortOrder).Select(p => (IReadOnlyList<string>)selected.Select(f => DocumentFieldValue.Quote(f, p)).ToArray()).ToArray(), category.CatalogCategoryId));
         }
         var subtotal = variant.Categories.SelectMany(c => c.Sections).SelectMany(s => s.Positions).Where(p => !p.ExcludeFromTotals).Sum(p => p.LineTotal);
         var vat = QuoteVatCalculator.Calculate(subtotal, variant.VatRate);
@@ -88,7 +88,7 @@ public static class DocumentCanvasBuilder
             foreach (var section in category.Sections.OrderBy(s => s.SortOrder))
                 tables.Add(new($"{category.Name} / {section.Name}", selected.Select(f => f.Label).ToArray(),
                     Widths(template, category.CatalogCategoryId, selected.Select(f => f.Code)),
-                    section.Positions.OrderBy(p => p.SortOrder).Select(p => (IReadOnlyList<string>)selected.Select(f => DocumentFieldValue.Order(f, p)).ToArray()).ToArray()));
+                    section.Positions.OrderBy(p => p.SortOrder).Select(p => (IReadOnlyList<string>)selected.Select(f => DocumentFieldValue.Order(f, p)).ToArray()).ToArray(), category.CatalogCategoryId));
         }
         return Build(template, Party(client), Party(executor), tables,
             [$"Позиций: {order.Categories.SelectMany(c => c.Sections).Sum(s => s.Positions.Count)}"], order.Title);

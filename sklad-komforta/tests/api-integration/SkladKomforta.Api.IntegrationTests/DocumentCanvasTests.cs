@@ -33,6 +33,36 @@ public sealed class DocumentCanvasTests
         Assert.DoesNotContain("secret", System.Text.Json.JsonSerializer.Serialize(content), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void CategoryOrderKeepsSectionsStableAndAppendsNewCategories()
+    {
+        var first = Guid.NewGuid();
+        var second = Guid.NewGuid();
+        var template = Template(Block() with { CategoryOrder = [second, first] });
+        template.Validate();
+        DocumentCanvasTable Table(string title, Guid? id) => new(title, ["Название"], [1], [], id);
+        var content = DocumentCanvasBuilder.Build(template, new Dictionary<string, string?>(),
+            new Dictionary<string, string?>(),
+            [Table("A", first), Table("B1", second), Table("B2", second), Table("New", Guid.NewGuid())], []);
+        Assert.Equal(["B1", "B2", "A", "New"], content.Blocks.Single().Tables.Select(t => t.Title));
+        Assert.Throws<IdentityException>(() => Template(Block() with { CategoryOrder = [first, first] }).Validate());
+    }
+
+    [Fact]
+    public void PartyFieldsFlowAcrossWidthAndWrapWithoutLosingValues()
+    {
+        string[] lines = ["ИНН: 123", "КПП: 456", new string('Ж', 100), "Телефон: 123"];
+        var rows = DocumentCanvasPdfRenderer.PartyRows(lines, 220, s => s.Length * 8, true);
+        Assert.Equal(2, rows[0].Cells.Count);
+        Assert.Equal(lines, rows.SelectMany(r => r.Cells));
+        Assert.All(rows, row => Assert.True(row.Widths.Sum() <= 220));
+        Assert.Equal(4, DocumentCanvasPdfRenderer.PartyRows(lines, 220, s => s.Length * 8, false).Count);
+        var template = Template(Block("client") with { FlowFields = true, Fields = ["inn", "kpp"] });
+        var content = DocumentCanvasBuilder.Build(template,
+            new Dictionary<string, string?> { ["inn"] = "123", ["kpp"] = "456" }, new Dictionary<string, string?>(), [], []);
+        Assert.True(DocumentCanvasPdfRenderer.Render("Реквизиты", [content]).Length > 1000);
+    }
+
     [Theory]
     [InlineData(false, "sans")]
     [InlineData(true, "serif")]

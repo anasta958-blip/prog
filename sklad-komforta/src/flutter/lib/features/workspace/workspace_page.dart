@@ -92,7 +92,9 @@ class _WorkspacePageState extends State<WorkspacePage> {
     if (selectedIndex == 2) {
       companySection =
           CompanySection.values
-              .where((section) => section.name == path.lastOrNull)
+              .where(
+                (section) => section.name == (path.length > 1 ? path[1] : null),
+              )
               .firstOrNull ??
           CompanySection.settings;
       companyExpanded = true;
@@ -279,7 +281,11 @@ class _WorkspacePageState extends State<WorkspacePage> {
 
   void _saveAddress() => writeWorkspacePath(switch (selectedIndex) {
     1 => '/catalog',
-    2 => '/company/${companySection.name}',
+    2 =>
+      companySection == CompanySection.settings &&
+              readWorkspacePath().startsWith('/company/settings/')
+          ? readWorkspacePath()
+          : '/company/${companySection.name}',
     3 => '/devices',
     _ => '/kanban',
   });

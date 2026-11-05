@@ -20,6 +20,7 @@ import 'package:sklad_komforta_app/features/quotes/quote_models.dart';
 part 'order_controller.dart';
 
 const _autoRelationSourcesKey = '_auto_relation_sources';
+const _autoRelationQuantitiesKey = '_auto_relation_quantities';
 
 /// Состояние редактора КП/ПКП и все операции над его изменяемым деревом.
 ///
@@ -430,6 +431,7 @@ final class QuoteController extends ChangeNotifier {
           ..hiddenFieldCodes.addAll(source.hiddenFieldCodes);
     // Automatic relations must point to the copied parent, not the original row.
     final sources = _autoRelationSources(copy);
+    final quantities = _autoRelationQuantities(copy);
     if (sources.isNotEmpty) {
       _writeAutoRelationSources(copy, {
         for (final marker in sources)
@@ -438,6 +440,13 @@ final class QuoteController extends ChangeNotifier {
           else
             marker,
       });
+      copy.values[_autoRelationQuantitiesKey] = {
+        for (final entry in quantities.entries)
+          (entry.key.contains('|')
+              ? '${ids[entry.key.split('|').first] ?? entry.key.split('|').first}${entry.key.substring(entry.key.indexOf('|'))}'
+              : entry.key): entry
+              .value,
+      };
     }
     return copy;
   }
@@ -1083,7 +1092,14 @@ final class QuoteController extends ChangeNotifier {
     QuotePositionDraft? position,
     String? fieldCode,
   }) async {
+    final related = position == null
+        ? <QuotePositionDraft>[]
+        : _synchronizeRelatedQuantities(position);
     _changed(position: position, fieldCode: fieldCode);
+    for (final child in related) {
+      _changed(position: child, fieldCode: 'quantity');
+      await _applyBehaviorRules(child, changedFieldCode: 'quantity');
+    }
     if (position == null) {
       await _waitForVariantBehavior();
       return;
@@ -1176,6 +1192,7 @@ final class QuoteController extends ChangeNotifier {
       }
     }
     if (changed) {
+      _synchronizeRelatedQuantities(position);
       _changed(
         consumedVariant: eventType == 'variant_calculation'
             ? location.variant
@@ -1333,12 +1350,17 @@ final class QuoteController extends ChangeNotifier {
       for (final section in category.sections) {
         for (final position in section.positions.toList(growable: false)) {
           final sources = _autoRelationSources(position);
+          final quantities = _autoRelationQuantities(position);
+          if (!sources.any(
+            (source) => source == marker || source.startsWith('$marker|'),
+          )) {
+            continue;
+          }
           final removed = sources
               .where(
                 (source) => source == marker || source.startsWith('$marker|'),
               )
-              .length;
-          if (removed == 0) continue;
+              .fold<double>(0, (sum, source) => sum + quantities[source]!);
           sources.removeWhere(
             (source) => source == marker || source.startsWith('$marker|'),
           );
@@ -1364,10 +1386,11 @@ final class QuoteController extends ChangeNotifier {
       for (final section in category.sections) {
         for (final position in section.positions.toList(growable: false)) {
           final sources = _autoRelationSources(position);
+          final quantities = _autoRelationQuantities(position);
+          if (!sources.any((source) => source.startsWith(prefix))) continue;
           final removed = sources
               .where((item) => item.startsWith(prefix))
-              .length;
-          if (removed == 0) continue;
+              .fold<double>(0, (sum, source) => sum + quantities[source]!);
           sources.removeWhere((item) => item.startsWith(prefix));
           position.quantity -= removed;
           if (position.quantity <= 0) {
@@ -1387,16 +1410,69 @@ final class QuoteController extends ChangeNotifier {
         : <String>{};
   }
 
+  Map<String, double> _autoRelationQuantities(QuotePositionDraft position) {
+    final stored = position.values[_autoRelationQuantitiesKey];
+    return {
+      for (final source in _autoRelationSources(position))
+        source: stored is Map && stored[source] is num
+            ? (stored[source] as num).toDouble()
+            : 1,
+    };
+  }
+
+  List<QuotePositionDraft> _synchronizeRelatedQuantities(
+    QuotePositionDraft parent,
+  ) {
+    final variant = _variantContaining(parent);
+    if (variant == null || !attachesCatalogRelations) return [];
+    final changed = <QuotePositionDraft>[];
+    final prefix = '${parent.id}|';
+    for (final child in variant.positions) {
+      if (identical(child, parent)) continue;
+      final sources = _autoRelationSources(child);
+      final matching = sources.where((s) => s.startsWith(prefix)).toList();
+      if (matching.isEmpty) continue;
+      final quantities = _autoRelationQuantities(child);
+      final previous = matching.fold<double>(
+        0,
+        (sum, source) => sum + quantities[source]!,
+      );
+      // Old documents may have one marker per repeated catalog addition.
+      final normalized = matching
+          .map((s) => s.split('|').take(2).join('|'))
+          .toSet();
+      sources.removeAll(matching);
+      sources.addAll(normalized);
+      for (final source in matching) {
+        quantities.remove(source);
+      }
+      for (final source in normalized) {
+        quantities[source] = parent.quantity;
+      }
+      final delta = parent.quantity * normalized.length - previous;
+      child.quantity += delta;
+      _writeAutoRelationSources(child, sources);
+      child.values[_autoRelationQuantitiesKey] = quantities;
+      if (delta != 0) changed.add(child);
+    }
+    return changed;
+  }
+
   void _writeAutoRelationSources(
     QuotePositionDraft position,
     Set<String> sources,
   ) {
     if (sources.isEmpty) {
       position.values.remove(_autoRelationSourcesKey);
+      position.values.remove(_autoRelationQuantitiesKey);
     } else {
       position.values[_autoRelationSourcesKey] = sources.toList(
         growable: false,
       );
+      final quantities = position.values[_autoRelationQuantitiesKey];
+      if (quantities is Map) {
+        quantities.removeWhere((key, _) => !sources.contains(key));
+      }
     }
   }
 

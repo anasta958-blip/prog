@@ -114,10 +114,10 @@ void main() {
       final work = variant.positions.singleWhere(
         (item) => item.catalogItemId == _workItemId,
       );
-      expect(work.quantity, 1);
+      expect(work.quantity, 20);
       expect(variant.lastRuleTotal, variant.totalWithVat);
       await controller.positionChanged(position: row, fieldCode: 'name');
-      expect(work.quantity, 1);
+      expect(work.quantity, 20);
       controller.dispose();
       auth.dispose();
     },
@@ -833,6 +833,75 @@ void main() {
       expect(workPositions.single.discountPercent, 7);
       expect(equipmentSection.positions, hasLength(1));
       expect(equipmentSection.positions.single.quantity, 2);
+
+      final parent = equipmentSection.positions.single;
+      parent.quantity = 7;
+      await controller.positionChanged(position: parent, fieldCode: 'quantity');
+      expect(workPosition.quantity, 10); // Seven linked, three manually added.
+      expect(workPosition.manualPrice, 150);
+      parent.quantity = 2.5;
+      await controller.positionChanged(position: parent, fieldCode: 'quantity');
+      expect(workPosition.quantity, 5.5);
+      await controller.positionChanged(position: parent, fieldCode: 'quantity');
+      expect(workPosition.quantity, 5.5);
+
+      // Relation contributions survive saving/reopening the document.
+      controller.draft = QuoteDraft.fromJson(controller.draft!.toJson());
+      final restored = controller.draft!.proposalTypes.single.variants.single;
+      final restoredParent = restored.positions.singleWhere(
+        (row) => row.id == parent.id,
+      );
+      final restoredWork = restored.positions.singleWhere(
+        (row) => row.id == workPosition.id,
+      );
+      restoredParent.quantity = 4;
+      await controller.positionChanged(
+        position: restoredParent,
+        fieldCode: 'quantity',
+      );
+      expect(restoredWork.quantity, 7);
+      final otherParent = QuotePositionDraft.fromJson({
+        ...restoredParent.toJson(),
+        'id': 'other-parent',
+        'catalogItemId': null,
+      })..quantity = 3;
+      final restoredCategory = restored.categories.first;
+      final restoredSection = restoredCategory.sections.first;
+      restoredSection.positions.add(otherParent);
+      await controller.applyCatalogItem(
+        restoredCategory,
+        restoredSection,
+        otherParent,
+        _equipmentItem,
+      );
+      expect(restoredWork.quantity, 10);
+      restoredParent.quantity = 0;
+      await controller.positionChanged(
+        position: restoredParent,
+        fieldCode: 'quantity',
+      );
+      expect(restoredWork.quantity, 6);
+      controller.removePosition(restoredSection, restoredParent);
+      expect(restoredWork.quantity, 6);
+      otherParent.quantity = 5;
+      await controller.positionChanged(
+        position: otherParent,
+        fieldCode: 'quantity',
+      );
+      expect(restoredWork.quantity, 8);
+      controller.removePosition(restoredSection, otherParent);
+      expect(restoredWork.quantity, 3);
+      controller.draft = QuoteDraft(
+        kind: QuoteKind.quote,
+        title: 'Тестовое КП',
+        clientId: 'client',
+        executorCompanyId: 'executor',
+        selectionMode: 'variant',
+        proposalTypes: [proposalType],
+      );
+      parent.quantity = 2;
+      await controller.positionChanged(position: parent, fieldCode: 'quantity');
+      expect(workPosition.quantity, 5);
 
       equipmentSection.positions.first.selected = true;
       controller.applyPercent(equipmentSection, value: 9, markup: false);

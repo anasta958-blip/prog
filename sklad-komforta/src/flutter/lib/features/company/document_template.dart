@@ -101,14 +101,24 @@ class DocumentBlock {
     this.fontSize = 12,
     this.padding = 10,
     this.align = 'left',
+    this.flowFields = false,
+    List<String>? categoryOrder,
     List<String>? fields,
     Map<String, double>? columnWidths,
-  }) : fields = fields ?? ['name', 'inn', 'address'],
+  }) : categoryOrder = categoryOrder ?? [],
+       fields = fields ?? ['name', 'inn', 'address'],
        columnWidths = columnWidths ?? {};
   final String id;
   final String kind;
   double x, y, width, height, fontSize, padding;
   String align;
+  bool flowFields;
+  List<String> categoryOrder;
+  int categoryRank(String? id) {
+    final index = categoryOrder.indexOf(id ?? '');
+    return index < 0 ? categoryOrder.length : index;
+  }
+
   List<String> fields;
   final Map<String, double> columnWidths;
   factory DocumentBlock.fromJson(Map<String, dynamic> json) => DocumentBlock(
@@ -121,6 +131,10 @@ class DocumentBlock {
     fontSize: (json['fontSize'] as num?)?.toDouble() ?? 12,
     padding: (json['padding'] as num?)?.toDouble() ?? 10,
     align: json['align'] as String? ?? 'left',
+    flowFields: json['flowFields'] == true,
+    categoryOrder: (json['categoryOrder'] as List? ?? [])
+        .cast<String>()
+        .toList(),
     fields: (json['fields'] as List? ?? []).cast<String>().toList(),
     columnWidths: (json['columnWidths'] as Map<String, dynamic>? ?? {}).map(
       (key, value) => MapEntry(key, (value as num).toDouble()),
@@ -136,6 +150,8 @@ class DocumentBlock {
     'fontSize': fontSize,
     'padding': padding,
     'align': align,
+    'flowFields': flowFields,
+    'categoryOrder': categoryOrder,
     'fields': fields,
     'columnWidths': columnWidths,
   };

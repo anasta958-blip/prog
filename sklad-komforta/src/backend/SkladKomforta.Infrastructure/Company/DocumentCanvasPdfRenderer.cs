@@ -117,7 +117,10 @@ internal static class DocumentCanvasPdfRenderer
                 }
 
                 if (data.Title.Length > 0) Row([data.Title], [1], true, false);
-                foreach (var line in data.Lines) Row([line], [1], false, false);
+                foreach (var row in PartyRows(data.Lines, width,
+                    text => text.Split('\n').Max(line => Graphics((int)(cursor / pageHeight)).MeasureString(line, font).Width),
+                    block.FlowFields && block.Kind is "client" or "executor"))
+                    Row(row.Cells, row.Widths, false, false);
                 foreach (var table in data.Tables)
                 {
                     activeTable = table;
@@ -130,6 +133,27 @@ internal static class DocumentCanvasPdfRenderer
             }
         }
         finally { foreach (var graphics in pages) graphics.Dispose(); }
+    }
+
+    internal static IReadOnlyList<(IReadOnlyList<string> Cells, IReadOnlyList<double> Widths)> PartyRows(
+        IReadOnlyList<string> lines, double width, Func<string, double> measure, bool flow)
+    {
+        var rows = new List<(IReadOnlyList<string>, IReadOnlyList<double>)>();
+        var cells = new List<string>();
+        var widths = new List<double>();
+        var used = 0.0;
+        foreach (var line in lines)
+        {
+            var size = flow ? Math.Min(width, measure(line) + 16) : width;
+            if (cells.Count > 0 && used + size > width)
+            {
+                rows.Add((cells, widths));
+                cells = []; widths = []; used = 0;
+            }
+            cells.Add(line); widths.Add(size); used += size;
+        }
+        if (cells.Count > 0) rows.Add((cells, widths));
+        return rows;
     }
 
     private static List<string> Wrap(XGraphics graphics, string text, XFont font, double width)

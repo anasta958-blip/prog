@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'document_field_picker.dart';
 import 'document_layout_models.dart';
 import 'document_template.dart';
+import 'document_paper_surface.dart';
+import 'document_party_rows.dart';
 
 class DocumentCanvasEditor extends StatefulWidget {
   const DocumentCanvasEditor({
@@ -19,20 +21,22 @@ class DocumentCanvasEditor extends StatefulWidget {
 }
 
 class _DocumentCanvasEditorState extends State<DocumentCanvasEditor> {
-  final transform = TransformationController(
-    Matrix4.diagonal3Values(.65, .65, 1),
-  );
+  double zoomFactor = 1;
+  final propertiesScroll = ScrollController();
+  final paperScroll = ScrollController();
+  @override
+  void dispose() {
+    propertiesScroll.dispose();
+    paperScroll.dispose();
+    super.dispose();
+  }
+
   String? selectedId;
   Offset? touchOrigin;
   Size? resizeOrigin;
   DocumentTemplate get template => widget.board.template!;
   DocumentBlock? get selected =>
       template.blocks.where((b) => b.id == selectedId).firstOrNull;
-  @override
-  void dispose() {
-    transform.dispose();
-    super.dispose();
-  }
 
   void change(VoidCallback action) {
     if (!widget.enabled) return;
@@ -81,6 +85,11 @@ class _DocumentCanvasEditorState extends State<DocumentCanvasEditor> {
     absorbing: !widget.enabled,
     child: LayoutBuilder(
       builder: (context, constraints) {
+        final desktop = constraints.maxWidth >= 1200;
+        final bounded = desktop && constraints.hasBoundedHeight;
+        final panelHeight = bounded
+            ? constraints.maxHeight
+            : math.max(260.0, MediaQuery.sizeOf(context).height - 180);
         final left = panel(
           'Компоненты',
           Column(
@@ -105,6 +114,7 @@ class _DocumentCanvasEditorState extends State<DocumentCanvasEditor> {
               const SizedBox(height: 12),
               const Text(
                 'Перетаскивайте блок за его область. Нижний правый угол меняет размер. '
+                'Ширина столбцов меняется перетаскиванием синих границ таблицы. '
                 'На сенсорном экране удерживайте блок перед переносом. '
                 'На холсте показаны образцы, а не данные клиента.',
                 style: TextStyle(fontSize: 12),
@@ -120,7 +130,22 @@ class _DocumentCanvasEditorState extends State<DocumentCanvasEditor> {
         );
         final right = panel(
           selected == null ? 'Настройки холста' : 'Свойства блока',
-          properties(),
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: math.max(120, panelHeight - 80),
+            ),
+            child: Scrollbar(
+              controller: propertiesScroll,
+              thumbVisibility: true,
+              child: SingleChildScrollView(
+                key: const ValueKey('document-properties-scroll'),
+                controller: propertiesScroll,
+                primary: false,
+                padding: const EdgeInsets.only(right: 12),
+                child: properties(),
+              ),
+            ),
+          ),
         );
         final center = panel(
           'Холст документа',
@@ -144,49 +169,47 @@ class _DocumentCanvasEditorState extends State<DocumentCanvasEditor> {
                   ),
                 ],
               ),
-              SizedBox(
-                height: 650,
-                child: ClipRect(
-                  child: InteractiveViewer(
-                    transformationController: transform,
-                    constrained: false,
-                    minScale: .25,
-                    maxScale: 2,
-                    boundaryMargin: const EdgeInsets.all(150),
-                    child: GestureDetector(
-                      onTap: () => setState(() => selectedId = null),
-                      child: Container(
-                        width: template.width,
-                        height: template.height,
-                        decoration: const BoxDecoration(color: Colors.white),
-                        child: Stack(
-                          children: [
-                            Positioned(
-                              left: template.margin,
-                              right: template.margin,
-                              top: template.margin,
-                              bottom: template.margin,
-                              child: IgnorePointer(
-                                child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    border: Border.all(
-                                      color: const Color(0xFFD9DFE8),
-                                    ),
+              paperViewport(
+                bounded,
+                DocumentPaperSurface(
+                  width: template.width,
+                  height: template.height,
+                  fitWidth: true,
+                  zoom: zoomFactor,
+                  child: GestureDetector(
+                    onTap: () => setState(() => selectedId = null),
+                    child: Container(
+                      key: const ValueKey('document-editor-paper'),
+                      width: template.width,
+                      height: template.height,
+                      decoration: const BoxDecoration(color: Colors.white),
+                      child: Stack(
+                        children: [
+                          Positioned(
+                            left: template.margin,
+                            right: template.margin,
+                            top: template.margin,
+                            bottom: template.margin,
+                            child: IgnorePointer(
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: const Color(0xFFD9DFE8),
                                   ),
                                 ),
                               ),
                             ),
-                            for (final block in template.blocks)
-                              canvasBlock(block),
-                            if (template.blocks.isEmpty)
-                              const Center(
-                                child: Text(
-                                  'Добавьте компоненты слева',
-                                  style: TextStyle(color: Colors.black54),
-                                ),
+                          ),
+                          for (final block in template.blocks)
+                            canvasBlock(block),
+                          if (template.blocks.isEmpty)
+                            const Center(
+                              child: Text(
+                                'Добавьте компоненты слева',
+                                style: TextStyle(color: Colors.black54),
                               ),
-                          ],
-                        ),
+                            ),
+                        ],
                       ),
                     ),
                   ),
@@ -194,19 +217,33 @@ class _DocumentCanvasEditorState extends State<DocumentCanvasEditor> {
               ),
             ],
           ),
+          expand: bounded,
         );
-        if (constraints.maxWidth < 1100) {
-          return Column(
+        if (!desktop) {
+          final stacked = Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [left, center, right],
           );
+          return constraints.hasBoundedHeight
+              ? SingleChildScrollView(primary: false, child: stacked)
+              : stacked;
         }
         return Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SizedBox(width: 210, child: left),
+            SizedBox(
+              width: 210,
+              height: bounded ? panelHeight : null,
+              child: bounded
+                  ? SingleChildScrollView(primary: false, child: left)
+                  : left,
+            ),
             const SizedBox(width: 12),
-            Expanded(child: center),
+            Expanded(
+              child: bounded
+                  ? SizedBox(height: panelHeight, child: center)
+                  : center,
+            ),
             const SizedBox(width: 12),
             SizedBox(width: 330, child: right),
           ],
@@ -216,14 +253,25 @@ class _DocumentCanvasEditorState extends State<DocumentCanvasEditor> {
   );
 
   void zoom(double factor) {
-    final scale = (transform.value.getMaxScaleOnAxis() * factor).clamp(
-      .25,
-      2.0,
-    );
-    transform.value = Matrix4.diagonal3Values(scale, scale, 1);
+    setState(() => zoomFactor = (zoomFactor * factor).clamp(.25, 2.0));
   }
 
-  Widget panel(String title, Widget child) => Container(
+  Widget paperViewport(bool bounded, Widget paper) => bounded
+      ? Expanded(
+          child: Scrollbar(
+            controller: paperScroll,
+            thumbVisibility: true,
+            child: SingleChildScrollView(
+              key: const ValueKey('document-paper-scroll'),
+              controller: paperScroll,
+              primary: false,
+              child: paper,
+            ),
+          ),
+        )
+      : paper;
+
+  Widget panel(String title, Widget child, {bool expand = false}) => Container(
     margin: const EdgeInsets.only(bottom: 12),
     padding: const EdgeInsets.all(14),
     decoration: BoxDecoration(
@@ -236,7 +284,7 @@ class _DocumentCanvasEditorState extends State<DocumentCanvasEditor> {
       children: [
         Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
         const SizedBox(height: 14),
-        child,
+        if (expand) Expanded(child: child) else child,
       ],
     ),
   );
@@ -345,45 +393,109 @@ class _DocumentCanvasEditorState extends State<DocumentCanvasEditor> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          for (final category in widget.board.categories) ...[
+          for (final category in orderedCategories(block)) ...[
             Text(
               category.name,
               style: const TextStyle(fontWeight: FontWeight.bold),
             ),
             if ((category.codes ?? []).isNotEmpty)
-              Table(
-                border: TableBorder.all(color: const Color(0xFFD9DFE8)),
-                columnWidths: {
-                  for (var i = 0; i < category.codes!.length; i++)
-                    i: FlexColumnWidth(
-                      block.columnWidths['${category.id}/${category.codes![i]}'] ??
-                          1,
-                    ),
-                },
-                children: [
-                  TableRow(
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final codes = category.codes!;
+                  final weights = [
+                    for (final code in codes)
+                      block.columnWidths['${category.id}/$code'] ?? 1.0,
+                  ];
+                  final total = weights.fold<double>(0, (sum, w) => sum + w);
+                  return Stack(
                     children: [
-                      for (final code in category.codes!)
-                        Padding(
-                          padding: const EdgeInsets.all(4),
-                          child: Text(
-                            category.fields
-                                .firstWhere((f) => f.code == code)
-                                .label,
+                      Table(
+                        border: TableBorder.all(color: const Color(0xFFD9DFE8)),
+                        columnWidths: {
+                          for (var i = 0; i < category.codes!.length; i++)
+                            i: FlexColumnWidth(
+                              block.columnWidths['${category.id}/${category.codes![i]}'] ??
+                                  1,
+                            ),
+                        },
+                        children: [
+                          TableRow(
+                            children: [
+                              for (final code in category.codes!)
+                                Padding(
+                                  padding: const EdgeInsets.all(4),
+                                  child: Text(
+                                    category.fields
+                                        .firstWhere((f) => f.code == code)
+                                        .label,
+                                  ),
+                                ),
+                            ],
+                          ),
+                          TableRow(
+                            children: [
+                              for (final _ in category.codes!)
+                                const Padding(
+                                  padding: EdgeInsets.all(4),
+                                  child: Text('…'),
+                                ),
+                            ],
+                          ),
+                        ],
+                      ),
+                      for (var i = 0; i < codes.length - 1; i++)
+                        Positioned(
+                          left:
+                              constraints.maxWidth *
+                                  weights
+                                      .take(i + 1)
+                                      .fold<double>(0, (sum, w) => sum + w) /
+                                  total -
+                              6,
+                          top: 0,
+                          bottom: 0,
+                          width: 12,
+                          child: MouseRegion(
+                            cursor: SystemMouseCursors.resizeColumn,
+                            child: Tooltip(
+                              message: 'Перетащите границу столбца',
+                              child: GestureDetector(
+                                key: ValueKey(
+                                  'column-resize-${category.id}-$i',
+                                ),
+                                behavior: HitTestBehavior.opaque,
+                                onHorizontalDragStart: (_) =>
+                                    setState(() => selectedId = block.id),
+                                onHorizontalDragUpdate: (details) => change(() {
+                                  final first = '${category.id}/${codes[i]}';
+                                  final second =
+                                      '${category.id}/${codes[i + 1]}';
+                                  final a = block.columnWidths[first] ?? 1.0;
+                                  final b = block.columnWidths[second] ?? 1.0;
+                                  final delta =
+                                      (details.delta.dx *
+                                              total /
+                                              constraints.maxWidth)
+                                          .clamp(
+                                            math.max(.2 - a, b - 20),
+                                            math.min(20 - a, b - .2),
+                                          );
+                                  block.columnWidths[first] = a + delta;
+                                  block.columnWidths[second] = b - delta;
+                                }),
+                                child: Center(
+                                  child: Container(
+                                    width: 2,
+                                    color: const Color(0xFF4B88FF),
+                                  ),
+                                ),
+                              ),
+                            ),
                           ),
                         ),
                     ],
-                  ),
-                  TableRow(
-                    children: [
-                      for (final _ in category.codes!)
-                        const Padding(
-                          padding: EdgeInsets.all(4),
-                          child: Text('…'),
-                        ),
-                    ],
-                  ),
-                ],
+                  );
+                },
               ),
             const SizedBox(height: 8),
           ],
@@ -403,10 +515,45 @@ class _DocumentCanvasEditorState extends State<DocumentCanvasEditor> {
           const Text('Сумма без НДС: …'),
           const Text('Итого для клиента: …'),
         ] else
-          for (final code in block.fields)
-            Text(
-              '${documentPartyFields.firstWhere((f) => f.code == code).label}: …',
-            ),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final style = DefaultTextStyle.of(context).style;
+              final rows = documentPartyRows(
+                [
+                  for (final code in block.fields)
+                    '${documentPartyFields.firstWhere((f) => f.code == code).label}: …',
+                ],
+                constraints.maxWidth,
+                style,
+                block.flowFields,
+              );
+              return Column(
+                children: [
+                  for (final row in rows)
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (var i = 0; i < row.cells.length; i++)
+                          Expanded(
+                            flex: (row.widths[i] * 100).round(),
+                            child: Padding(
+                              padding: const EdgeInsets.all(4),
+                              child: Text(
+                                row.cells[i],
+                                textAlign: switch (block.align) {
+                                  'right' => TextAlign.right,
+                                  'center' => TextAlign.center,
+                                  _ => TextAlign.left,
+                                },
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                ],
+              );
+            },
+          ),
       ],
     );
   }
@@ -529,15 +676,37 @@ class _DocumentCanvasEditorState extends State<DocumentCanvasEditor> {
           onChanged: (v) => change(() => block.align = v!),
         ),
         const SizedBox(height: 12),
-        if (block.kind == 'executor' || block.kind == 'client')
+        if (block.kind == 'executor' || block.kind == 'client') ...[
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Заполнять по ширине'),
+            subtitle: const Text('Размещать поля рядом, если хватает места'),
+            value: block.flowFields,
+            onChanged: (value) => change(() => block.flowFields = value),
+          ),
           DocumentFieldPicker(
             fields: documentPartyFieldsFor(block.kind),
             codes: block.fields,
             onChanged: (codes) => change(() => block.fields = codes),
           ),
+        ],
+        if (block.kind == 'table' && widget.board.categories.length > 1) ...[
+          const Text('Порядок категорий'),
+          DocumentFieldPicker(
+            key: const ValueKey('document-category-order'),
+            showSelection: false,
+            fields: [
+              for (final category in widget.board.categories)
+                DocumentLayoutField(category.id, category.name),
+            ],
+            codes: orderedCategories(block).map((c) => c.id).toList(),
+            onChanged: (codes) => change(() => block.categoryOrder = codes),
+          ),
+        ],
         if (block.kind == 'table')
-          for (final category in widget.board.categories)
+          for (final category in orderedCategories(block))
             ExpansionTile(
+              key: ValueKey('category-fields-${category.id}'),
               title: Text(category.name),
               children: [
                 DocumentFieldPicker(
@@ -567,6 +736,17 @@ class _DocumentCanvasEditorState extends State<DocumentCanvasEditor> {
         ),
       ],
     );
+  }
+
+  List<DocumentLayoutCategory> orderedCategories(DocumentBlock block) {
+    final indexed = widget.board.categories.indexed.toList()
+      ..sort((a, b) {
+        final rank = block
+            .categoryRank(a.$2.id)
+            .compareTo(block.categoryRank(b.$2.id));
+        return rank == 0 ? a.$1.compareTo(b.$1) : rank;
+      });
+    return indexed.map((entry) => entry.$2).toList();
   }
 }
 

@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/platform/workspace_address.dart';
 import 'package:sklad_komforta_app/core/widgets/reorderable_token_wrap.dart';
 import 'package:sklad_komforta_app/core/widgets/collapse_toggle.dart';
 import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
@@ -204,6 +205,13 @@ final class _OrganizationOnboardingPageState
     step = _settingsMode
         ? _settingsStepIndexes.first
         : draft.currentStep.clamp(1, 10) - 1;
+    if (_settingsMode) {
+      final path = readWorkspacePath();
+      final savedStep = path.startsWith('/company/settings/configuration/')
+          ? int.tryParse(path.split('/').last)
+          : null;
+      if (_settingsStepIndexes.contains(savedStep)) step = savedStep!;
+    }
     widget.configurationEditGuard?.attach(this, _confirmLeave);
   }
 
@@ -606,7 +614,10 @@ final class _OrganizationOnboardingPageState
     if (_settingsMode) {
       if (value == step || widget.settingsBusy) return;
       if (!await _confirmLeave(context)) return;
-      if (mounted) setState(() => step = value);
+      if (mounted) {
+        setState(() => step = value);
+        writeWorkspacePath('/company/settings/configuration/$value');
+      }
       return;
     }
     if (value <= draft.currentStep - 1) setState(() => step = value);

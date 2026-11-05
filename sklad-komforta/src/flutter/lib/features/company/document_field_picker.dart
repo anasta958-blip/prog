@@ -8,12 +8,14 @@ class DocumentFieldPicker extends StatelessWidget {
     required this.codes,
     required this.onChanged,
     this.enabled = true,
+    this.showSelection = true,
     super.key,
   });
   final List<DocumentLayoutField> fields;
   final List<String> codes;
   final ValueChanged<List<String>> onChanged;
   final bool enabled;
+  final bool showSelection;
 
   @override
   Widget build(BuildContext context) {
@@ -60,19 +62,25 @@ class DocumentFieldPicker extends StatelessWidget {
                 ),
               ),
               Expanded(
-                child: CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  controlAffinity: ListTileControlAffinity.leading,
-                  title: Text(fields.firstWhere((f) => f.code == code).label),
-                  value: checked,
-                  onChanged: !enabled
-                      ? null
-                      : (value) => onChanged(
-                          value == true
-                              ? [...selected, code]
-                              : selected.where((item) => item != code).toList(),
+                child: !showSelection
+                    ? Text(fields.firstWhere((f) => f.code == code).label)
+                    : CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        title: Text(
+                          fields.firstWhere((f) => f.code == code).label,
                         ),
-                ),
+                        value: checked,
+                        onChanged: !enabled
+                            ? null
+                            : (value) => onChanged(
+                                value == true
+                                    ? [...selected, code]
+                                    : selected
+                                          .where((item) => item != code)
+                                          .toList(),
+                              ),
+                      ),
               ),
               if (checked) ...[
                 IconButton(

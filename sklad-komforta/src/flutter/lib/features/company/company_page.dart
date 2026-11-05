@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/platform/workspace_address.dart';
 import 'document_layout_page.dart';
 import 'employee_password_dialog.dart';
 import 'company_form_fields.dart';
@@ -111,6 +112,16 @@ final class _OrganizationSettingsSection extends StatefulWidget {
 final class _OrganizationSettingsSectionState
     extends State<_OrganizationSettingsSection> {
   int tab = 0;
+  @override
+  void initState() {
+    super.initState();
+    final path = readWorkspacePath();
+    if (path == '/company/settings/configuration' ||
+        path.startsWith('/company/settings/configuration/')) {
+      tab = 1;
+    }
+  }
+
   late final ConfigurationEditGuard _configurationEditGuard =
       widget.configurationEditGuard ?? ConfigurationEditGuard();
   Widget get _sectionSelector => AppSelectField<int>(
@@ -189,7 +200,14 @@ final class _OrganizationSettingsSectionState
     if (!await _configurationEditGuard.canLeave(context)) {
       return;
     }
-    if (mounted) setState(() => tab = next);
+    if (mounted) {
+      setState(() => tab = next);
+      writeWorkspacePath(
+        next == 1
+            ? '/company/settings/configuration'
+            : '/company/settings/legal',
+      );
+    }
   }
 }
 

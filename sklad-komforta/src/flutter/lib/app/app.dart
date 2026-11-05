@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/platform/workspace_address.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/l10n/app_localizations.dart';
@@ -31,7 +32,15 @@ class SkladKomfortaApp extends StatelessWidget {
   /// Формирует MaterialApp с русской локалью и общей премиальной тёмной темой.
   @override
   Widget build(BuildContext context) {
+    initializeWorkspaceAddress();
     final quoteAccessToken = Uri.base.queryParameters['quoteAccessToken'];
+    final home = quoteAccessToken?.trim().isNotEmpty == true
+        ? QuoteClientAccessPage(config: config, accessToken: quoteAccessToken!)
+        : AuthFlowPage(
+            config: config,
+            controller: authController,
+            initializeController: initializeAuthController,
+          );
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       onGenerateTitle: (context) => AppLocalizations.of(context).appTitle,
@@ -44,16 +53,14 @@ class SkladKomfortaApp extends StatelessWidget {
       supportedLocales: AppLocalizations.supportedLocales,
       locale: const Locale('ru'),
       theme: buildAppTheme(),
-      home: quoteAccessToken?.trim().isNotEmpty == true
-          ? QuoteClientAccessPage(
-              config: config,
-              accessToken: quoteAccessToken!,
-            )
-          : AuthFlowPage(
-              config: config,
-              controller: authController,
-              initializeController: initializeAuthController,
-            ),
+      // Workspace fragments are handled after authentication, not by Navigator.
+      onGenerateInitialRoutes: (_) => [
+        MaterialPageRoute<void>(
+          settings: const RouteSettings(name: '/'),
+          builder: (_) => home,
+        ),
+      ],
+      routes: {'/': (_) => home},
     );
   }
 }

@@ -9,6 +9,35 @@ void main() {
     apiBaseUrl: 'https://example.test/api/v1',
     environment: 'test',
   );
+  for (final code in ['invalid_credentials', 'session_expired']) {
+    test(
+      'login 401 reports login failure rather than expired session: $code',
+      () async {
+        final api = _Gateway()
+          ..loginError = AuthApiException(
+            code,
+            'Неверный логин или пароль.',
+            401,
+          );
+        final auth = AuthController(config, api: api, tokens: _Tokens());
+        await auth.login('user', 'wrong-password');
+        expect(auth.stage, AuthStage.login);
+        expect(auth.busy, isFalse);
+        expect(
+          auth.error,
+          code == 'invalid_credentials'
+              ? 'Неверный логин или пароль.'
+              : 'Сервер отклонил запрос входа (HTTP 401). Проверьте адрес сервера и данные для входа.',
+        );
+        expect(auth.accessToken, isNull);
+        api.loginError = null;
+        await auth.login('user', 'correct-password');
+        expect(auth.stage, AuthStage.verifyTotp);
+        expect(auth.error, isNull);
+        auth.dispose();
+      },
+    );
+  }
   for (final restore in [false, true]) {
     test(
       'employee enters workspace without director settings: restore=$restore',
@@ -55,6 +84,7 @@ void main() {
 class _Gateway implements AuthGateway {
   final paths = <String>[];
   bool fail = false;
+  AuthApiException? loginError;
   @override
   Future<dynamic> get(String path, String accessToken) async {
     paths.add(path);
@@ -69,7 +99,14 @@ class _Gateway implements AuthGateway {
     String path,
     Map<String, dynamic> body, {
     String? accessToken,
-  }) async => {'accessToken': 'access', 'organizationId': 'organization'};
+  }) async {
+    if (path == '/auth/login') {
+      if (loginError != null) throw loginError!;
+      return {'step': 3, 'challengeToken': 'challenge'};
+    }
+    return {'accessToken': 'access', 'organizationId': 'organization'};
+  }
+
   @override
   Future<dynamic> delete(String path, String accessToken) async => null;
   @override

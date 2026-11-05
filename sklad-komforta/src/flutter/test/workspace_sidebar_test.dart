@@ -14,6 +14,33 @@ const _config = AppConfig(
 );
 
 void main() {
+  testWidgets(
+    'workspace fragment waits for authentication without unknown route',
+    (tester) async {
+      tester.binding.platformDispatcher.defaultRouteNameTestValue =
+          '/company/documents';
+      addTearDown(
+        tester.binding.platformDispatcher.clearDefaultRouteNameTestValue,
+      );
+      final auth = AuthController(
+        _config,
+        api: _OfflineAuthGateway(),
+        tokens: _MemoryTokenRepository(),
+      );
+      addTearDown(auth.dispose);
+      await tester.pumpWidget(
+        SkladKomfortaApp(
+          config: _config,
+          authController: auth,
+          initializeAuthController: false,
+        ),
+      );
+      await tester.pump();
+      expect(find.byType(WorkspacePage), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
   testWidgets('resize preserves the active kanban state', (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1400, 900);
