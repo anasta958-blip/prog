@@ -16,12 +16,137 @@ import 'package:sklad_komforta_app/features/company/company_controller.dart';
 import 'package:sklad_komforta_app/features/company/company_page.dart';
 import 'package:sklad_komforta_app/features/company/employee_password_dialog.dart';
 import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
+import 'package:sklad_komforta_app/features/onboarding/organization_onboarding_page.dart';
 
 void main() {
   const config = AppConfig(
     apiBaseUrl: 'https://api.example.test/api/v1',
     environment: 'test',
   );
+
+  testWidgets('rule copy button creates independent adjacent rules', (
+    tester,
+  ) async {
+    final auth = AuthController(
+      config,
+      api: _NoopAuthGateway(),
+      tokens: _MemoryTokenRepository(),
+    );
+    addTearDown(auth.dispose);
+    final draft = OrganizationOnboardingDraft.initial();
+    draft.categories.add(
+      CatalogCategoryDraft(
+        clientId: 'category',
+        name: 'Категория',
+        sections: [],
+        fields: [],
+      ),
+    );
+    draft.rules.add(
+      CalculationRuleDraft(
+        clientId: 'source',
+        name: 'Правило',
+        categoryClientId: 'category',
+        eventType: 'card_saving',
+        isEnabled: true,
+        actions: [
+          RuleActionDraft(actionType: 'block_save', message: 'Проверка'),
+        ],
+      ),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: OrganizationOnboardingPage(
+            controller: auth,
+            settingsDraft: draft,
+            onSettingsSave: (value, {required deleteCategoryData}) async =>
+                true,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    tester
+        .widget<AppSelectField<int>>(
+          find.byWidgetPredicate(
+            (widget) =>
+                widget is AppSelectField<int> && widget.label == 'Раздел',
+          ),
+        )
+        .onChanged!(5);
+    await tester.pumpAndSettle();
+    final copy = find.byTooltip('Копировать правило').first;
+    await tester.ensureVisible(copy);
+    await tester.tap(copy);
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Копировать правило'), findsNWidgets(2));
+    expect(find.text('Правило (копия)'), findsWidgets);
+    await tester.ensureVisible(copy);
+    await tester.tap(copy);
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Копировать правило'), findsNWidgets(3));
+    expect(find.text('Правило (копия 2)'), findsWidgets);
+    expect(tester.takeException(), isNull);
+    expect(draft.rules, hasLength(1));
+  });
+
+  for (final type in ['person', 'ip', 'ooo']) {
+    testWidgets('client $type validates only the required name', (
+      tester,
+    ) async {
+      final workspace = _PartialWorkspaceGateway()..allowClients = true;
+      final auth = AuthController(
+        config,
+        api: _NoopAuthGateway(),
+        tokens: _MemoryTokenRepository(),
+      )..accessToken = 'access-token';
+      final controller = CompanyController(
+        config,
+        auth,
+        api: _MemoryCompanyGateway(),
+        workspaceApi: workspace,
+      );
+      addTearDown(controller.dispose);
+      await controller.initialize();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CompanyPage(
+              controller: controller,
+              section: CompanySection.clients,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Добавить клиента'));
+      await tester.pumpAndSettle();
+      tester
+          .widget<AppSelectField<String>>(find.byType(AppSelectField<String>))
+          .onChanged!(type);
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Сохранить'));
+      await tester.pumpAndSettle();
+      if (type != 'person') {
+        expect(workspace.savedClient, isNull);
+        final name = find.byKey(
+          ValueKey(type == 'ip' ? 'Название ИП' : 'Название компании'),
+        );
+        await tester.ensureVisible(name);
+        await tester.enterText(name, 'Тестовый клиент');
+        await tester.tap(find.widgetWithText(FilledButton, 'Сохранить'));
+        await tester.pumpAndSettle();
+      }
+      expect(workspace.savedClient?.companyType, type);
+      expect(
+        workspace.savedClient?.name,
+        type == 'person' ? '' : 'Тестовый клиент',
+      );
+      expect(find.text('Новый клиент'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets('document builder saves selected fields in user order', (
     tester,
@@ -890,6 +1015,8 @@ final class _MemoryCompanyGateway
 }
 
 final class _PartialWorkspaceGateway implements CompanyWorkspaceGateway {
+  bool allowClients = false;
+  CompanyClientModel? savedClient;
   int employeeRequests = 0;
   String? passwordMembershipId;
   String? newPassword;
@@ -949,7 +1076,9 @@ final class _PartialWorkspaceGateway implements CompanyWorkspaceGateway {
 
   @override
   Future<List<CompanyClientModel>> getClients(String accessToken) =>
-      throw const ApiException('forbidden', 'Нет прав.', 403);
+      allowClients
+      ? Future.value([])
+      : throw const ApiException('forbidden', 'Нет прав.', 403);
 
   @override
   Future<List<EmployeeModel>> getEmployees(String accessToken) async {
@@ -988,7 +1117,10 @@ final class _PartialWorkspaceGateway implements CompanyWorkspaceGateway {
     String accessToken,
     CompanyClientModel value, {
     bool create = false,
-  }) async => value;
+  }) async {
+    savedClient = value;
+    return value;
+  }
 
   @override
   Future<void> deleteClient(String accessToken, String id) async {}

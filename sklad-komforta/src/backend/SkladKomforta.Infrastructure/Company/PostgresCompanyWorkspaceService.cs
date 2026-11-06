@@ -161,7 +161,7 @@ internal sealed class PostgresCompanyWorkspaceService(
     /// <inheritdoc />
     public async Task<CompanyClient> CreateClientAsync(Guid actorUserId, SaveCompanyClientRequest request, CancellationToken cancellationToken)
     {
-        var name = Required(request.Name, 2, 200, "client_name_invalid", "Название клиента должно содержать от 2 до 200 символов.");
+        var name = Required(request.Name ?? string.Empty, 0, 200, "client_name_invalid", "Название клиента должно содержать не более 200 символов.");
         ValidateClient(request);
         var id = Guid.NewGuid();
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
@@ -182,7 +182,7 @@ internal sealed class PostgresCompanyWorkspaceService(
     /// <inheritdoc />
     public async Task<CompanyClient> UpdateClientAsync(Guid actorUserId, Guid id, SaveCompanyClientRequest request, CancellationToken cancellationToken)
     {
-        var name = Required(request.Name, 2, 200, "client_name_invalid", "Название клиента должно содержать от 2 до 200 символов.");
+        var name = Required(request.Name ?? string.Empty, 0, 200, "client_name_invalid", "Название клиента должно содержать не более 200 символов.");
         ValidateClient(request);
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
         var before = (await ReadClientsAsync(connection, id, cancellationToken)).SingleOrDefault()
@@ -628,26 +628,26 @@ internal sealed class PostgresCompanyWorkspaceService(
     private static void ValidateClient(SaveCompanyClientRequest request)
     {
         var type = NormalizePartyType(request.CompanyType);
-        Required(request.CompanyName ?? string.Empty, 2, 300, "client_party_name_invalid", type == "person"
-            ? "Укажите ФИО клиента."
-            : "Укажите название клиента.");
-        RequiredPhone(request.Phone);
+        if (type != "person")
+            Required(request.Name ?? string.Empty, 2, 200, "client_name_invalid", "Название клиента должно содержать от 2 до 200 символов.");
+        Required(request.CompanyName ?? string.Empty, 0, 300, "client_party_name_invalid", "Название или ФИО клиента должно содержать не более 300 символов.");
+        Phone(request.Phone);
         Email(request.Email);
         if (type == "person")
         {
-            RequiredDigits(request.PassportSeries, [4], "Серия паспорта должна содержать 4 цифры.");
-            RequiredDigits(request.PassportNumber, [6], "Номер паспорта должен содержать 6 цифр.");
-            Required(request.PassportIssuedBy ?? string.Empty, 2, 500, "passport_issuer_invalid", "Укажите, кем выдан паспорт.");
+            Digits(request.PassportSeries, [4], "Серия паспорта должна содержать 4 цифры.");
+            Digits(request.PassportNumber, [6], "Номер паспорта должен содержать 6 цифр.");
+            Required(request.PassportIssuedBy ?? string.Empty, 0, 500, "passport_issuer_invalid", "Поле «Кем выдан» должно содержать не более 500 символов.");
             return;
         }
-        Required(request.LegalName ?? string.Empty, 2, 300, "client_legal_name_invalid", "Укажите юридическое название клиента.");
-        RequiredDigits(request.Inn, type == "ip" ? [12] : [10], type == "ip" ? "ИНН ИП должен содержать 12 цифр." : "ИНН организации должен содержать 10 цифр.");
-        RequiredDigits(request.Ogrn, type == "ip" ? [15] : [13], type == "ip" ? "ОГРНИП должен содержать 15 цифр." : "ОГРН должен содержать 13 цифр.");
-        if (type != "ip") RequiredDigits(request.Kpp, [9], "КПП должен содержать 9 цифр.");
-        Required(request.BankName ?? string.Empty, 2, 300, "client_bank_name_invalid", "Укажите банк клиента.");
-        RequiredDigits(request.BankBik, [9], "БИК должен содержать 9 цифр.");
-        RequiredDigits(request.BankAccount, [20], "Расчётный счёт должен содержать 20 цифр.");
-        RequiredDigits(request.CorrAccount, [20], "Корреспондентский счёт должен содержать 20 цифр.");
+        Required(request.LegalName ?? string.Empty, 0, 300, "client_legal_name_invalid", "Юридическое название клиента должно содержать не более 300 символов.");
+        Digits(request.Inn, type == "ip" ? [12] : [10], type == "ip" ? "ИНН ИП должен содержать 12 цифр." : "ИНН организации должен содержать 10 цифр.");
+        Digits(request.Ogrn, type == "ip" ? [15] : [13], type == "ip" ? "ОГРНИП должен содержать 15 цифр." : "ОГРН должен содержать 13 цифр.");
+        if (type != "ip") Digits(request.Kpp, [9], "КПП должен содержать 9 цифр.");
+        Required(request.BankName ?? string.Empty, 0, 300, "client_bank_name_invalid", "Название банка должно содержать не более 300 символов.");
+        Digits(request.BankBik, [9], "БИК должен содержать 9 цифр.");
+        Digits(request.BankAccount, [20], "Расчётный счёт должен содержать 20 цифр.");
+        Digits(request.CorrAccount, [20], "Корреспондентский счёт должен содержать 20 цифр.");
     }
 
     private static string NormalizePartyType(string? value) => value?.Trim().ToLowerInvariant() switch

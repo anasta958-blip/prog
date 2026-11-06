@@ -293,7 +293,7 @@ internal sealed class PostgresOrderService(
                  sort_order, created_by, updated_by)
             VALUES
                 (@id, @id, @workflow_id, @column_id, NULL, @title, '{}'::jsonb,
-                 COALESCE((SELECT max(sort_order) + 1 FROM kanban_cards
+                 COALESCE((SELECT min(sort_order) - 1 FROM kanban_cards
                            WHERE workflow_id = @workflow_id AND column_id = @column_id
                              AND deleted_at IS NULL), 0),
                  @actor, @actor)

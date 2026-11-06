@@ -30,10 +30,15 @@ final class PartySearchOption {
   }
 
   factory PartySearchOption.client(CompanyClientModel client) {
-    final detail = client.companyType == 'person'
-        ? _distinct(client.phone, client.name)
+    final company = client.companyType == 'person'
+        ? null
         : _distinct(client.companyName, client.name) ??
               _distinct(client.legalName, client.name);
+    final details = <String>{
+      ?company,
+      ?_distinct(client.phone, client.name),
+    };
+    final detail = details.isEmpty ? null : details.join(' · ');
     return PartySearchOption(
       id: client.id,
       title: client.name,

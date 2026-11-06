@@ -4,6 +4,20 @@ import 'package:sklad_komforta_app/features/company/company_models.dart';
 import 'package:sklad_komforta_app/features/quotes/party_search_field.dart';
 
 void main() {
+  for (final type in ['ip', 'ooo']) {
+    test('business customer $type displays phone without duplicate name', () {
+      final client =
+          CompanyClientModel(id: type, name: 'Название', companyType: type)
+            ..companyName = 'Название'
+            ..phone = '+7 (999) 123-45-67';
+      expect(
+        PartySearchOption.client(client).label,
+        'Название — +7 (999) 123-45-67',
+      );
+      client.phone = '  ';
+      expect(PartySearchOption.client(client).label, 'Название');
+    });
+  }
   test(
     'party labels include company name or phone and match partial input',
     () {

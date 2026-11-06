@@ -1269,7 +1269,7 @@ final class _ClientDialogState extends State<_ClientDialog>
                     item.name = value;
                     if (item.companyType != 'person') item.legalName = value;
                   },
-                  required: true,
+                  required: item.companyType != 'person',
                 ),
                 if (item.companyType == 'person') ...[
                   const SizedBox(height: 12),
@@ -1280,7 +1280,6 @@ final class _ClientDialogState extends State<_ClientDialog>
                         'Телефон',
                         item.phone ?? '',
                         (value) => item.phone = value,
-                        required: true,
                       ),
                       companyEmailField(
                         'Email',
@@ -1298,20 +1297,17 @@ final class _ClientDialogState extends State<_ClientDialog>
                         item.passportSeries ?? '',
                         (value) => item.passportSeries = value,
                         lengths: const [4],
-                        required: true,
                       ),
                       companyDigitsField(
                         'Номер паспорта',
                         item.passportNumber ?? '',
                         (value) => item.passportNumber = value,
                         lengths: const [6],
-                        required: true,
                       ),
                       companyTextField(
                         'Кем выдан',
                         item.passportIssuedBy ?? '',
                         (value) => item.passportIssuedBy = value,
-                        required: true,
                       ),
                     ],
                   ),
@@ -1335,7 +1331,6 @@ final class _ClientDialogState extends State<_ClientDialog>
                         lengths: item.companyType == 'ip'
                             ? const [12]
                             : const [10],
-                        required: true,
                         suffix: registryLookupButton(
                           () => lookupRegistry(
                             controller: widget.controller,
@@ -1351,7 +1346,6 @@ final class _ClientDialogState extends State<_ClientDialog>
                           item.kpp ?? '',
                           (value) => item.kpp = value,
                           lengths: const [9],
-                          required: true,
                         ),
                       companyDigitsField(
                         item.companyType == 'ip' ? 'ОГРНИП' : 'ОГРН',
@@ -1360,7 +1354,6 @@ final class _ClientDialogState extends State<_ClientDialog>
                         lengths: item.companyType == 'ip'
                             ? const [15]
                             : const [13],
-                        required: true,
                       ),
                     ],
                   ),
@@ -1373,7 +1366,6 @@ final class _ClientDialogState extends State<_ClientDialog>
                         'Телефон',
                         item.phone ?? '',
                         (value) => item.phone = value,
-                        required: true,
                       ),
                       companyEmailField(
                         'Email',
@@ -1384,7 +1376,6 @@ final class _ClientDialogState extends State<_ClientDialog>
                         'Банк',
                         item.bankName ?? '',
                         (value) => item.bankName = value,
-                        required: true,
                       ),
                     ],
                   ),
@@ -1394,7 +1385,6 @@ final class _ClientDialogState extends State<_ClientDialog>
                     item.bankBik ?? '',
                     (value) => item.bankBik = value,
                     lengths: const [9],
-                    required: true,
                   ),
                   const SizedBox(height: 12),
                   companyTextField(
@@ -1413,14 +1403,12 @@ final class _ClientDialogState extends State<_ClientDialog>
                         item.bankAccount ?? '',
                         (value) => item.bankAccount = value,
                         lengths: const [20],
-                        required: true,
                       ),
                       companyDigitsField(
                         'Корреспондентский счёт',
                         item.corrAccount ?? '',
                         (value) => item.corrAccount = value,
                         lengths: const [20],
-                        required: true,
                       ),
                     ],
                   ),

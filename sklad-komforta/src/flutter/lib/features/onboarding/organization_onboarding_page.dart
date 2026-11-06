@@ -2261,6 +2261,7 @@ final class _OrganizationOnboardingPageState
       const SizedBox(height: 12),
       for (var index = 0; index < draft.rules.length; index++)
         Padding(
+          key: ValueKey(draft.rules[index].clientId),
           padding: const EdgeInsets.only(bottom: 12),
           child: _rulePanel(draft.rules[index], index),
         ),
@@ -2464,6 +2465,26 @@ final class _OrganizationOnboardingPageState
     final expanded = !_collapsedRules.contains(rule.clientId);
     return _SubPanel(
       title: rule.name,
+      onCopy: () => setState(() {
+        var id = 'rule_${DateTime.now().microsecondsSinceEpoch}';
+        while (draft.rules.any((item) => item.clientId == id)) {
+          id = '${id}_copy';
+        }
+        String copyName(String suffix) {
+          final limit = 120 - suffix.length;
+          final base = rule.name.length > limit
+              ? rule.name.substring(0, limit)
+              : rule.name;
+          return '$base$suffix';
+        }
+
+        var name = copyName(' (копия)');
+        var number = 2;
+        while (draft.rules.any((item) => item.name == name)) {
+          name = copyName(' (копия ${number++})');
+        }
+        draft.rules.insert(index + 1, rule.copy(clientId: id, name: name));
+      }),
       expanded: expanded,
       onToggle: () =>
           setState(() => _toggleCollapsed(_collapsedRules, rule.clientId)),
@@ -3836,6 +3857,7 @@ final class _SubPanel extends StatelessWidget {
     required this.title,
     required this.child,
     this.onDelete,
+    this.onCopy,
     this.onToggle,
     this.expanded = true,
     this.collapseTooltip = 'Свернуть блок',
@@ -3844,6 +3866,7 @@ final class _SubPanel extends StatelessWidget {
   final String title;
   final Widget child;
   final VoidCallback? onDelete;
+  final VoidCallback? onCopy;
   final VoidCallback? onToggle;
   final bool expanded;
   final String collapseTooltip;
@@ -3879,6 +3902,12 @@ final class _SubPanel extends StatelessWidget {
                       child: const Icon(Icons.keyboard_arrow_down),
                     ),
                   ),
+                ),
+              if (onCopy != null)
+                IconButton(
+                  onPressed: onCopy,
+                  icon: const Icon(Icons.copy_outlined),
+                  tooltip: 'Копировать правило',
                 ),
               if (onDelete != null)
                 IconButton(

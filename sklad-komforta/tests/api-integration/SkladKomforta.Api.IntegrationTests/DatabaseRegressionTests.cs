@@ -79,6 +79,15 @@ public sealed partial class DatabaseRegressionTests
             Assert.Equal(0L, await profileTables.ExecuteScalarAsync());
         }
         var workspaceProfile = await Send(staff, HttpMethod.Get, "/company/profile");
+        foreach (var clientType in new[] { "person", "ip", "ooo" })
+        {
+            var emptyClient = new { name = clientType == "person" ? "" : "Test", companyType = clientType };
+            var client = await Send(staff, HttpMethod.Post, "/company/clients", emptyClient);
+            Assert.Equal(emptyClient.name, Text(client, "name"));
+            var clientPath = $"/company/clients/{Text(client, "id")}";
+            await Send(staff, HttpMethod.Put, clientPath, emptyClient);
+            await Send(staff, HttpMethod.Delete, clientPath);
+        }
         Assert.Single(workspaceProfile.AsObject());
         var initialConfiguration = await Send(staff, HttpMethod.Get, "/company/configuration");
         Assert.Single(initialConfiguration["company"]!.AsObject());
@@ -275,8 +284,13 @@ public sealed partial class DatabaseRegressionTests
         foreach (var kind in new[] { "quote", "prequote" })
         {
             var proposal = QuoteRequest(kind, Text(customer, "id"), Text(company, "id"), categoryId, sectionId, productId);
+            var older = await Send(staff, HttpMethod.Post, $"/kanbans/{boardId}/quotes", new { columnId, quote = proposal });
             var created = await Send(staff, HttpMethod.Post, $"/kanbans/{boardId}/quotes", new { columnId, quote = proposal });
             var cardId = Text(created, "cardId");
+            var orderedCards = (await Send(staff, HttpMethod.Get, $"/kanbans/{boardId}/cards?columnId={columnId}"))["items"]!.AsArray();
+            Assert.Equal(cardId, Text(orderedCards[0]!, "id"));
+            Assert.Equal(Text(older, "cardId"), Text(orderedCards[1]!, "id"));
+            await Send(staff, HttpMethod.Delete, $"/kanbans/{boardId}/cards/{Text(older, "cardId")}");
             var path = $"/kanbans/{boardId}/cards/{cardId}";
             var quotePath = path + "/quote";
             var saved = await Send(staff, HttpMethod.Get, quotePath);

@@ -4,6 +4,52 @@ import 'package:sklad_komforta_app/features/onboarding/onboarding_field_registry
 import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
 
 void main() {
+  test('rule copy preserves settings and owns all nested mutable data', () {
+    final source = CalculationRuleDraft(
+      clientId: 'original',
+      name: 'Правило',
+      categoryClientId: 'category',
+      eventType: 'field_changed',
+      eventFieldCode: 'price',
+      isEnabled: false,
+      conditions: [
+        RuleConditionDraft(
+          fieldCode: 'price',
+          operator: 'equals',
+          comparisonFieldCode: 'cost',
+        ),
+      ],
+      actions: [
+        RuleActionDraft(
+          actionType: 'set_field',
+          targetFieldCode: 'result',
+          highlightColor: '#EF4444',
+          message: 'Сообщение',
+          formula: FormulaDraft(
+            tokens: [
+              FormulaTokenDraft(tokenType: 'constant', constantValue: 10),
+            ],
+          ),
+        ),
+      ],
+    );
+    final before = source.toJson();
+    final copy = source.copy(clientId: 'copy', name: 'Правило (копия)');
+    expect(copy.toJson(), {
+      ...before,
+      'clientId': 'copy',
+      'name': 'Правило (копия)',
+    });
+    copy.conditions.first.comparisonFieldCode = 'other';
+    copy.actions.first.formula!.tokens.first.constantValue = 20;
+    copy.actions.first.message = 'Изменено';
+    copy.conditions.clear();
+    expect(source.toJson(), before);
+    expect(
+      CalculationRuleDraft.fromJson(copy.toJson()).toJson(),
+      copy.toJson(),
+    );
+  });
   test('field total mode survives serialization including legacy null', () {
     for (final mode in [null, 'none', 'total', 'separate']) {
       final field = CatalogFieldDraft(

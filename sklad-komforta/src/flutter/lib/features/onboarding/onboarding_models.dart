@@ -619,6 +619,11 @@ final class CalculationRuleDraft {
   List<RuleConditionDraft> conditions;
   List<RuleActionDraft> actions;
 
+  CalculationRuleDraft copy({required String clientId, required String name}) =>
+      CalculationRuleDraft.fromJson(toJson())
+        ..clientId = clientId
+        ..name = name;
+
   factory CalculationRuleDraft.fromJson(Map<String, dynamic> json) =>
       CalculationRuleDraft(
         clientId: json['clientId'] as String,
