@@ -33,6 +33,9 @@ class DocumentFieldPicker extends StatelessWidget {
     }
 
     return ReorderableListView.builder(
+      // Do not reparent active tooltip overlays during a LayoutBuilder layout.
+      // The parent panel owns scrolling; only this non-scrollable list resets.
+      key: ValueKey(Object.hashAll(ordered)),
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       buildDefaultDragHandles: false,

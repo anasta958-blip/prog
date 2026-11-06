@@ -74,6 +74,57 @@ void main() {
       await font.load();
     }
   });
+  testWidgets('field arrows reorder with visible tooltips during layout', (
+    tester,
+  ) async {
+    var codes = ['name', 'quantity', 'price'];
+    late StateSetter rebuild;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StatefulBuilder(
+            builder: (context, setState) {
+              rebuild = setState;
+              return LayoutBuilder(
+                builder: (context, constraints) {
+                  return DocumentFieldPicker(
+                    fields: const [
+                      DocumentLayoutField('name', 'Название'),
+                      DocumentLayoutField('quantity', 'Количество'),
+                      DocumentLayoutField('price', 'Цена'),
+                    ],
+                    codes: codes,
+                    onChanged: (value) => rebuild(() => codes = value),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ),
+    );
+    final mouse = await tester.createGesture(kind: ui.PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    for (final tooltip in ['Переместить ниже', 'Переместить выше']) {
+      final button = find
+          .byWidgetPredicate(
+            (widget) =>
+                widget is IconButton &&
+                widget.tooltip == tooltip &&
+                widget.onPressed != null,
+          )
+          .first;
+      await mouse.moveTo(tester.getCenter(button));
+      await tester.pumpAndSettle(const Duration(seconds: 1));
+      expect(find.text(tooltip), findsOneWidget);
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    }
+    expect(codes, ['name', 'quantity', 'price']);
+    await mouse.removePointer();
+  });
+
   testWidgets('selected document fields reorder by dragging', (tester) async {
     var codes = ['name', 'quantity'];
     await tester.pumpWidget(
