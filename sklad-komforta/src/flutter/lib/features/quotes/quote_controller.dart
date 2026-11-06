@@ -1663,7 +1663,15 @@ final class QuoteController extends ChangeNotifier {
     if (_calculationError != null) return _calculationError;
     if (document.title.trim().isEmpty) return 'Введите название предложения.';
     if (document.clientId.isEmpty) return 'Выберите заказчика.';
+    if (!clients.any((client) => client.id == document.clientId)) {
+      return 'Заказчик не найден. Выберите запись из списка.';
+    }
     if (document.executorCompanyId.isEmpty) return 'Выберите исполнителя.';
+    if (!executors.any(
+      (executor) => executor.id == document.executorCompanyId,
+    )) {
+      return 'Исполнитель не найден. Выберите запись из списка.';
+    }
     if (document.proposalTypes.isEmpty) {
       return 'Добавьте хотя бы один тип предложения.';
     }

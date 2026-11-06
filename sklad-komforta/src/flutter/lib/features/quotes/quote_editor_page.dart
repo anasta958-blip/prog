@@ -33,6 +33,7 @@ import 'package:sklad_komforta_app/features/quotes/quote_client_access_api.dart'
 import 'package:sklad_komforta_app/features/quotes/quote_models.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_local_draft.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_preview_page.dart';
+import 'package:sklad_komforta_app/features/quotes/party_search_field.dart';
 
 part 'order_editor_page.dart';
 
@@ -1412,33 +1413,33 @@ final class _MetadataPanel extends StatelessWidget {
               onChanged: (value) =>
                   controller.updateDocument((draft) => draft.title = value),
             ),
-            AppSelectField<String>(
+            PartySearchField(
               value: draft.clientId.isEmpty ? null : draft.clientId,
               label: 'Заказчик',
               options: controller.clients
-                  .map(
-                    (item) => AppSelectOption(value: item.id, label: item.name),
-                  )
+                  .map(PartySearchOption.client)
                   .toList(),
               onChanged: (value) {
-                if (value != null) {
-                  controller.updateDocument((draft) => draft.clientId = value);
-                }
+                controller.updateDocument(
+                  (draft) => draft.clientId = value ?? '',
+                );
               },
             ),
-            AppSelectField<String>(
+            PartySearchField(
               value: draft.executorCompanyId.isEmpty
                   ? null
                   : draft.executorCompanyId,
               label: 'Исполнитель',
               options: controller.executors
-                  .map(
-                    (item) => AppSelectOption(value: item.id, label: item.name),
-                  )
+                  .map(PartySearchOption.executor)
                   .toList(),
               onChanged: (value) {
                 if (value != null) {
                   controller.selectExecutor(value);
+                } else {
+                  controller.updateDocument(
+                    (draft) => draft.executorCompanyId = '',
+                  );
                 }
               },
             ),

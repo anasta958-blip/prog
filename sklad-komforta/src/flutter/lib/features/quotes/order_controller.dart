@@ -325,6 +325,12 @@ final class OrderController extends QuoteController {
       notifyListeners();
       return false;
     }
+    if (!clients.any((client) => client.id == value.clientId) ||
+        !executors.any((executor) => executor.id == value.executorCompanyId)) {
+      error = 'Выберите существующих заказчика и исполнителя из списка.';
+      notifyListeners();
+      return false;
+    }
     saving = true;
     error = null;
     successMessage = null;

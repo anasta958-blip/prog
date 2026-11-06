@@ -34,6 +34,26 @@ void main() {
     tokens: _MemoryTokenRepository(),
   )..accessToken = 'access-token';
 
+  test('комплектация не сохраняется с заказчиком вне справочника', () async {
+    final auth = authorized();
+    final gateway = _MemoryOrderGateway();
+    final controller = OrderController(
+      config,
+      auth,
+      orderGateway: gateway,
+      catalogGateway: _CatalogGateway(),
+      companyGateway: _CompanyGateway(),
+    );
+    await controller.initializeOrder(board: _orderBoard, card: _card());
+    controller.updateDocument((draft) => draft.clientId = 'unknown-client');
+
+    expect(await controller.saveOrder(), isFalse);
+    expect(gateway.saved, isNull);
+
+    controller.dispose();
+    auth.dispose();
+  });
+
   test('источник поставщика выбирается по коду для каждой категории', () async {
     final auth = authorized();
     final board = KanbanBoard(
@@ -572,7 +592,10 @@ Map<String, dynamic> _orderJson() => {
               'quantity': 3,
               'isReorder': false,
               'fromQuote': true,
-              'values': {'custom_vendor': 'ВентАид', 'shipment_status': 'Купить'},
+              'values': {
+                'custom_vendor': 'ВентАид',
+                'shipment_status': 'Купить',
+              },
             },
             {
               'id': 'row-2',

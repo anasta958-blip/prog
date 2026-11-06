@@ -732,32 +732,28 @@ final class _OrderMetadataPanel extends StatelessWidget {
         ],
         onChanged: controller.setObjectType,
       ),
-      AppSelectField<String>(
+      PartySearchField(
         value: draft.clientId.isEmpty ? null : draft.clientId,
         label: 'Заказчик',
         options: [
           for (final client in controller.clients)
-            AppSelectOption(value: client.id, label: client.name),
+            PartySearchOption.client(client),
         ],
         onChanged: (value) {
-          if (value != null) {
-            controller.updateDocument((draft) => draft.clientId = value);
-          }
+          controller.updateDocument((draft) => draft.clientId = value ?? '');
         },
       ),
-      AppSelectField<String>(
+      PartySearchField(
         value: draft.executorCompanyId.isEmpty ? null : draft.executorCompanyId,
         label: 'Исполнитель',
         options: [
           for (final executor in controller.executors)
-            AppSelectOption(value: executor.id, label: executor.name),
+            PartySearchOption.executor(executor),
         ],
         onChanged: (value) {
-          if (value != null) {
-            controller.updateDocument(
-              (draft) => draft.executorCompanyId = value,
-            );
-          }
+          controller.updateDocument(
+            (draft) => draft.executorCompanyId = value ?? '',
+          );
         },
       ),
       _EmployeeField(

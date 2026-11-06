@@ -1489,6 +1489,15 @@ void main() {
         ..activeTypeId = type.id
         ..activeVariantId = variant.id;
 
+      controller.clients = [CompanyClientModel(id: 'client', name: 'Заказчик')];
+      controller.executors = [
+        LegalEntityModel(
+          id: 'executor',
+          name: 'Исполнитель',
+          companyType: 'ooo',
+        ),
+      ];
+
       final row = controller.addEntryPosition(section);
       expect(controller.focusRequestPositionId, row.id);
       expect(
@@ -1536,6 +1545,10 @@ void main() {
 
       controller.addEntryPosition(section);
       expect(section.positions, hasLength(2));
+      controller.draft!.clientId = 'unknown-client';
+      expect(await controller.save(board: _quoteBoard), isFalse);
+      expect(gateway.savedDraft, isNull);
+      controller.draft!.clientId = 'client';
       expect(await controller.save(board: _quoteBoard), isTrue);
       final saved = gateway.savedDraft!.proposalTypes.single.variants.single;
       final savedSection = saved.categories
