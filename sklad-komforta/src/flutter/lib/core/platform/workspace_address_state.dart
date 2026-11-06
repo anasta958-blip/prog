@@ -16,7 +16,7 @@ class WorkspaceAddressState {
   static String? validPath(String? value) =>
       value != null &&
           RegExp(
-            r'^/(kanban|catalog|devices|company(?:/[a-zA-Z]+)?|company/settings/(?:legal|configuration(?:/[0-9]+)?))$',
+            r'^/(kanban|catalog|devices|company(?:/[a-zA-Z]+)?|company/settings/(?:legal|configuration(?:/[0-9]+)?)|company/documents/(?:quote|order)(?:/[a-zA-Z0-9_-]+)?)$',
           ).hasMatch(value)
       ? value
       : null;

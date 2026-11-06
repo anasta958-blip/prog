@@ -5,6 +5,9 @@ void main() {
   for (final path in [
     '/catalog',
     '/company/documents',
+    '/company/documents/quote/board-1',
+    '/company/documents/order/board-2',
+    '/company/documents/order',
     '/company/settings/configuration',
     '/company/settings/configuration/5',
     '/company/settings/legal',

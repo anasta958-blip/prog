@@ -2465,6 +2465,14 @@ final class _OrganizationOnboardingPageState
     final expanded = !_collapsedRules.contains(rule.clientId);
     return _SubPanel(
       title: rule.name,
+      headerControl: Tooltip(
+        message: rule.isEnabled ? 'Отключить правило' : 'Включить правило',
+        child: Switch(
+          key: ValueKey('rule-enabled-${rule.clientId}'),
+          value: rule.isEnabled,
+          onChanged: (value) => setState(() => rule.isEnabled = value),
+        ),
+      ),
       onCopy: () => setState(() {
         var id = 'rule_${DateTime.now().microsecondsSinceEpoch}';
         while (draft.rules.any((item) => item.clientId == id)) {
@@ -2522,13 +2530,6 @@ final class _OrganizationOnboardingPageState
               },
             ),
           ]),
-          const SizedBox(height: 8),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Правило активно'),
-            value: rule.isEnabled,
-            onChanged: (value) => setState(() => rule.isEnabled = value),
-          ),
           const Divider(height: 24),
           _ruleEventEditor(rule, category),
           const Divider(height: 28),
@@ -3858,6 +3859,7 @@ final class _SubPanel extends StatelessWidget {
     required this.child,
     this.onDelete,
     this.onCopy,
+    this.headerControl,
     this.onToggle,
     this.expanded = true,
     this.collapseTooltip = 'Свернуть блок',
@@ -3867,6 +3869,7 @@ final class _SubPanel extends StatelessWidget {
   final Widget child;
   final VoidCallback? onDelete;
   final VoidCallback? onCopy;
+  final Widget? headerControl;
   final VoidCallback? onToggle;
   final bool expanded;
   final String collapseTooltip;
@@ -3890,6 +3893,7 @@ final class _SubPanel extends StatelessWidget {
                   style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
               ),
+              ?headerControl,
               if (onToggle != null)
                 Semantics(
                   button: true,

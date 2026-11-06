@@ -284,8 +284,9 @@ class _WorkspacePageState extends State<WorkspacePage> {
   void _saveAddress() => writeWorkspacePath(switch (selectedIndex) {
     1 => '/catalog',
     2 =>
-      companySection == CompanySection.settings &&
-              readWorkspacePath().startsWith('/company/settings/')
+      (companySection == CompanySection.settings ||
+                  companySection == CompanySection.documents) &&
+              readWorkspacePath().startsWith('/company/${companySection.name}/')
           ? readWorkspacePath()
           : '/company/${companySection.name}',
     3 => '/devices',

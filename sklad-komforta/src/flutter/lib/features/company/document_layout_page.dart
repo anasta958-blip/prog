@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/core/platform/workspace_address.dart';
 import 'package:sklad_komforta_app/core/network/api_exception.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
 import 'company_controller.dart';
@@ -12,9 +13,13 @@ final class DocumentLayoutPage extends StatefulWidget {
     required this.controller,
     this.guard,
     this.showTitle = true,
+    this.readPath = readWorkspacePath,
+    this.writePath = writeWorkspacePath,
     super.key,
   });
   final bool showTitle;
+  final String Function() readPath;
+  final ValueChanged<String> writePath;
   final CompanyController controller;
   final ConfigurationEditGuard? guard;
   @override
@@ -42,6 +47,14 @@ final class _DocumentLayoutPageState extends State<DocumentLayoutPage> {
   @override
   void initState() {
     super.initState();
+    final path = widget.readPath().split('/');
+    if (path.length >= 4 &&
+        path[1] == 'company' &&
+        path[2] == 'documents' &&
+        (path[3] == 'quote' || path[3] == 'order')) {
+      order = path[3] == 'order';
+      boardId = path.length == 5 ? path[4] : null;
+    }
     widget.guard?.attach(this, _canLeave);
     _load();
   }
@@ -89,10 +102,12 @@ final class _DocumentLayoutPageState extends State<DocumentLayoutPage> {
       if (!mounted) return;
       setState(() {
         boards = result;
-        boardId = null;
+        if (!available.any((item) => item.id == boardId)) boardId = null;
+        if (board case final current?) _prepare(current);
         dirty = false;
         error = null;
       });
+      _saveAddress();
     } catch (exception) {
       if (mounted) {
         setState(
@@ -114,7 +129,12 @@ final class _DocumentLayoutPageState extends State<DocumentLayoutPage> {
       if (board case final current?) _prepare(current);
       saved = false;
     });
+    _saveAddress();
   }
+
+  void _saveAddress() => widget.writePath(
+    '/company/documents/${order ? 'order' : 'quote'}${boardId == null ? '' : '/$boardId'}',
+  );
 
   void _change(VoidCallback action) => setState(() {
     action();

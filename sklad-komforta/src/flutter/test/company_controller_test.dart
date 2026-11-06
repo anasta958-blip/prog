@@ -24,6 +24,68 @@ void main() {
     environment: 'test',
   );
 
+  for (final kind in ['quote', 'order']) {
+    testWidgets('document editor restores $kind board after refresh', (
+      tester,
+    ) async {
+      final api = _MemoryCompanyGateway()..layoutSpecialization = kind;
+      final auth = AuthController(
+        config,
+        api: _NoopAuthGateway(),
+        tokens: _MemoryTokenRepository(),
+      )..accessToken = 'token';
+      final controller = CompanyController(config, auth, api: api);
+      addTearDown(controller.dispose);
+      addTearDown(auth.dispose);
+      var path = '/company/documents/$kind';
+      Widget page() => MaterialApp(
+        home: Scaffold(
+          body: DocumentLayoutPage(
+            controller: controller,
+            readPath: () => path,
+            writePath: (value) => path = value,
+          ),
+        ),
+      );
+      Finder boardSelect() => find.byWidgetPredicate(
+        (widget) =>
+            widget is AppSelectField<String> && widget.label == 'Канбан',
+      );
+      await tester.pumpWidget(page());
+      await tester.pumpAndSettle();
+      tester.widget<AppSelectField<String>>(boardSelect()).onChanged!('board');
+      await tester.pumpAndSettle();
+      expect(path, '/company/documents/$kind/board');
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(page());
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<AppSelectField<String>>(boardSelect()).value,
+        'board',
+      );
+      expect(
+        find.byKey(const ValueKey('document-editor-paper')),
+        findsOneWidget,
+      );
+      expect(
+        tester
+            .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'Комплектация'))
+            .selected,
+        kind == 'order',
+      );
+      await tester.pumpWidget(const SizedBox());
+      path = '/company/documents/$kind/missing';
+      await tester.pumpWidget(page());
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<AppSelectField<String>>(boardSelect()).value,
+        isNull,
+      );
+      expect(path, '/company/documents/$kind');
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets('rule copy button creates independent adjacent rules', (
     tester,
   ) async {
@@ -87,6 +149,27 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byTooltip('Копировать правило'), findsNWidgets(3));
     expect(find.text('Правило (копия 2)'), findsWidgets);
+    final sourcePanel = find.byKey(const ValueKey('source'));
+    final toggle = find.byKey(const ValueKey('rule-enabled-source'));
+    final collapse = find.descendant(
+      of: sourcePanel,
+      matching: find.byWidgetPredicate(
+        (widget) => widget is IconButton && widget.icon is AnimatedRotation,
+      ),
+    );
+    await tester.ensureVisible(collapse);
+    await tester.tap(collapse);
+    await tester.pumpAndSettle();
+    expect(toggle.hitTestable(), findsOneWidget);
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(tester.widget<Switch>(toggle).value, isFalse);
+    await tester.tap(collapse);
+    await tester.pumpAndSettle();
+    expect(tester.widget<Switch>(toggle).value, isFalse);
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(tester.widget<Switch>(toggle).value, isTrue);
     expect(tester.takeException(), isNull);
     expect(draft.rules, hasLength(1));
   });
@@ -931,10 +1014,11 @@ final class _FakeRealtime implements RealtimeSource {
 
 final class _MemoryCompanyGateway
     implements CompanyGateway, DocumentLayoutGateway {
+  String layoutSpecialization = 'quote';
   DocumentLayoutBoard? savedLayout;
   @override
   Future<List<DocumentLayoutBoard>> getDocumentLayouts(String token) async => [
-    DocumentLayoutBoard('board', 'Канбан КП', 'quote', [
+    DocumentLayoutBoard('board', 'Канбан КП', layoutSpecialization, [
       DocumentLayoutCategory('category', 'Оборудование', [
         const DocumentLayoutField('name', 'Наименование'),
         const DocumentLayoutField('quantity', 'Количество'),
