@@ -628,8 +628,9 @@ internal sealed class PostgresCompanyWorkspaceService(
     private static void ValidateClient(SaveCompanyClientRequest request)
     {
         var type = NormalizePartyType(request.CompanyType);
-        if (type != "person")
-            Required(request.Name ?? string.Empty, 2, 200, "client_name_invalid", "Название клиента должно содержать от 2 до 200 символов.");
+        Required(request.Name ?? string.Empty, 2, 200, "client_name_invalid", type == "person"
+            ? "ФИО клиента должно содержать от 2 до 200 символов."
+            : "Название клиента должно содержать от 2 до 200 символов.");
         Required(request.CompanyName ?? string.Empty, 0, 300, "client_party_name_invalid", "Название или ФИО клиента должно содержать не более 300 символов.");
         Phone(request.Phone);
         Email(request.Email);

@@ -272,21 +272,22 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(FilledButton, 'Сохранить'));
       await tester.pumpAndSettle();
-      if (type != 'person') {
-        expect(workspace.savedClient, isNull);
-        final name = find.byKey(
-          ValueKey(type == 'ip' ? 'Название ИП' : 'Название компании'),
-        );
-        await tester.ensureVisible(name);
-        await tester.enterText(name, 'Тестовый клиент');
-        await tester.tap(find.widgetWithText(FilledButton, 'Сохранить'));
-        await tester.pumpAndSettle();
-      }
-      expect(workspace.savedClient?.companyType, type);
-      expect(
-        workspace.savedClient?.name,
-        type == 'person' ? '' : 'Тестовый клиент',
+      expect(workspace.savedClient, isNull);
+      final name = find.byKey(
+        ValueKey(
+          type == 'person'
+              ? 'ФИО'
+              : type == 'ip'
+              ? 'Название ИП'
+              : 'Название компании',
+        ),
       );
+      await tester.ensureVisible(name);
+      await tester.enterText(name, 'Тестовый клиент');
+      await tester.tap(find.widgetWithText(FilledButton, 'Сохранить'));
+      await tester.pumpAndSettle();
+      expect(workspace.savedClient?.companyType, type);
+      expect(workspace.savedClient?.name, 'Тестовый клиент');
       expect(find.text('Новый клиент'), findsNothing);
       expect(tester.takeException(), isNull);
     });

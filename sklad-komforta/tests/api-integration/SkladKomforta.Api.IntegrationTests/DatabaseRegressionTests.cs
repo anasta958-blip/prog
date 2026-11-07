@@ -81,7 +81,7 @@ public sealed partial class DatabaseRegressionTests
         var workspaceProfile = await Send(staff, HttpMethod.Get, "/company/profile");
         foreach (var clientType in new[] { "person", "ip", "ooo" })
         {
-            var emptyClient = new { name = clientType == "person" ? "" : "Test", companyType = clientType };
+            var emptyClient = new { name = "Test", companyType = clientType };
             var client = await Send(staff, HttpMethod.Post, "/company/clients", emptyClient);
             Assert.Equal(emptyClient.name, Text(client, "name"));
             var clientPath = $"/company/clients/{Text(client, "id")}";

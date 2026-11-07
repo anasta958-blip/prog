@@ -252,7 +252,7 @@ final class _ClientsSection extends StatelessWidget {
               title: 'Клиенты',
               subtitle: 'Единый справочник заказчиков для будущих КП и ПКП.',
               trailing: FilledButton.icon(
-                onPressed: () => _editClient(context, controller, null),
+                onPressed: () => editCompanyClient(context, controller, null),
                 icon: const Icon(Icons.add),
                 label: const Text('Добавить клиента'),
               ),
@@ -261,7 +261,7 @@ final class _ClientsSection extends StatelessWidget {
               child: _CollectionPage(
                 emptyIcon: Icons.handshake_outlined,
                 emptyText: 'Клиенты ещё не добавлены.',
-                onAdd: () => _editClient(context, controller, null),
+                onAdd: () => editCompanyClient(context, controller, null),
                 showAddButton: false,
                 children: [
                   for (final item in controller.clients)
@@ -277,7 +277,8 @@ final class _ClientsSection extends StatelessWidget {
                         item.email,
                         item.address,
                       ],
-                      onEdit: () => _editClient(context, controller, item),
+                      onEdit: () =>
+                          editCompanyClient(context, controller, item),
                       onDelete: () => controller.deleteClient(item.id),
                     ),
                 ],
@@ -1019,7 +1020,7 @@ Future<void> _editLegalEntity(
   );
 }
 
-Future<void> _editClient(
+Future<CompanyClientModel?> editCompanyClient(
   BuildContext context,
   CompanyController controller,
   CompanyClientModel? source,
@@ -1027,7 +1028,7 @@ Future<void> _editClient(
   final item = source == null
       ? CompanyClientModel(id: '', name: '')
       : CompanyClientModel.fromJson({...source.toJson(), 'id': source.id});
-  await showDialog<void>(
+  return showDialog<CompanyClientModel>(
     context: context,
     builder: (context) => _withoutAccessibilityAnnouncements(
       context,
@@ -1269,7 +1270,7 @@ final class _ClientDialogState extends State<_ClientDialog>
                     item.name = value;
                     if (item.companyType != 'person') item.legalName = value;
                   },
-                  required: item.companyType != 'person',
+                  required: true,
                 ),
                 if (item.companyType == 'person') ...[
                   const SizedBox(height: 12),
@@ -1452,13 +1453,15 @@ final class _ClientDialogState extends State<_ClientDialog>
       submitting = true;
       submitError = null;
     });
+    CompanyClientModel? savedClient;
     final saved = await widget.controller.saveClient(
       item,
       create: widget.create,
+      onSaved: (value) => savedClient = value,
     );
     if (!mounted) return;
     if (saved) {
-      Navigator.pop(context);
+      Navigator.pop(context, savedClient);
       return;
     }
     setState(() {

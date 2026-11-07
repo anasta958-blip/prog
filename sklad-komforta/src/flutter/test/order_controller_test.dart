@@ -274,6 +274,35 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('order-filter-supplier')), findsOneWidget);
+    final originalDraft = controller.draft!;
+    controller.updateDocument((draft) => draft.title = 'Несохранённый адрес');
+    await tester.pumpAndSettle();
+    final createClient = find.text('Создать клиента');
+    expect(createClient, findsOneWidget);
+    await tester.tap(createClient);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Отмена'));
+    await tester.pumpAndSettle();
+    expect(controller.draft, same(originalDraft));
+    expect(controller.draft!.clientId, 'client-1');
+    await tester.tap(createClient);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('ФИО')), 'Новый заказчик');
+    await tester.tap(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.widgetWithText(FilledButton, 'Сохранить'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(controller.draft, same(originalDraft));
+    expect(controller.draft!.title, 'Несохранённый адрес');
+    expect(controller.draft!.clientId, 'created-client');
+    expect(
+      controller.clients.where((client) => client.id == 'created-client'),
+      hasLength(1),
+    );
+    expect(controller.dirty, isTrue);
     expect(find.byKey(const Key('order-filter-shipment')), findsOneWidget);
     final upload = find.byKey(const Key('order-invoice-upload'));
     expect(upload, findsOneWidget);
@@ -801,6 +830,14 @@ final class _CatalogGateway implements CatalogGateway {
 }
 
 final class _CompanyGateway implements CompanyWorkspaceGateway {
+  @override
+  Future<CompanyClientModel> saveClient(
+    String accessToken,
+    CompanyClientModel value, {
+    bool create = false,
+  }) async =>
+      CompanyClientModel.fromJson({...value.toJson(), 'id': 'created-client'});
+
   @override
   Future<List<CompanyClientModel>> getClients(String accessToken) async => [
     CompanyClientModel(id: 'client-1', name: 'Петров Пётр'),

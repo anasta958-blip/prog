@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:sklad_komforta_app/features/company/company_api.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -16,11 +17,89 @@ import 'package:sklad_komforta_app/features/quotes/quote_controller.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_editor_page.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_models.dart';
 
+final class _CreateCustomerGateway implements CompanyWorkspaceGateway {
+  @override
+  Future<CompanyClientModel> saveClient(
+    String token,
+    CompanyClientModel value, {
+    bool create = false,
+  }) async =>
+      CompanyClientModel.fromJson({...value.toJson(), 'id': 'new-client'});
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
+}
+
 void main() {
   const config = AppConfig(
     apiBaseUrl: 'https://api.example.test/api/v1',
     environment: 'test',
   );
+
+  for (final kind in [QuoteKind.quote, QuoteKind.prequote]) {
+    testWidgets('header creates customer for $kind without replacing draft', (
+      tester,
+    ) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1600, 1000);
+      addTearDown(tester.view.reset);
+      final auth = AuthController(
+        config,
+        api: _NoopAuthGateway(),
+        tokens: _MemoryTokenRepository(),
+      )..accessToken = 'token';
+      final controller = QuoteController(
+        config,
+        auth,
+        companyGateway: _CreateCustomerGateway(),
+      );
+      final type = QuoteProposalTypeDraft.create();
+      final draft = QuoteDraft(
+        kind: kind,
+        title: 'Черновик',
+        clientId: '',
+        executorCompanyId: '',
+        selectionMode: 'variant',
+        proposalTypes: [type],
+      );
+      controller
+        ..draft = draft
+        ..activeTypeId = type.id
+        ..activeVariantId = type.variants.first.id;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: QuoteEditorPage(
+              config: config,
+              authController: auth,
+              board: _quoteBoard,
+              controller: controller,
+              onBack: () {},
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Создать клиента'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const ValueKey('ФИО')), 'Новый клиент');
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.widgetWithText(FilledButton, 'Сохранить'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(controller.draft, same(draft));
+      expect(draft.clientId, 'new-client');
+      expect(draft.title, 'Черновик');
+      expect(draft.proposalTypes.single, same(type));
+      expect(controller.dirty, isTrue);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+      auth.dispose();
+    });
+  }
 
   test(
     'variant total event queues related cards once without recursion',

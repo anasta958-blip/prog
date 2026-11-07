@@ -678,6 +678,13 @@ final class _OrderCommandBar extends StatelessWidget {
     onBack: onBack,
     onSave: onSave,
     commands: [
+      DocumentCommand(
+        'Создать клиента',
+        Icons.person_add_alt_1_outlined,
+        controller.saving
+            ? null
+            : () => _createDocumentClient(context, controller),
+      ),
       DocumentCommand('Предпросмотр', Icons.visibility_outlined, onPreview),
       DocumentCommand(
         'Печать',
@@ -732,17 +739,7 @@ final class _OrderMetadataPanel extends StatelessWidget {
         ],
         onChanged: controller.setObjectType,
       ),
-      PartySearchField(
-        value: draft.clientId.isEmpty ? null : draft.clientId,
-        label: 'Заказчик',
-        options: [
-          for (final client in controller.clients)
-            PartySearchOption.client(client),
-        ],
-        onChanged: (value) {
-          controller.updateDocument((draft) => draft.clientId = value ?? '');
-        },
-      ),
+      _CustomerField(controller: controller),
       PartySearchField(
         value: draft.executorCompanyId.isEmpty ? null : draft.executorCompanyId,
         label: 'Исполнитель',

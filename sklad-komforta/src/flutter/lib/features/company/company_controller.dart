@@ -247,13 +247,20 @@ final class CompanyController extends ChangeNotifier {
     );
   });
 
-  Future<bool> saveClient(CompanyClientModel value, {bool create = false}) =>
-      _mutate(() async {
-        await _auth.executeAuthorized(
-          (token) => _workspaceApi!.saveClient(token, value, create: create),
-        );
-        clients = await _auth.executeAuthorized(_workspaceApi!.getClients);
-      });
+  Future<bool> saveClient(
+    CompanyClientModel value, {
+    bool create = false,
+    ValueChanged<CompanyClientModel>? onSaved,
+  }) => _mutate(() async {
+    final savedClient = await _auth.executeAuthorized(
+      (token) => _workspaceApi!.saveClient(token, value, create: create),
+    );
+    clients = [
+      ...clients.where((item) => item.id != savedClient.id),
+      savedClient,
+    ];
+    onSaved?.call(savedClient);
+  });
 
   Future<bool> deleteClient(String id) => _mutate(() async {
     await _auth.executeAuthorized(

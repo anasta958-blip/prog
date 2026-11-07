@@ -9,6 +9,7 @@ import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_api.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_models.dart';
 import 'package:sklad_komforta_app/features/company/company_api.dart';
+import 'package:sklad_komforta_app/features/company/company_controller.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_models.dart';
 import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
 import 'package:sklad_komforta_app/features/orders/order_api.dart';
@@ -33,7 +34,8 @@ final class QuoteController extends ChangeNotifier {
     QuoteGateway? quoteGateway,
     CatalogGateway? catalogGateway,
     CompanyWorkspaceGateway? companyGateway,
-  }) : _quoteGateway = quoteGateway ?? QuoteApi(config),
+  }) : _config = config,
+       _quoteGateway = quoteGateway ?? QuoteApi(config),
        _catalogGateway = catalogGateway ?? CatalogApi(config),
        _companyGateway = companyGateway ?? CompanyApi(config),
        _ownsQuoteGateway = quoteGateway == null,
@@ -41,6 +43,16 @@ final class QuoteController extends ChangeNotifier {
        _ownsCompanyGateway = companyGateway == null;
 
   final AuthController _auth;
+  final AppConfig _config;
+
+  CompanyController createClientEditorController() =>
+      CompanyController(_config, _auth, workspaceApi: _companyGateway);
+
+  void selectCreatedClient(CompanyClientModel client) {
+    clients = [...clients.where((item) => item.id != client.id), client];
+    updateDocument((document) => document.clientId = client.id);
+  }
+
   final QuoteGateway _quoteGateway;
   final CatalogGateway _catalogGateway;
   final CompanyWorkspaceGateway _companyGateway;
@@ -57,6 +69,7 @@ final class QuoteController extends ChangeNotifier {
   String? activeVariantId;
   bool loading = false;
   bool saving = false;
+  bool creatingClient = false;
   bool printing = false;
   bool dirty = false;
 

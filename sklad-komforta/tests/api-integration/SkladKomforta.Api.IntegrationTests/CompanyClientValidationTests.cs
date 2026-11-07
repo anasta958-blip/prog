@@ -18,15 +18,16 @@ public sealed class CompanyClientValidationTests
     public void OptionalClientDetailsAreAccepted(string type)
     {
         var request = JsonSerializer.Deserialize<SaveCompanyClientRequest>(
-            JsonSerializer.Serialize(new { Name = type == "person" ? "" : "Test", CompanyType = type }))!;
+            JsonSerializer.Serialize(new { Name = "Test", CompanyType = type }))!;
         Validate.Invoke(null, [request]);
         Validate.Invoke(null, [request with { CompanyName = "А", LegalName = "Б" }]);
     }
 
     [Theory]
+    [InlineData("person")]
     [InlineData("ip")]
     [InlineData("ooo")]
-    public void BusinessClientRequiresName(string type)
+    public void ClientRequiresName(string type)
     {
         var request = JsonSerializer.Deserialize<SaveCompanyClientRequest>(
             JsonSerializer.Serialize(new { Name = "  ", CompanyType = type }))!;

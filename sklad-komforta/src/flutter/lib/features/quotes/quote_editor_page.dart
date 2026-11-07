@@ -20,6 +20,8 @@ import 'package:sklad_komforta_app/core/network/api_exception.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
 import 'package:sklad_komforta_app/core/widgets/app_number_field.dart';
 import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
+import 'package:sklad_komforta_app/features/company/company_page.dart'
+    show editCompanyClient;
 import 'package:sklad_komforta_app/features/catalog/catalog_models.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_models.dart';
 import 'package:sklad_komforta_app/features/orders/order_local_draft.dart';
@@ -780,6 +782,13 @@ final class _CommandBar extends StatelessWidget {
     onBack: onBack,
     onSave: onSave,
     commands: [
+      DocumentCommand(
+        'Создать клиента',
+        Icons.person_add_alt_1_outlined,
+        controller.saving
+            ? null
+            : () => _createDocumentClient(context, controller),
+      ),
       DocumentCommand('Предпросмотр', Icons.visibility_outlined, onPreview),
       DocumentCommand(
         'Печать',
@@ -1394,6 +1403,40 @@ final class _ClientAccessValue extends StatelessWidget {
   );
 }
 
+Future<void> _createDocumentClient(
+  BuildContext context,
+  QuoteController controller,
+) async {
+  if (controller.creatingClient) return;
+  controller.creatingClient = true;
+  final editor = controller.createClientEditorController();
+  try {
+    final client = await editCompanyClient(context, editor, null);
+    if (context.mounted && client != null) {
+      controller.selectCreatedClient(client);
+    }
+  } finally {
+    editor.dispose();
+    controller.creatingClient = false;
+  }
+}
+
+final class _CustomerField extends StatelessWidget {
+  const _CustomerField({required this.controller});
+  final QuoteController controller;
+
+  @override
+  Widget build(BuildContext context) => PartySearchField(
+    value: controller.draft!.clientId.isEmpty
+        ? null
+        : controller.draft!.clientId,
+    label: 'Заказчик',
+    options: controller.clients.map(PartySearchOption.client).toList(),
+    onChanged: (value) =>
+        controller.updateDocument((draft) => draft.clientId = value ?? ''),
+  );
+}
+
 final class _MetadataPanel extends StatelessWidget {
   const _MetadataPanel({required this.controller, required this.board});
   final QuoteController controller;
@@ -1413,18 +1456,7 @@ final class _MetadataPanel extends StatelessWidget {
               onChanged: (value) =>
                   controller.updateDocument((draft) => draft.title = value),
             ),
-            PartySearchField(
-              value: draft.clientId.isEmpty ? null : draft.clientId,
-              label: 'Заказчик',
-              options: controller.clients
-                  .map(PartySearchOption.client)
-                  .toList(),
-              onChanged: (value) {
-                controller.updateDocument(
-                  (draft) => draft.clientId = value ?? '',
-                );
-              },
-            ),
+            _CustomerField(controller: controller),
             PartySearchField(
               value: draft.executorCompanyId.isEmpty
                   ? null
