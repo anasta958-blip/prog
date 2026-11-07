@@ -3020,6 +3020,52 @@ final class _OrganizationOnboardingPageState
                                       ),
                                     ),
                                   ),
+                                  if (formula.tokens[index].tokenType ==
+                                      'field')
+                                    PopupMenuButton<CatalogFieldDraft>(
+                                      tooltip: 'Изменить поле формулы',
+                                      icon: const Icon(
+                                        Icons.edit_outlined,
+                                        size: 16,
+                                      ),
+                                      onSelected: (field) => setState(
+                                        () => formula.tokens[index].fieldCode =
+                                            field.fieldCode,
+                                      ),
+                                      itemBuilder: (context) => [
+                                        for (final field in numeric)
+                                          PopupMenuItem(
+                                            value: field,
+                                            child: Text(
+                                              catalogFieldLabel(field),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  if (formula.tokens[index].tokenType ==
+                                      'constant')
+                                    IconButton(
+                                      tooltip: 'Изменить число формулы',
+                                      visualDensity: VisualDensity.compact,
+                                      icon: const Icon(
+                                        Icons.edit_outlined,
+                                        size: 16,
+                                      ),
+                                      onPressed: () async {
+                                        final token = formula.tokens[index];
+                                        final value = await _askFormulaConstant(
+                                          initialValue: token.constantValue,
+                                        );
+                                        if (!mounted ||
+                                            value == null ||
+                                            !formula.tokens.contains(token)) {
+                                          return;
+                                        }
+                                        setState(
+                                          () => token.constantValue = value,
+                                        );
+                                      },
+                                    ),
                                   IconButton(
                                     tooltip: 'Удалить компонент формулы',
                                     visualDensity: VisualDensity.compact,
@@ -3134,14 +3180,15 @@ final class _OrganizationOnboardingPageState
     );
   }
 
-  Future<num?> _askFormulaConstant() async {
-    final controller = TextEditingController();
+  Future<num?> _askFormulaConstant({num? initialValue}) async {
+    var text = initialValue?.toString() ?? '';
     final result = await showDialog<num>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Добавить число'),
-        content: TextField(
-          controller: controller,
+        title: Text(initialValue == null ? 'Добавить число' : 'Изменить число'),
+        content: TextFormField(
+          initialValue: text,
+          onChanged: (value) => text = value,
           autofocus: true,
           keyboardType: const TextInputType.numberWithOptions(
             decimal: true,
@@ -3151,8 +3198,8 @@ final class _OrganizationOnboardingPageState
             FilteringTextInputFormatter.allow(RegExp(r'[-0-9.,]')),
           ],
           decoration: const InputDecoration(labelText: 'Значение'),
-          onSubmitted: (_) {
-            final value = num.tryParse(controller.text.replaceAll(',', '.'));
+          onFieldSubmitted: (_) {
+            final value = num.tryParse(text.replaceAll(',', '.'));
             if (value != null) Navigator.pop(dialogContext, value);
           },
         ),
@@ -3163,15 +3210,14 @@ final class _OrganizationOnboardingPageState
           ),
           FilledButton(
             onPressed: () {
-              final value = num.tryParse(controller.text.replaceAll(',', '.'));
+              final value = num.tryParse(text.replaceAll(',', '.'));
               if (value != null) Navigator.pop(dialogContext, value);
             },
-            child: const Text('Добавить'),
+            child: Text(initialValue == null ? 'Добавить' : 'Применить'),
           ),
         ],
       ),
     );
-    controller.dispose();
     return result;
   }
 

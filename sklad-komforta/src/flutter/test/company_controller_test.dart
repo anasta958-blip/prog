@@ -101,7 +101,18 @@ void main() {
         clientId: 'category',
         name: 'Категория',
         sections: [],
-        fields: [],
+        fields: [
+          CatalogFieldDraft(
+            fieldCode: 'base_price',
+            isVisible: true,
+            isRequired: false,
+          ),
+          CatalogFieldDraft(
+            fieldCode: 'quantity',
+            isVisible: true,
+            isRequired: false,
+          ),
+        ],
       ),
     );
     draft.rules.add(
@@ -113,6 +124,17 @@ void main() {
         isEnabled: true,
         actions: [
           RuleActionDraft(actionType: 'block_save', message: 'Проверка'),
+          RuleActionDraft(
+            actionType: 'calculate_field',
+            targetFieldCode: 'base_price',
+            formula: FormulaDraft(
+              tokens: [
+                FormulaTokenDraft(tokenType: 'field', fieldCode: 'base_price'),
+                FormulaTokenDraft(tokenType: 'operator', operator: 'multiply'),
+                FormulaTokenDraft(tokenType: 'constant', constantValue: 10),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -139,6 +161,45 @@ void main() {
         .onChanged!(5);
     await tester.pumpAndSettle();
     final copy = find.byTooltip('Копировать правило').first;
+    final expandRule = find.descendant(
+      of: find.byKey(const ValueKey('source')),
+      matching: find.byWidgetPredicate(
+        (widget) => widget is IconButton && widget.icon is AnimatedRotation,
+      ),
+    );
+    await tester.ensureVisible(expandRule);
+    await tester.tap(expandRule);
+    await tester.pumpAndSettle();
+    final editNumber = find.byTooltip('Изменить число формулы');
+    await tester.ensureVisible(editNumber);
+    await tester.tap(editNumber);
+    await tester.pumpAndSettle();
+    final numberInput = find.descendant(
+      of: find.byType(AlertDialog),
+      matching: find.byType(TextField),
+    );
+    expect(tester.widget<TextField>(numberInput).controller!.text, '10');
+    await tester.enterText(numberInput, '-2,5');
+    await tester.tap(find.text('Применить'));
+    await tester.pumpAndSettle();
+    expect(find.text('-2.5'), findsOneWidget);
+    await tester.ensureVisible(editNumber);
+    await tester.tap(editNumber);
+    await tester.pumpAndSettle();
+    await tester.enterText(numberInput, '99');
+    await tester.tap(find.text('Отмена'));
+    await tester.pumpAndSettle();
+    expect(find.text('-2.5'), findsOneWidget);
+    final editField = find.byTooltip('Изменить поле формулы');
+    await tester.ensureVisible(editField);
+    await tester.tap(editField);
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.widgetWithText(PopupMenuItem<CatalogFieldDraft>, 'Количество'),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('[Количество]'), findsOneWidget);
+    expect(find.byTooltip('Удалить компонент формулы'), findsNWidgets(3));
     await tester.ensureVisible(copy);
     await tester.tap(copy);
     await tester.pumpAndSettle();

@@ -36,7 +36,7 @@ public sealed class OnboardingValidatorTests
     [Theory]
     [InlineData("#F59E0B", "Check", "base_price", true)]
     [InlineData("red", "Check", "base_price", false)]
-    [InlineData("#F59E0B", "", "base_price", false)]
+    [InlineData("#F59E0B", "", "base_price", true)]
     [InlineData("#F59E0B", "Check", "missing", false)]
     public void HighlightActionValidatesTargetColorAndMessage(string color, string message, string target, bool valid)
     {
@@ -46,6 +46,23 @@ public sealed class OnboardingValidatorTests
         var draft = ValidDraft() with { Rules = [rule] };
         if (valid) OnboardingValidator.Validate(draft, false);
         else Assert.Throws<IdentityException>(() => OnboardingValidator.Validate(draft, false));
+    }
+
+    [Theory]
+    [InlineData("highlight_field")]
+    [InlineData("block_save")]
+    public void RuleMessageIsOptionalButStillLimited(string actionType)
+    {
+        foreach (var message in new[] { null, "", "   ", new string('a', 300) })
+            OnboardingValidator.Validate(Draft(message), false);
+        Assert.Throws<IdentityException>(() => OnboardingValidator.Validate(Draft(new string('a', 301)), false));
+
+        OrganizationOnboardingDraft Draft(string? message) => ValidDraft() with
+        {
+            Rules = [new CalculationRuleDraft("optional", "Optional", "equipment", "row_calculation", true,
+                null, [], [new RuleActionDraft(actionType, TargetFieldCode: "base_price",
+                    Message: message, HighlightColor: "#F59E0B")])]
+        };
     }
 
     [Theory]

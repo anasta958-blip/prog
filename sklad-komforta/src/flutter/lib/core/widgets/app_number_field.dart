@@ -103,6 +103,12 @@ class _AppNumberFieldState extends State<AppNumberField> {
     ),
     inputFormatters: [
       TextInputFormatter.withFunction((oldValue, next) {
+        if (raw(next.text).isEmpty) {
+          return const TextEditingValue(
+            text: '0',
+            selection: TextSelection(baseOffset: 0, extentOffset: 1),
+          );
+        }
         final pattern = widget.minimum != null && widget.minimum! >= 0
             ? RegExp(r'^\d*[.,]?\d*$')
             : RegExp(r'^-?\d*[.,]?\d*$');

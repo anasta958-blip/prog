@@ -3,6 +3,42 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sklad_komforta_app/core/widgets/app_number_field.dart';
 
 void main() {
+  for (final grouped in [false, true]) {
+    testWidgets(
+      'clearing numeric input commits selected zero (grouped=$grouped)',
+      (tester) async {
+        var value = '12500';
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: StatefulBuilder(
+                builder: (context, setState) => AppNumberField(
+                  value: value,
+                  groupThousands: grouped,
+                  onChanged: (next) => setState(() => value = next),
+                ),
+              ),
+            ),
+          ),
+        );
+        final field = find.byType(TextFormField);
+        await tester.enterText(field, '');
+        await tester.pump();
+        final input = tester.widget<TextFormField>(field).controller!;
+        expect(value, '0');
+        expect(input.text, '0');
+        expect(
+          input.selection,
+          const TextSelection(baseOffset: 0, extentOffset: 1),
+        );
+        await tester.enterText(field, '2,5');
+        await tester.pump();
+        expect(value, '2,5');
+        expect(input.text, '2,5');
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
   testWidgets('денежное поле отображает разделители без изменения значения', (
     tester,
   ) async {

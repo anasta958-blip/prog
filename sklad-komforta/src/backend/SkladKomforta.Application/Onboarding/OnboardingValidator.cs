@@ -539,10 +539,10 @@ public static class OnboardingValidator
                 RequireRuleField(fields, action.TargetFieldCode, null, "Выделяемое поле");
                 if (action.HighlightColor is not { Length: 7 } color || color[0] != '#' || !color[1..].All(Uri.IsHexDigit))
                     Fail("onboarding_color_invalid", "Цвет выделения должен иметь формат #RRGGBB.");
-                RequireText(action.Message ?? string.Empty, 1, 300, "Сообщение выделенного поля");
+                RequireText(action.Message ?? string.Empty, 0, 300, "Сообщение выделенного поля");
                 return;
             case "block_save":
-                RequireText(action.Message ?? string.Empty, 1, 300, "Сообщение запрета сохранения");
+                RequireText(action.Message ?? string.Empty, 0, 300, "Сообщение запрета сохранения");
                 return;
             case "aggregate_money":
                 RequireRuleField(fields, action.SourceFieldCode, ["money", "calculated_money"], "Денежное поле");

@@ -3291,15 +3291,16 @@ final class _PositionFieldCell extends StatelessWidget {
               ),
               child: input,
             ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-              child: Text(
-                highlight.message,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 10, color: Colors.white),
+            if (highlight.message.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                child: Text(
+                  highlight.message,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 10, color: Colors.white),
+                ),
               ),
-            ),
           ],
         ),
       ),
