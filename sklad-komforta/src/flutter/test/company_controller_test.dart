@@ -235,6 +235,73 @@ void main() {
     expect(draft.rules, hasLength(1));
   });
 
+  testWidgets('clients search filters names and clears results', (
+    tester,
+  ) async {
+    final auth = AuthController(
+      config,
+      api: _NoopAuthGateway(),
+      tokens: _MemoryTokenRepository(),
+    )..accessToken = 'access-token';
+    final controller = CompanyController(
+      config,
+      auth,
+      api: _MemoryCompanyGateway(),
+      workspaceApi: _PartialWorkspaceGateway()..allowClients = true,
+    );
+    addTearDown(controller.dispose);
+    await controller.initialize();
+    controller.clients = [
+      CompanyClientModel(id: 'person', name: 'Иванов Иван')
+        ..phone = '+7 (999) 123-45-67',
+      CompanyClientModel(id: 'ooo', name: 'Ромашка', companyType: 'ooo')
+        ..legalName = 'ООО Цветочный магазин',
+      CompanyClientModel(id: 'ip', name: 'ИП Петров', companyType: 'ip'),
+    ];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CompanyPage(
+            controller: controller,
+            section: CompanySection.clients,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final search = find.byKey(const Key('clients-search'));
+    await tester.enterText(search, '  ИВАНОВ  ');
+    await tester.pumpAndSettle();
+    expect(find.text('Иванов'), findsOneWidget);
+    expect(find.text('Ромашка'), findsNothing);
+    await tester.enterText(search, 'ромаш');
+    await tester.pumpAndSettle();
+    expect(find.text('Ромашка'), findsOneWidget);
+    expect(find.text('Иванов'), findsNothing);
+    await tester.enterText(search, 'цветочный');
+    await tester.pumpAndSettle();
+    expect(find.text('Ромашка'), findsOneWidget);
+    await tester.enterText(search, 'петров');
+    await tester.pumpAndSettle();
+    expect(find.text('Петров'), findsOneWidget);
+    for (final query in ['79991234567', '123-45', '+7 (999) 123']) {
+      await tester.enterText(search, query);
+      await tester.pumpAndSettle();
+      expect(find.text('Иванов'), findsOneWidget);
+      expect(find.text('Ромашка'), findsNothing);
+    }
+    await tester.enterText(search, 'нет совпадений');
+    await tester.pumpAndSettle();
+    expect(find.text('Клиенты не найдены.'), findsOneWidget);
+    await tester.tap(find.byTooltip('Очистить поиск'));
+    await tester.pumpAndSettle();
+    expect(find.text('Иванов'), findsOneWidget);
+    expect(find.text('Ромашка'), findsOneWidget);
+    expect(find.text('Петров'), findsOneWidget);
+    expect(controller.clients, hasLength(3));
+    expect(tester.takeException(), isNull);
+  });
+
   for (final type in ['person', 'ip', 'ooo']) {
     testWidgets('client $type validates only the required name', (
       tester,

@@ -240,9 +240,40 @@ final class _LegalEntitiesSection extends StatelessWidget {
         );
 }
 
-final class _ClientsSection extends StatelessWidget {
+final class _ClientsSection extends StatefulWidget {
   const _ClientsSection({required this.controller});
   final CompanyController controller;
+  @override
+  State<_ClientsSection> createState() => _ClientsSectionState();
+}
+
+final class _ClientsSectionState extends State<_ClientsSection> {
+  final _searchController = TextEditingController();
+  String _query = '';
+  CompanyController get controller => widget.controller;
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  bool _matches(CompanyClientModel client) {
+    if (_query.isEmpty ||
+        [
+          client.name,
+          client.companyName,
+          client.legalName,
+          client.contactName,
+        ].any((value) => value?.toLowerCase().contains(_query) ?? false)) {
+      return true;
+    }
+    final digits = _query.replaceAll(RegExp(r'\D'), '');
+    return digits.isNotEmpty &&
+        RegExp(r'^[\d\s()+.\-]+$').hasMatch(_query) &&
+        (client.phone?.replaceAll(RegExp(r'\D'), '').contains(digits) ?? false);
+  }
+
   @override
   Widget build(BuildContext context) => !controller.canViewClients
       ? const _NoAccessState(section: 'клиентам')
@@ -257,14 +288,40 @@ final class _ClientsSection extends StatelessWidget {
                 label: const Text('Добавить клиента'),
               ),
             ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(22, 12, 22, 0),
+              child: TextField(
+                key: const Key('clients-search'),
+                controller: _searchController,
+                decoration: InputDecoration(
+                  labelText: 'Поиск по названию, ФИО или телефону',
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: _searchController.text.isEmpty
+                      ? null
+                      : IconButton(
+                          tooltip: 'Очистить поиск',
+                          icon: const Icon(Icons.close),
+                          onPressed: () => setState(() {
+                            _searchController.clear();
+                            _query = '';
+                          }),
+                        ),
+                ),
+                onChanged: (value) => setState(() {
+                  _query = value.trim().toLowerCase();
+                }),
+              ),
+            ),
             Expanded(
               child: _CollectionPage(
                 emptyIcon: Icons.handshake_outlined,
-                emptyText: 'Клиенты ещё не добавлены.',
+                emptyText: _query.isEmpty
+                    ? 'Клиенты ещё не добавлены.'
+                    : 'Клиенты не найдены.',
                 onAdd: () => editCompanyClient(context, controller, null),
                 showAddButton: false,
                 children: [
-                  for (final item in controller.clients)
+                  for (final item in controller.clients.where(_matches))
                     _EntityCard(
                       icon: Icons.person_outline,
                       title: item.name,
