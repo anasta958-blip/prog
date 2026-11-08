@@ -447,6 +447,10 @@ internal sealed class PostgresOrderService(
                     var values = (position.Values ?? new Dictionary<string, JsonElement>())
                         .Where(item => item.Key != "supplier" && (allowed is null || allowed.Contains(item.Key)))
                         .ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
+                    var catalogItemId = await Catalog.DocumentCatalogItems.ResolveAsync(
+                        connection, transaction, actorUserId, position.CatalogItemId,
+                        category.CatalogCategoryId, section.CatalogSectionId,
+                        position.Name, position.Marking, position.Unit, position.Values, null, token);
                     await ExecuteAsync(connection, transaction, """
                         INSERT INTO order_positions
                             (id, order_section_id, catalog_item_id, name_snapshot, marking_snapshot,
@@ -458,7 +462,7 @@ internal sealed class PostgresOrderService(
                              CAST(@values AS jsonb), @sort, @actor, @actor)
                         """, token,
                         ("id", positionId), ("section_id", sectionId),
-                        ("catalog_item_id", Db(position.CatalogItemId)), ("name", position.Name.Trim()),
+                        ("catalog_item_id", Db(catalogItemId)), ("name", position.Name.Trim()),
                         ("marking", position.Marking?.Trim() ?? string.Empty),
                         ("unit", position.Unit?.Trim() ?? string.Empty),
                         ("quantity", position.Quantity), ("is_reorder", state.IsReorder),

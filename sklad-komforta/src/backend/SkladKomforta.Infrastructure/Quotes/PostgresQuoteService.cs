@@ -616,6 +616,11 @@ internal sealed class PostgresQuoteService(
                             var legacyCalculation = calculation is null
                                 ? QuoteCalculationEngine.Calculate(position)
                                 : null;
+                            var catalogItemId = await Catalog.DocumentCatalogItems.ResolveAsync(
+                                connection, transaction, actorUserId, position.CatalogItemId,
+                                category.CatalogCategoryId, section.CatalogSectionId,
+                                position.Name, position.Marking, position.Unit, position.Values,
+                                position.BasePrice, token);
                             await ExecuteAsync(connection, transaction, """
                                 INSERT INTO quote_positions
                                     (id, variant_section_id, catalog_item_id, name_snapshot,
@@ -631,7 +636,7 @@ internal sealed class PostgresQuoteService(
                                      @actor, @actor)
                                 """, token,
                                 ("id", position.Id ?? Guid.NewGuid()), ("section_id", sectionId),
-                                ("catalog_item_id", Db(position.CatalogItemId)), ("name", position.Name.Trim()),
+                                ("catalog_item_id", Db(catalogItemId)), ("name", position.Name.Trim()),
                                 ("marking", position.Marking?.Trim() ?? string.Empty),
                                 ("unit", position.Unit?.Trim() ?? string.Empty),
                                 ("quantity", calculation?.Quantity ?? position.Quantity),
