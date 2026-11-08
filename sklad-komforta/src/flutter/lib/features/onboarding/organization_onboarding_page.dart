@@ -2147,6 +2147,10 @@ final class _OrganizationOnboardingPageState
                 ('none', 'Не включать в итог'),
                 ('separate', 'Включить в итог отдельной строкой'),
                 ('total', 'Включить в суммарный итог'),
+                (
+                  'separate_only',
+                  'Не включать в итог, но показывать отдельной строкой',
+                ),
               ])
                 SizedBox(
                   width: option.$1 == 'none' ? 220 : 330,

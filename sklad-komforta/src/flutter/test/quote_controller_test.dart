@@ -35,6 +35,68 @@ void main() {
     environment: 'test',
   );
 
+  test('справочная сумма видна в шапке и сводке без изменения итога', () {
+    final auth = AuthController(
+      config,
+      api: _NoopAuthGateway(),
+      tokens: _MemoryTokenRepository(),
+    );
+    final controller = QuoteController(config, auth)
+      ..catalog = const CatalogConfiguration(
+        categories: [
+          CatalogCategory(
+            id: 'category',
+            clientId: 'equipment',
+            name: 'Оборудование',
+            sortOrder: 0,
+            sections: [],
+            fields: [
+              CatalogField(
+                code: 'reference_amount',
+                label: 'Справочная сумма',
+                fieldType: 'money',
+                isVisible: true,
+                isRequired: false,
+                sortOrder: 0,
+                totalMode: 'separate_only',
+              ),
+            ],
+          ),
+        ],
+        dictionaries: [],
+      );
+    QuotePositionDraft row(String id, double amount, {bool excluded = false}) =>
+        QuotePositionDraft(
+          id: id,
+          name: id,
+          marking: '',
+          unit: 'шт',
+          quantity: 1,
+          basePrice: 100,
+          values: {'reference_amount': amount},
+          excludeFromTotals: excluded,
+        );
+    final category = QuoteCategoryDraft(
+      id: 'category-draft',
+      catalogCategoryId: 'category',
+      name: 'Оборудование',
+      sections: [
+        QuoteSectionDraft(
+          id: 'section',
+          name: 'Раздел',
+          positions: [row('one', 25), row('two', 50, excluded: true)],
+        ),
+      ],
+    );
+
+    expect(controller.separateTotalRows([category]), [
+      ('Справочная сумма', 25),
+    ]);
+    expect(category.clientTotal, 100);
+    controller.dispose();
+    auth.dispose();
+  });
+
   for (final kind in [QuoteKind.quote, QuoteKind.prequote]) {
     testWidgets('header creates customer for $kind without replacing draft', (
       tester,

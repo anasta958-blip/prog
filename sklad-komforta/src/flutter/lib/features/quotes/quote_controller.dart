@@ -150,7 +150,8 @@ final class QuoteController extends ChangeNotifier {
               ?.fields ??
           const <CatalogField>[];
       for (final field in fields.where(
-        (field) => field.totalMode == 'separate',
+        (field) =>
+            field.totalMode == 'separate' || field.totalMode == 'separate_only',
       )) {
         final key = (field.code, field.label);
         for (final position in category.sections.expand(

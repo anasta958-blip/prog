@@ -712,6 +712,62 @@ void main() {
     },
   );
 
+  test('separate_only keeps money and calculated money outside totals', () {
+    final row = _position(
+      basePrice: 100,
+      quantity: 2,
+      values: {'reference_money': 15},
+    );
+    final document = _document(row);
+    final engine = QuoteConfiguredCalculationEngine(
+      _configuration(
+        fields: const [
+          CatalogField(
+            code: 'line_total',
+            label: 'Основная сумма',
+            fieldType: 'calculated_money',
+            isVisible: true,
+            isRequired: false,
+            sortOrder: 0,
+            totalMode: 'total',
+          ),
+          CatalogField(
+            code: 'reference_money',
+            label: 'Справочная сумма',
+            fieldType: 'money',
+            isVisible: true,
+            isRequired: false,
+            sortOrder: 1,
+            totalMode: 'separate_only',
+          ),
+          CatalogField(
+            code: 'reference_calculated',
+            label: 'Расчётная справочная сумма',
+            fieldType: 'calculated_money',
+            isVisible: true,
+            isRequired: false,
+            sortOrder: 2,
+            totalMode: 'separate_only',
+          ),
+        ],
+        pipelines: [
+          MoneyPipelineDraft(
+            categoryClientId: 'equipment',
+            basePriceFieldCode: 'base_price',
+            quantityFieldCode: 'quantity',
+            resultFieldCode: 'reference_calculated',
+            includeResultInTotals: false,
+          ),
+        ],
+      ),
+    );
+
+    engine.calculateDocument(document);
+    expect(row.values['reference_calculated'], 200);
+    expect(row.lineTotal, 200);
+    expect(document.proposalTypes.single.clientTotal, 200);
+  });
+
   test(
     'сводки согласованы с разделами после конвейеров и денежной агрегации',
     () {

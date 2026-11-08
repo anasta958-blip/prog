@@ -7,6 +7,26 @@ namespace SkladKomforta.Domain.Tests.Onboarding;
 /// <summary>Фиксирует серверные инварианты первичной настройки организации.</summary>
 public sealed class OnboardingValidatorTests
 {
+    [Theory]
+    [InlineData("money", true)]
+    [InlineData("calculated_money", true)]
+    [InlineData("text", false)]
+    public void SeparateOnlyTotalModeIsRestrictedToMoneyFields(string fieldType, bool valid)
+    {
+        var source = ValidDraft();
+        var category = CategoryWithCalculationFields();
+        var fields = category.Fields.ToList();
+        fields.Add(new CatalogFieldDraft("reference_amount", true, false,
+            FieldType: fieldType, Label: "Справочная сумма", TotalMode: "separate_only"));
+        var draft = source with { Categories = [category with { Fields = fields }] };
+
+        if (valid)
+            OnboardingValidator.Validate(draft, false);
+        else
+            Assert.Equal("onboarding_total_mode_invalid",
+                Assert.Throws<IdentityException>(() => OnboardingValidator.Validate(draft, false)).Code);
+    }
+
     [Fact]
     public void VariantTotalCanBeAComparisonOperandAndFormulaSource()
     {

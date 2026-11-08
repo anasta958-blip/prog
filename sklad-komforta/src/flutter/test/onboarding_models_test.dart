@@ -51,7 +51,7 @@ void main() {
     );
   });
   test('field total mode survives serialization including legacy null', () {
-    for (final mode in [null, 'none', 'total', 'separate']) {
+    for (final mode in [null, 'none', 'total', 'separate', 'separate_only']) {
       final field = CatalogFieldDraft(
         fieldCode: 'custom_amount',
         fieldType: 'money',
