@@ -829,6 +829,7 @@ final class _OrganizationOnboardingPageState
   Widget _workflowSpecializationSelector(WorkflowDraft workflow) {
     const options = [
       (WorkflowSpecialization.quote, 'КП'),
+      (WorkflowSpecialization.prequote, 'ПКП'),
       (WorkflowSpecialization.quoteAndPrequote, 'КП + ПКП'),
       (WorkflowSpecialization.order, 'Комплектация'),
     ];
@@ -1034,6 +1035,7 @@ final class _OrganizationOnboardingPageState
 
   static bool _isQuoteBoard(WorkflowSpecialization specialization) =>
       specialization == WorkflowSpecialization.quote ||
+      specialization == WorkflowSpecialization.prequote ||
       specialization == WorkflowSpecialization.quoteAndPrequote;
 
   /// Выбор столбца-триггера: «не переносить» либо канбан и его столбец.
@@ -1165,6 +1167,7 @@ final class _OrganizationOnboardingPageState
     WorkflowSpecialization specialization,
   ) => switch (specialization) {
     WorkflowSpecialization.quote => const [WorkflowCreationAction.quote],
+    WorkflowSpecialization.prequote => const [WorkflowCreationAction.prequote],
     WorkflowSpecialization.quoteAndPrequote => const [
       WorkflowCreationAction.quote,
       WorkflowCreationAction.prequote,

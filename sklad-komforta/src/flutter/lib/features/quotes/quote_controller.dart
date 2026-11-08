@@ -246,7 +246,9 @@ final class QuoteController extends ChangeNotifier {
     return QuoteDraft(
       kind:
           createKind ??
-          (board.specialization == WorkflowSpecialization.quoteAndPrequote
+          (board.specialization == WorkflowSpecialization.prequote ||
+                  board.specialization ==
+                      WorkflowSpecialization.quoteAndPrequote
               ? QuoteKind.prequote
               : QuoteKind.quote),
       title: card?.title ?? '',

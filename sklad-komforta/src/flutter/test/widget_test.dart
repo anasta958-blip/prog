@@ -580,6 +580,20 @@ void main() {
       isNull,
     );
 
+    await tester.tap(find.widgetWithText(FilterChip, 'ПКП'));
+    await tester.pumpAndSettle();
+    expect(
+      controller.onboardingDraft!.workflows.single.specialization.apiValue,
+      'prequote',
+    );
+
+    await tester.tap(find.widgetWithText(FilterChip, 'КП + ПКП'));
+    await tester.pumpAndSettle();
+    expect(
+      controller.onboardingDraft!.workflows.single.specialization.apiValue,
+      'quote_and_prequote',
+    );
+
     await tester.tap(find.bySemanticsLabel('Свернуть канбан'));
     await tester.pumpAndSettle();
     expect(find.text('Название канбана'), findsNothing);

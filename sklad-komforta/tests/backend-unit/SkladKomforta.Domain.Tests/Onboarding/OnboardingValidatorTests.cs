@@ -272,6 +272,7 @@ public sealed class OnboardingValidatorTests
     [Theory]
     [InlineData(null)]
     [InlineData("quote")]
+    [InlineData("prequote")]
     [InlineData("quote_and_prequote")]
     [InlineData("order")]
     public void DraftAcceptsSupportedWorkflowSpecialization(string? specialization)
@@ -288,6 +289,7 @@ public sealed class OnboardingValidatorTests
                         CreationActions = specialization switch
                         {
                             "quote" => [WorkflowCreationActionCodes.Quote],
+                            "prequote" => [WorkflowCreationActionCodes.Prequote],
                             "quote_and_prequote" =>
                                 [WorkflowCreationActionCodes.Quote, WorkflowCreationActionCodes.Prequote],
                             "order" => [WorkflowCreationActionCodes.Order],

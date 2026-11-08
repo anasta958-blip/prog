@@ -2,6 +2,7 @@
 enum WorkflowSpecialization {
   standard(null),
   quote('quote'),
+  prequote('prequote'),
   quoteAndPrequote('quote_and_prequote'),
   order('order');
 
@@ -11,6 +12,7 @@ enum WorkflowSpecialization {
 
   static WorkflowSpecialization fromApi(String? value) => switch (value) {
     'quote' => quote,
+    'prequote' => prequote,
     'quote_and_prequote' => quoteAndPrequote,
     'order' => order,
     _ => standard,

@@ -77,6 +77,14 @@ public sealed partial class DatabaseRegressionTests
                   AND table_name IN ('organization_profile', 'organization_profile_legacy')
                 """, schemaConnection);
             Assert.Equal(0L, await profileTables.ExecuteScalarAsync());
+            await using var prequoteSpecialization = new NpgsqlCommand("""
+                SELECT count(*) FROM pg_constraint AS constraint_item
+                JOIN pg_namespace AS schema_item ON schema_item.oid = constraint_item.connamespace
+                WHERE schema_item.nspname LIKE 'tenant_%'
+                  AND constraint_item.conname = 'workflows_specialization_check'
+                  AND pg_get_constraintdef(constraint_item.oid) LIKE '%prequote%'
+                """, schemaConnection);
+            Assert.Equal(1L, await prequoteSpecialization.ExecuteScalarAsync());
         }
         var workspaceProfile = await Send(staff, HttpMethod.Get, "/company/profile");
         foreach (var clientType in new[] { "person", "ip", "ooo" })

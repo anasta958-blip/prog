@@ -9,6 +9,7 @@ namespace SkladKomforta.Application.Quotes;
 public static class WorkflowSpecializationCodes
 {
     public const string Quote = "quote";
+    public const string Prequote = "prequote";
     public const string QuoteAndPrequote = "quote_and_prequote";
     public const string Order = "order";
 }

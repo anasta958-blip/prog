@@ -11,6 +11,7 @@ public static class OnboardingValidator
     private static readonly HashSet<string> WorkflowSpecializations =
         [
             WorkflowSpecializationCodes.Quote,
+            WorkflowSpecializationCodes.Prequote,
             WorkflowSpecializationCodes.QuoteAndPrequote,
             WorkflowSpecializationCodes.Order,
         ];
@@ -149,6 +150,7 @@ public static class OnboardingValidator
         var required = workflow.Specialization switch
         {
             WorkflowSpecializationCodes.Quote => new[] { WorkflowCreationActionCodes.Quote },
+            WorkflowSpecializationCodes.Prequote => new[] { WorkflowCreationActionCodes.Prequote },
             WorkflowSpecializationCodes.QuoteAndPrequote =>
                 new[] { WorkflowCreationActionCodes.Quote, WorkflowCreationActionCodes.Prequote },
             WorkflowSpecializationCodes.Order => new[] { WorkflowCreationActionCodes.Order },
@@ -233,6 +235,7 @@ public static class OnboardingValidator
         {
             var isOrder = workflow.Specialization == WorkflowSpecializationCodes.Order;
             var isQuote = workflow.Specialization is WorkflowSpecializationCodes.Quote
+                or WorkflowSpecializationCodes.Prequote
                 or WorkflowSpecializationCodes.QuoteAndPrequote;
             if (workflow.Columns.Count(column => column.ReorderFrom) > 1)
                 Fail("onboarding_reorder_column_invalid",
@@ -264,6 +267,7 @@ public static class OnboardingValidator
                         $"Столбец «{column.Name}» переносит карточки в неизвестный канбан.");
                 var targetIsOrder = target.Specialization == WorkflowSpecializationCodes.Order;
                 var targetIsQuote = target.Specialization is WorkflowSpecializationCodes.Quote
+                    or WorkflowSpecializationCodes.Prequote
                     or WorkflowSpecializationCodes.QuoteAndPrequote;
                 if ((isQuote && !targetIsOrder) || (isOrder && !targetIsQuote))
                     Fail("onboarding_transfer_invalid",

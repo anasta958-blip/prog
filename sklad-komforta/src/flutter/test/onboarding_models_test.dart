@@ -300,17 +300,21 @@ void main() {
   });
 
   test('специализация канбана сохраняется в JSON', () {
-    final source = WorkflowDraft(
-      code: 'quote',
-      name: 'КП и ПКП',
-      columns: [],
-      transitions: [],
-      specialization: WorkflowSpecialization.quoteAndPrequote,
-    );
+    for (final specialization in [
+      WorkflowSpecialization.prequote,
+      WorkflowSpecialization.quoteAndPrequote,
+    ]) {
+      final source = WorkflowDraft(
+        code: 'quote',
+        name: 'Предложения',
+        columns: [],
+        transitions: [],
+        specialization: specialization,
+      );
 
-    final restored = WorkflowDraft.fromJson(source.toJson());
-
-    expect(restored.specialization, WorkflowSpecialization.quoteAndPrequote);
+      final restored = WorkflowDraft.fromJson(source.toJson());
+      expect(restored.specialization, specialization);
+    }
   });
 
   test('канбан сохраняет категории и порядок полей карточки', () {

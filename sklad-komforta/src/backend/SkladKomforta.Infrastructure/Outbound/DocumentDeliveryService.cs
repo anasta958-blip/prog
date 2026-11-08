@@ -131,7 +131,7 @@ internal sealed class DocumentDeliveryService(
 
         switch (board.Specialization)
         {
-            case WorkflowSpecializationCodes.Quote or WorkflowSpecializationCodes.QuoteAndPrequote:
+            case WorkflowSpecializationCodes.Quote or WorkflowSpecializationCodes.Prequote or WorkflowSpecializationCodes.QuoteAndPrequote:
             {
                 await RequireAsync(actorUserId, "quotes.view", token);
                 var quote = await quoteService.GetAsync(actorUserId, boardId, cardId, token);

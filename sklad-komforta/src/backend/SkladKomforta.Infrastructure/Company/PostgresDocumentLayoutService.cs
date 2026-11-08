@@ -17,7 +17,7 @@ internal sealed class PostgresDocumentLayoutService(IDatabaseConnectionFactory f
         var boards = new List<(Guid Id, string Name, string Kind)>();
         await using (var command = connection.CreateCommand())
         {
-            command.CommandText = "SELECT id, name, specialization FROM workflows WHERE specialization IN ('quote', 'quote_and_prequote', 'order') ORDER BY sort_order, name";
+            command.CommandText = "SELECT id, name, specialization FROM workflows WHERE specialization IN ('quote', 'prequote', 'quote_and_prequote', 'order') ORDER BY sort_order, name";
             await using var reader = await command.ExecuteReaderAsync(token);
             while (await reader.ReadAsync(token)) boards.Add((reader.GetGuid(0), reader.GetString(1), reader.GetString(2)));
         }

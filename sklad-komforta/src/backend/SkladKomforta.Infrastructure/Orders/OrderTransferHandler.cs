@@ -60,12 +60,13 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
         }
 
         var sourceIsQuote = sourceSpecialization is WorkflowSpecializationCodes.Quote
+            or WorkflowSpecializationCodes.Prequote
             or WorkflowSpecializationCodes.QuoteAndPrequote;
         if (sourceIsQuote && targetSpecialization == WorkflowSpecializationCodes.Order)
             await TransferQuoteAsync(connection, transaction, actorUserId, cardId,
                 targetBoardId, targetColumnId, cancellationToken);
         else if (sourceSpecialization == WorkflowSpecializationCodes.Order &&
-                 targetSpecialization is WorkflowSpecializationCodes.Quote or WorkflowSpecializationCodes.QuoteAndPrequote)
+                 targetSpecialization is WorkflowSpecializationCodes.Quote or WorkflowSpecializationCodes.Prequote or WorkflowSpecializationCodes.QuoteAndPrequote)
             await MoveLinkedCardAsync(connection, transaction, actorUserId,
                 await WorkItemOfAsync(connection, transaction, cardId, cancellationToken),
                 targetBoardId, targetColumnId, cancellationToken);

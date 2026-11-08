@@ -19,6 +19,15 @@ import 'package:sklad_komforta_app/features/quotes/quote_models.dart';
 
 final class _CreateCustomerGateway implements CompanyWorkspaceGateway {
   @override
+  Future<List<CompanyClientModel>> getClients(String token) async => [];
+
+  @override
+  Future<List<LegalEntityModel>> getLegalEntities(String token) async => [];
+
+  @override
+  Future<List<EmployeeModel>> getEmployees(String token) async => [];
+
+  @override
   Future<CompanyClientModel> saveClient(
     String token,
     CompanyClientModel value, {
@@ -34,6 +43,36 @@ void main() {
     apiBaseUrl: 'https://api.example.test/api/v1',
     environment: 'test',
   );
+
+  test('отдельный канбан ПКП создаёт предварительное предложение', () async {
+    final auth = AuthController(
+      config,
+      api: _NoopAuthGateway(),
+      tokens: _MemoryTokenRepository(),
+    )..accessToken = 'access-token';
+    final controller = QuoteController(
+      config,
+      auth,
+      quoteGateway: _RecordingQuoteGateway(),
+      catalogGateway: _CatalogGatewayWithRelations(),
+      companyGateway: _CreateCustomerGateway(),
+    );
+    const board = KanbanBoard(
+      id: 'prequote-board',
+      code: 'prequotes',
+      name: 'Предварительные предложения',
+      specialization: WorkflowSpecialization.prequote,
+      columns: [],
+      transitions: [],
+      categories: [],
+    );
+
+    await controller.initialize(board: board);
+    expect(controller.draft?.kind, QuoteKind.prequote);
+
+    controller.dispose();
+    auth.dispose();
+  });
 
   test('справочная сумма видна в шапке и сводке без изменения итога', () {
     final auth = AuthController(

@@ -219,7 +219,8 @@ internal sealed class PostgresQuoteService(
         {
             QuoteKindCodes.Quote => specialization is
                 WorkflowSpecializationCodes.Quote or WorkflowSpecializationCodes.QuoteAndPrequote,
-            QuoteKindCodes.Prequote => specialization == WorkflowSpecializationCodes.QuoteAndPrequote,
+            QuoteKindCodes.Prequote => specialization is
+                WorkflowSpecializationCodes.Prequote or WorkflowSpecializationCodes.QuoteAndPrequote,
             _ => false,
         };
         if (!compatible || !actionAllowed)
@@ -279,14 +280,15 @@ internal sealed class PostgresQuoteService(
         {
             QuoteKindCodes.Quote => specialization is
                 WorkflowSpecializationCodes.Quote or WorkflowSpecializationCodes.QuoteAndPrequote,
-            QuoteKindCodes.Prequote => specialization == WorkflowSpecializationCodes.QuoteAndPrequote,
+            QuoteKindCodes.Prequote => specialization is
+                WorkflowSpecializationCodes.Prequote or WorkflowSpecializationCodes.QuoteAndPrequote,
             _ => false,
         };
         if (!compatible)
             throw new IdentityException(
                 409, "quote_workflow_incompatible",
                 quoteKind == QuoteKindCodes.Prequote
-                    ? "ПКП можно создать только в канбане типа «КП + ПКП»."
+                    ? "ПКП можно создать только в канбане типа «ПКП» или «КП + ПКП»."
                     : "КП можно создать только в канбане типа «КП» или «КП + ПКП»."
             );
     }

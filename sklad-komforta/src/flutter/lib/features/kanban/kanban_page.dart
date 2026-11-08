@@ -101,6 +101,7 @@ final class _KanbanPageState extends State<KanbanPage> {
   /// Отправлять можно КП, ПКП и комплектации.
   bool _sendsDocuments(KanbanBoard board) =>
       board.specialization == WorkflowSpecialization.quote ||
+      board.specialization == WorkflowSpecialization.prequote ||
       board.specialization == WorkflowSpecialization.quoteAndPrequote ||
       board.specialization == WorkflowSpecialization.order;
 
@@ -521,6 +522,8 @@ final class _KanbanPageState extends State<KanbanPage> {
                                 widget.authController != null &&
                                 (board.specialization ==
                                         WorkflowSpecialization.quote ||
+                                    board.specialization ==
+                                        WorkflowSpecialization.prequote ||
                                     board.specialization ==
                                         WorkflowSpecialization.quoteAndPrequote)
                             ? _openClientLink
