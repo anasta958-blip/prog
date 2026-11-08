@@ -4,6 +4,11 @@ import 'package:sklad_komforta_app/features/catalog/catalog_models.dart';
 import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_models.dart';
 
+/// Missing inputs are expected while a document row is being filled in.
+final class MissingCalculationValueException extends FormatException {
+  const MissingCalculationValueException(super.message);
+}
+
 /// Executes the safe calculation configuration downloaded from the tenant.
 /// It mirrors the backend evaluator so the editor updates immediately while
 /// the backend remains authoritative when the document is saved.
@@ -48,7 +53,11 @@ final class QuoteConfiguredCalculationEngine {
                     '«${field.label}»',
                   );
                 }
-                throw FormatException('Позиция «${position.name}»: $message');
+                final details = 'Позиция «${position.name}»: $message';
+                if (error is MissingCalculationValueException) {
+                  throw MissingCalculationValueException(details);
+                }
+                throw FormatException(details);
               }
             }
           }
@@ -644,7 +653,9 @@ final class QuoteConfiguredCalculationEngine {
 
   static double _requiredNumber(Map<String, dynamic> values, String code) =>
       _number(values[code]) ??
-      (throw FormatException('Для расчёта не заполнено поле «$code».'));
+      (throw MissingCalculationValueException(
+        'Для расчёта не заполнено поле «$code».',
+      ));
 
   static double? _number(dynamic value) {
     if (value is num) return value.toDouble();

@@ -20,6 +20,8 @@ import 'package:sklad_komforta_app/features/outbound/outbound_models.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_api.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_controller.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_editor_page.dart';
+import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart'
+    show MoneyPipelineDraft;
 
 void main() {
   setUpAll(() => initializeDateFormatting('ru'));
@@ -52,6 +54,57 @@ void main() {
 
     controller.dispose();
     auth.dispose();
+  });
+
+  test('missing formula input in order is shown only on save', () async {
+    final auth = authorized();
+    final gateway = _MemoryOrderGateway();
+    final controller = OrderController(
+      config,
+      auth,
+      orderGateway: gateway,
+      catalogGateway: _CatalogGateway(),
+      companyGateway: _CompanyGateway(),
+    );
+    addTearDown(controller.dispose);
+    addTearDown(auth.dispose);
+    await controller.initializeOrder(board: _orderBoard, card: _card());
+    final category =
+        controller.draft!.proposalTypes.first.variants.first.categories.first;
+    controller.catalog = CatalogConfiguration(
+      categories: [
+        CatalogCategory(
+          id: category.catalogCategoryId!,
+          clientId: 'equipment',
+          name: category.name,
+          sortOrder: 0,
+          fields: [],
+          sections: [],
+        ),
+      ],
+      dictionaries: [],
+      moneyPipelines: [
+        MoneyPipelineDraft(
+          categoryClientId: 'equipment',
+          basePriceFieldCode: 'custom_missing',
+          resultFieldCode: 'result',
+        ),
+      ],
+    );
+    await controller.positionChanged();
+    expect(controller.error, isNull);
+    expect(await controller.saveOrder(), isFalse);
+    expect(controller.error, contains('не заполнено поле'));
+    expect(gateway.saved, isNull);
+    for (final section in category.sections) {
+      for (final row in section.positions) {
+        row.values['custom_missing'] = 10;
+      }
+    }
+    await controller.positionChanged();
+    expect(controller.error, isNull);
+    expect(await controller.saveOrder(), isTrue);
+    expect(gateway.saved, isNotNull);
   });
 
   test('источник поставщика выбирается по коду для каждой категории', () async {

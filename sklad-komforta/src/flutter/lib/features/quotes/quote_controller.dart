@@ -1530,7 +1530,9 @@ final class QuoteController extends ChangeNotifier {
       );
     } on FormatException catch (exception) {
       _calculationError = exception.message;
-      error = _calculationError;
+      if (saving || exception is! MissingCalculationValueException) {
+        error = _calculationError;
+      }
     }
   }
 

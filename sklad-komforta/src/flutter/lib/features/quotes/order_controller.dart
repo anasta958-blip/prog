@@ -305,9 +305,8 @@ final class OrderController extends QuoteController {
   /// Сохраняет комплектацию; новая создаётся в столбце [creationColumnId].
   Future<bool> saveOrder({String? creationColumnId}) async {
     final board = _board;
-    final value = snapshot;
     final document = draft;
-    if (board == null || value == null || document == null || saving) {
+    if (board == null || document == null || saving) {
       return false;
     }
     _removeBlankEntryRows(document);
@@ -315,6 +314,14 @@ final class OrderController extends QuoteController {
         in document.proposalTypes.first.variants.first.positions) {
       if (position.quantity <= 0) position.quantity = 1;
     }
+    _recalculateConfiguredRules(saving: true);
+    if (_calculationError != null) {
+      error = _calculationError;
+      notifyListeners();
+      return false;
+    }
+    final value = snapshot;
+    if (value == null) return false;
     if (value.title.trim().isEmpty) {
       error = 'Укажите адрес объекта.';
       notifyListeners();

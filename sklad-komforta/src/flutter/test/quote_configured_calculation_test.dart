@@ -1,10 +1,56 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sklad_komforta_app/core/config/app_config.dart';
+import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
+import 'package:sklad_komforta_app/features/kanban/kanban_models.dart';
+import 'package:sklad_komforta_app/features/quotes/quote_controller.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_models.dart';
 import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_configured_calculation.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_models.dart';
 
 void main() {
+  for (final kind in QuoteKind.values) {
+    test('missing formula input is shown only on save for $kind', () async {
+      const config = AppConfig(
+        apiBaseUrl: 'https://api.example.test',
+        environment: 'test',
+      );
+      final auth = AuthController(config);
+      final controller = QuoteController(config, auth);
+      addTearDown(controller.dispose);
+      addTearDown(auth.dispose);
+      final row = _position();
+      controller.draft = _document(row)..kind = kind;
+      controller.catalog = _configuration(
+        pipelines: [
+          MoneyPipelineDraft(
+            categoryClientId: 'equipment',
+            basePriceFieldCode: 'custom_missing',
+            resultFieldCode: 'result',
+          ),
+        ],
+      );
+      await controller.positionChanged();
+      expect(controller.error, isNull);
+      const board = KanbanBoard(
+        id: 'board',
+        code: 'sales',
+        name: 'Sales',
+        columns: [],
+        transitions: [],
+        categories: [],
+      );
+      expect(await controller.save(board: board), isFalse);
+      expect(controller.error, contains('не заполнено поле'));
+      await controller.positionChanged();
+      expect(controller.error, isNull);
+      row.values['custom_missing'] = 10;
+      await controller.positionChanged();
+      expect(controller.error, isNull);
+      expect(row.values['result'], 10);
+    });
+  }
+
   test('variant event is isolated and reads totals in formulas', () {
     final row = _position(basePrice: 10);
     final other = _position(basePrice: 30);
