@@ -1452,7 +1452,7 @@ final class _MetadataPanel extends StatelessWidget {
           final fields = <Widget>[
             _TextField(
               initialValue: draft.title,
-              label: 'Название КП',
+              label: 'Название ${draft.kind.label}',
               onChanged: (value) =>
                   controller.updateDocument((draft) => draft.title = value),
             ),

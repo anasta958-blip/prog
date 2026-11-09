@@ -15,6 +15,8 @@ namespace SkladKomforta.Infrastructure.Orders;
 /// Перенос по столбцам-триггерам. КП/ПКП → комплектация: создаёт комплектацию
 /// из выбранных вариантов (или типа) либо синхронизирует уже созданную и
 /// перемещает её карточку. Комплектация → КП: только перемещает карточку КП.
+/// Между отдельными канбанами КП и ПКП создаёт связанную копию предложения
+/// нужного вида; последующие переносы перемещают существующую карточку.
 /// Связь карточек — общий <c>work_item_id</c>.
 /// </summary>
 internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
@@ -70,6 +72,189 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
             await MoveLinkedCardAsync(connection, transaction, actorUserId,
                 await WorkItemOfAsync(connection, transaction, cardId, cancellationToken),
                 targetBoardId, targetColumnId, cancellationToken);
+        else if ((sourceSpecialization == WorkflowSpecializationCodes.Quote &&
+                  targetSpecialization == WorkflowSpecializationCodes.Prequote) ||
+                 (sourceSpecialization == WorkflowSpecializationCodes.Prequote &&
+                  targetSpecialization == WorkflowSpecializationCodes.Quote))
+            await TransferBetweenQuoteBoardsAsync(connection, transaction, actorUserId, cardId,
+                targetBoardId, targetColumnId, targetSpecialization!, cancellationToken);
+    }
+
+    /// <summary>Создаёт связанное предложение нужного вида при первом переносе между КП и ПКП.</summary>
+    private static async Task TransferBetweenQuoteBoardsAsync(
+        DbConnection connection, DbTransaction transaction, Guid actorUserId, Guid sourceCardId,
+        Guid targetBoardId, Guid targetColumnId, string targetKind, CancellationToken token)
+    {
+        var source = await ReadQuoteAsync(connection, transaction, sourceCardId, token)
+            ?? throw new IdentityException(409, "quote_transfer_source_missing",
+                "У карточки нет сохранённого КП или ПКП для переноса.");
+        await using (var lockCommand = connection.CreateCommand())
+        {
+            lockCommand.Transaction = transaction;
+            lockCommand.CommandText = "SELECT id FROM work_items WHERE id = @id FOR UPDATE";
+            Add(lockCommand, "id", source.WorkItemId);
+            await lockCommand.ExecuteScalarAsync(token);
+        }
+        var existing = await ReadLinkedQuoteCardAsync(connection, transaction,
+            source.WorkItemId, targetBoardId, token);
+        if (existing is not null)
+        {
+            if (!existing.Value.HasQuote)
+                throw new IdentityException(409, "quote_transfer_target_missing",
+                    "Связанная карточка в целевом канбане не содержит предложения.");
+            await MoveLinkedCardAsync(connection, transaction, actorUserId, source.WorkItemId,
+                targetBoardId, targetColumnId, token);
+            return;
+        }
+
+        var targetCardId = Guid.NewGuid();
+        var targetQuoteId = Guid.NewGuid();
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO kanban_cards
+                (id, work_item_id, workflow_id, column_id, category_id, title, values,
+                 sort_order, created_by, updated_by)
+            VALUES
+                (@id, @work_item_id, @workflow_id, @column_id, NULL, @title, '{}'::jsonb,
+                 COALESCE((SELECT min(sort_order) - 1 FROM kanban_cards
+                           WHERE workflow_id = @workflow_id AND column_id = @column_id
+                             AND deleted_at IS NULL), 0), @actor, @actor)
+            """, token,
+            ("id", targetCardId), ("work_item_id", source.WorkItemId),
+            ("workflow_id", targetBoardId), ("column_id", targetColumnId),
+            ("title", source.Title), ("actor", actorUserId));
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO quotes
+                (id, workflow_id, card_id, quote_kind, title, client_id, executor_company_id,
+                 manager_user_id, sales_head_user_id, selection_mode, additional_information,
+                 client_selection_submitted_at, created_by, updated_by)
+            SELECT @target_quote_id, @target_board_id, @target_card_id, @target_kind,
+                   title, client_id, executor_company_id, manager_user_id, sales_head_user_id,
+                   selection_mode, additional_information, client_selection_submitted_at,
+                   @actor, @actor
+              FROM quotes WHERE id = @source_quote_id AND deleted_at IS NULL
+            """, token,
+            ("target_quote_id", targetQuoteId), ("target_board_id", targetBoardId),
+            ("target_card_id", targetCardId), ("target_kind", targetKind),
+            ("source_quote_id", source.Id), ("actor", actorUserId));
+        await CopyQuoteTreeAsync(connection, transaction, source.Id, targetQuoteId, actorUserId, token);
+    }
+
+    private static async Task<(Guid CardId, bool HasQuote)?> ReadLinkedQuoteCardAsync(
+        DbConnection connection, DbTransaction transaction, Guid workItemId, Guid boardId,
+        CancellationToken token)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT card.id, quote.id IS NOT NULL
+              FROM kanban_cards AS card
+              LEFT JOIN quotes AS quote ON quote.card_id = card.id AND quote.deleted_at IS NULL
+             WHERE card.work_item_id = @work_item_id AND card.workflow_id = @workflow_id
+               AND card.deleted_at IS NULL
+             ORDER BY card.created_at LIMIT 1 FOR UPDATE OF card
+            """;
+        Add(command, "work_item_id", workItemId);
+        Add(command, "workflow_id", boardId);
+        await using var reader = await command.ExecuteReaderAsync(token);
+        return await reader.ReadAsync(token) ? (reader.GetGuid(0), reader.GetBoolean(1)) : null;
+    }
+
+    /// <summary>Копирует дерево предложения с новыми идентификаторами, сохраняя выбор вариантов.</summary>
+    private static async Task CopyQuoteTreeAsync(
+        DbConnection connection, DbTransaction transaction, Guid sourceQuoteId, Guid targetQuoteId,
+        Guid actorUserId, CancellationToken token)
+    {
+        await ExecuteAsync(connection, transaction, """
+            CREATE TEMP TABLE quote_transfer_ids (
+                old_id uuid PRIMARY KEY, new_id uuid NOT NULL
+            ) ON COMMIT DROP
+            """, token);
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO quote_transfer_ids (old_id, new_id)
+            SELECT id, gen_random_uuid() FROM quote_proposal_types WHERE quote_id = @source
+            """, token, ("source", sourceQuoteId));
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO quote_proposal_types (id, quote_id, name, sort_order)
+            SELECT map.new_id, @target, source.name, source.sort_order
+              FROM quote_proposal_types AS source
+              JOIN quote_transfer_ids AS map ON map.old_id = source.id
+             WHERE source.quote_id = @source
+            """, token, ("target", targetQuoteId), ("source", sourceQuoteId));
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO quote_transfer_ids (old_id, new_id)
+            SELECT variant.id, gen_random_uuid()
+              FROM quote_variants AS variant
+              JOIN quote_proposal_types AS type ON type.id = variant.proposal_type_id
+             WHERE type.quote_id = @source
+            """, token, ("source", sourceQuoteId));
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO quote_variants (id, proposal_type_id, name, subtitle, vat_rate, sort_order)
+            SELECT variant_map.new_id, type_map.new_id, variant.name, variant.subtitle,
+                   variant.vat_rate, variant.sort_order
+              FROM quote_variants AS variant
+              JOIN quote_transfer_ids AS variant_map ON variant_map.old_id = variant.id
+              JOIN quote_transfer_ids AS type_map ON type_map.old_id = variant.proposal_type_id
+            """, token);
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO quote_proposal_type_selections (proposal_type_id, variant_id, selected_by, selected_at)
+            SELECT type_map.new_id, variant_map.new_id, selected.selected_by, selected.selected_at
+              FROM quote_proposal_type_selections AS selected
+              JOIN quote_transfer_ids AS type_map ON type_map.old_id = selected.proposal_type_id
+              JOIN quote_transfer_ids AS variant_map ON variant_map.old_id = selected.variant_id
+            """, token);
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO quote_client_type_selections (quote_id, proposal_type_id, selected_at)
+            SELECT @target, type_map.new_id, selected.selected_at
+              FROM quote_client_type_selections AS selected
+              JOIN quote_transfer_ids AS type_map ON type_map.old_id = selected.proposal_type_id
+             WHERE selected.quote_id = @source
+            """, token, ("target", targetQuoteId), ("source", sourceQuoteId));
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO quote_transfer_ids (old_id, new_id)
+            SELECT category.id, gen_random_uuid()
+              FROM quote_variant_categories AS category
+              JOIN quote_transfer_ids AS variant_map ON variant_map.old_id = category.variant_id
+            """, token);
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO quote_variant_categories
+                (id, variant_id, catalog_category_id, name_snapshot, sort_order)
+            SELECT category_map.new_id, variant_map.new_id, category.catalog_category_id,
+                   category.name_snapshot, category.sort_order
+              FROM quote_variant_categories AS category
+              JOIN quote_transfer_ids AS category_map ON category_map.old_id = category.id
+              JOIN quote_transfer_ids AS variant_map ON variant_map.old_id = category.variant_id
+            """, token);
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO quote_transfer_ids (old_id, new_id)
+            SELECT section.id, gen_random_uuid()
+              FROM quote_variant_sections AS section
+              JOIN quote_transfer_ids AS category_map ON category_map.old_id = section.variant_category_id
+            """, token);
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO quote_variant_sections
+                (id, variant_category_id, catalog_section_id, name_snapshot,
+                 markup_percent, discount_percent, sort_order)
+            SELECT section_map.new_id, category_map.new_id, section.catalog_section_id,
+                   section.name_snapshot, section.markup_percent, section.discount_percent,
+                   section.sort_order
+              FROM quote_variant_sections AS section
+              JOIN quote_transfer_ids AS section_map ON section_map.old_id = section.id
+              JOIN quote_transfer_ids AS category_map ON category_map.old_id = section.variant_category_id
+            """, token);
+        await ExecuteAsync(connection, transaction, """
+            INSERT INTO quote_positions
+                (variant_section_id, catalog_item_id, name_snapshot, marking_snapshot,
+                 unit_snapshot, quantity, purchase_price, base_price, manual_price,
+                 markup_percent, discount_percent, line_total, exclude_from_totals,
+                 values, sort_order, created_by, updated_by)
+            SELECT section_map.new_id, position.catalog_item_id, position.name_snapshot,
+                   position.marking_snapshot, position.unit_snapshot, position.quantity,
+                   position.purchase_price, position.base_price, position.manual_price,
+                   position.markup_percent, position.discount_percent, position.line_total,
+                   position.exclude_from_totals, position.values, position.sort_order, @actor, @actor
+              FROM quote_positions AS position
+              JOIN quote_transfer_ids AS section_map ON section_map.old_id = position.variant_section_id
+            """, token, ("actor", actorUserId));
     }
 
     /// <summary>Создаёт или синхронизирует комплектацию по выбранному в КП.</summary>

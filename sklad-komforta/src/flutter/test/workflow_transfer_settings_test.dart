@@ -97,6 +97,83 @@ void main() {
     expect(saved.last.workflows.first.columns[1].transferTo, isNull);
     auth.dispose();
   });
+  testWidgets('КП и ПКП могут переносить карточки друг другу', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1400, 3000);
+    addTearDown(tester.view.reset);
+    final auth = AuthController(
+      const AppConfig(
+        apiBaseUrl: 'https://example.test/api/v1',
+        environment: 'test',
+      ),
+      api: _Gateway(),
+      tokens: _Tokens(),
+    );
+    final draft = _draft();
+    draft.workflows.insert(
+      1,
+      WorkflowDraft(
+        code: 'prequotes',
+        name: 'ПКП',
+        specialization: WorkflowSpecialization.prequote,
+        columns: [
+          WorkflowColumnDraft(
+            clientId: 'pre-start',
+            name: 'Подготовка',
+            color: '#4D8DFF',
+            creationActions: [WorkflowCreationAction.prequote],
+          ),
+        ],
+        transitions: [],
+      ),
+    );
+    final saved = <OrganizationOnboardingDraft>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: OrganizationOnboardingPage(
+            controller: auth,
+            settingsDraft: draft,
+            onSettingsSave: (value, {deleteCategoryData = const []}) async {
+              saved.add(value);
+              return true;
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    for (final toggle
+        in find.bySemanticsLabel('Развернуть канбан').evaluate().toList()) {
+      await tester.tap(find.byWidget(toggle.widget));
+      await tester.pumpAndSettle();
+    }
+    final quoteTransfer = find.byKey(const ValueKey('transfer-buy'));
+    await tester.ensureVisible(quoteTransfer);
+    await tester.tap(quoteTransfer);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('ПКП → Подготовка').last);
+    await tester.pumpAndSettle();
+
+    final prequoteTransfer = find.byKey(const ValueKey('transfer-pre-start'));
+    await tester.ensureVisible(prequoteTransfer);
+    await tester.tap(prequoteTransfer);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Предложения → Подготовка').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Сохранить изменения').first);
+    await tester.pumpAndSettle();
+
+    expect(
+      saved.last.workflows[0].columns[1].transferTo?.workflowCode,
+      'prequotes',
+    );
+    expect(
+      saved.last.workflows[1].columns[0].transferTo?.workflowCode,
+      'sales',
+    );
+    auth.dispose();
+  });
   testWidgets('вкладка «Внешняя отправка» открывается и сохраняет раздел', (
     tester,
   ) async {

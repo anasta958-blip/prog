@@ -222,6 +222,113 @@ public sealed partial class DatabaseRegressionTests
         await Send(staff, HttpMethod.Post, "/onboarding/activate");
     }
 
+    [DatabaseFact]
+    public async Task QuoteAndPrequoteBoardsTransferCopiesDocumentAndReusesLinkedCard()
+    {
+        await using var database = await RegressionDatabase.CreateAsync();
+        await using var factory = new RegressionFactory(database.ConnectionString);
+        using var staff = factory.CreateClient();
+        var draft = OrderDraft();
+        var sales = draft.Workflows[0] with
+        {
+            Columns =
+            [
+                draft.Workflows[0].Columns[0],
+                draft.Workflows[0].Columns[1] with
+                {
+                    TransferTo = new WorkflowTransferDraft("prequotes", "pre-start"),
+                },
+                draft.Workflows[0].Columns[2],
+            ],
+        };
+        var prequotes = new WorkflowDraft("prequotes", "Предварительные предложения",
+            [
+                new WorkflowColumnDraft("pre-start", "Подготовка ПКП", "#4D8DFF", ["prequote"]),
+                new WorkflowColumnDraft("pre-back", "Вернуть в КП", "#F59E0B",
+                    TransferTo: new WorkflowTransferDraft("sales", "done")),
+            ],
+            [new WorkflowTransitionDraft("pre-start", "pre-back")],
+            Specialization: "prequote");
+        await SignInDirectorAsync(staff, draft with { Workflows = [sales, prequotes] });
+
+        var configuration = await Send(staff, HttpMethod.Get, "/catalog/configuration");
+        var categories = configuration["categories"]!.AsArray();
+        var equipment = categories.Single(item => Text(item!, "name") == "Оборудование")!;
+        var services = categories.Single(item => Text(item!, "name") == "Работы")!;
+        var equipmentId = Text(equipment, "id");
+        var sectionId = Text(equipment["sections"]![0]!, "id");
+        var servicesId = Text(services, "id");
+        var unitId = Text(configuration["dictionaries"]![0]!["items"]![0]!, "id");
+        async Task<string> Product(string categoryId, string? section, string name) =>
+            Text(await Send(staff, HttpMethod.Post, "/catalog/items", new
+            {
+                categoryId, sectionId = section, name, marking = "T-1", status = "approved",
+                values = new Dictionary<string, object> { ["unit"] = unitId, ["base_price"] = 1000m },
+            }), "id");
+        var conditioner = await Product(equipmentId, sectionId, "Кондиционер");
+        var montage = await Product(servicesId, null, "Монтаж");
+        var executor = Text(await Send(staff, HttpMethod.Post, "/company/legal-entities", new
+        {
+            name = "Исполнитель", companyType = "ООО", legalName = "ООО Исполнитель",
+            inn = "7707083893", kpp = "773601001", ogrn = "1027700132195", phone = "+79991234567",
+            directorName = "Иванов Иван", signatoryName = "Иванов Иван", signatoryTitle = "Директор",
+            bankName = "Тестовый банк", bankBik = "044525225", bankAccount = "40702810900000000001",
+            corrAccount = "30101810400000000225", vatRates = new decimal?[] { 20 }, isDefault = true,
+        }), "id");
+        var client = Text(await Send(staff, HttpMethod.Post, "/company/clients", new
+        {
+            name = "Петров Пётр", companyName = "Петров Пётр", companyType = "person", phone = "+79990000000",
+            passportSeries = "1234", passportNumber = "123456", passportIssuedBy = "Тестовый отдел",
+        }), "id");
+
+        var boards = (await Send(staff, HttpMethod.Get, "/kanbans/")).AsArray();
+        var salesId = Text(boards.Single(item => Text(item!, "code") == "sales")!, "id");
+        var prequotesId = Text(boards.Single(item => Text(item!, "code") == "prequotes")!, "id");
+        var salesBoard = await Send(staff, HttpMethod.Get, $"/kanbans/{salesId}");
+        var prequotesBoard = await Send(staff, HttpMethod.Get, $"/kanbans/{prequotesId}");
+        string Column(JsonNode board, string name) =>
+            Text(board["columns"]!.AsArray().Single(item => Text(item!, "name") == name)!, "id");
+        var start = Column(salesBoard, "Подготовка");
+        var buy = Column(salesBoard, "Закупить материал");
+        var done = Column(salesBoard, "Завершено");
+        var preStart = Column(prequotesBoard, "Подготовка ПКП");
+        var preBack = Column(prequotesBoard, "Вернуть в КП");
+        var quoteBody = OrderQuote(client, executor, equipmentId, sectionId, servicesId,
+            conditioner, conditioner, montage, firstQuantity: 2, withPipe: false);
+        var quoteCardId = Text(await Send(staff, HttpMethod.Post, $"/kanbans/{salesId}/quotes",
+            new { columnId = start, quote = quoteBody }), "cardId");
+        var quote = await Send(staff, HttpMethod.Get,
+            $"/kanbans/{salesId}/cards/{quoteCardId}/quote");
+        await Send(staff, HttpMethod.Post, $"/kanbans/{salesId}/cards/{quoteCardId}/move",
+            new { targetColumnId = buy, targetIndex = 0 });
+
+        var prequoteCards = (await Send(staff, HttpMethod.Get,
+            $"/kanbans/{prequotesId}/cards?columnId={preStart}"))["items"]!.AsArray();
+        var prequoteCardId = Text(Assert.Single(prequoteCards)!, "id");
+        var prequote = await Send(staff, HttpMethod.Get,
+            $"/kanbans/{prequotesId}/cards/{prequoteCardId}/quote");
+        Assert.Equal("prequote", Text(prequote, "quoteKind"));
+        Assert.Equal(Text(quote, "title"), Text(prequote, "title"));
+        Assert.Equal(quote["proposalTypes"]!.AsArray().Count, prequote["proposalTypes"]!.AsArray().Count);
+        Assert.NotEqual(Text(quote["proposalTypes"]![0]!, "id"),
+            Text(prequote["proposalTypes"]![0]!, "id"));
+        Assert.Equal(Text(prequote["proposalTypes"]![0]!["variants"]![0]!, "id"),
+            Text(prequote["proposalTypes"]![0]!, "selectedVariantId"));
+        Assert.Equal(quote["proposalTypes"]![0]!["variants"]![0]!["categories"]![0]!["sections"]![0]!["positions"]!.AsArray().Count,
+            prequote["proposalTypes"]![0]!["variants"]![0]!["categories"]![0]!["sections"]![0]!["positions"]!.AsArray().Count);
+
+        await Send(staff, HttpMethod.Post, $"/kanbans/{prequotesId}/cards/{prequoteCardId}/move",
+            new { targetColumnId = preBack, targetIndex = 0 });
+        Assert.Equal(quoteCardId, Text(Assert.Single((await Send(staff, HttpMethod.Get,
+            $"/kanbans/{salesId}/cards?columnId={done}"))["items"]!.AsArray())!, "id"));
+        await Send(staff, HttpMethod.Post, $"/kanbans/{salesId}/cards/{quoteCardId}/move",
+            new { targetColumnId = start, targetIndex = 0 });
+        await Send(staff, HttpMethod.Post, $"/kanbans/{salesId}/cards/{quoteCardId}/move",
+            new { targetColumnId = buy, targetIndex = 0 });
+        Assert.Equal(prequoteCardId, Text(Assert.Single((await Send(staff, HttpMethod.Get,
+            $"/kanbans/{prequotesId}/cards?columnId={preStart}"))["items"]!.AsArray())!, "id"));
+    }
+
     /// <summary>
     /// Канбан КП со столбцом-триггером «Закупить материал» и канбан комплектации
     /// со столбцом дозаказа «Монтаж» и обратным триггером «Вернуть в КП».

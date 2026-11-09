@@ -1028,7 +1028,11 @@ final class _OrganizationOnboardingPageState
         if (!identical(target, workflow) &&
             ((fromQuote &&
                     target.specialization == WorkflowSpecialization.order) ||
-                (fromOrder && _isQuoteBoard(target.specialization))))
+                (fromOrder && _isQuoteBoard(target.specialization)) ||
+                (workflow.specialization == WorkflowSpecialization.quote &&
+                    target.specialization == WorkflowSpecialization.prequote) ||
+                (workflow.specialization == WorkflowSpecialization.prequote &&
+                    target.specialization == WorkflowSpecialization.quote)))
           target,
     ];
   }
@@ -1053,13 +1057,10 @@ final class _OrganizationOnboardingPageState
     final current = column.transferTo == null
         ? ''
         : '${column.transferTo!.workflowCode}|${column.transferTo!.columnClientId}';
-    final isOrder = workflow.specialization == WorkflowSpecialization.order;
     return AppSelectField<String>(
       key: ValueKey('transfer-${column.clientId}'),
       value: options.any((option) => option.value == current) ? current : '',
-      label: isOrder
-          ? 'Попав в этот столбец, вернуть карточку КП в'
-          : 'Попав в этот столбец, перенести в комплектацию',
+      label: 'Попав в этот столбец, перенести карточку в',
       options: options,
       onChanged: (value) => setState(() {
         if (value == null || value.isEmpty) {

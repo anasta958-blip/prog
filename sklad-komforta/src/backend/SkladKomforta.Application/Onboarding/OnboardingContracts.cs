@@ -8,7 +8,8 @@ public sealed record CompanyProfileDraft(
 
 /// <summary>
 /// Цель переноса из столбца-триггера: канбан (по коду) и его столбец (по
-/// клиентскому идентификатору). КП/ПКП переносится в комплектацию и обратно.
+/// клиентскому идентификатору). КП/ПКП переносится в комплектацию и обратно,
+/// а отдельные канбаны КП и ПКП могут переносить карточки друг другу.
 /// </summary>
 public sealed record WorkflowTransferDraft(string WorkflowCode, string ColumnClientId);
 

@@ -306,6 +306,41 @@ public sealed class OnboardingValidatorTests
         Assert.Null(exception);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void DraftAcceptsTransferBetweenDedicatedQuoteAndPrequoteBoards(bool fromQuote)
+    {
+        var draft = ValidDraft();
+        var quote = draft.Workflows[0] with
+        {
+            Specialization = WorkflowSpecializationCodes.Quote,
+            Columns =
+            [
+                new WorkflowColumnDraft("quote-column", "КП", "#4D8DFF",
+                    [WorkflowCreationActionCodes.Quote],
+                    fromQuote ? new WorkflowTransferDraft("prequote", "prequote-column") : null),
+            ],
+        };
+        var prequote = quote with
+        {
+            Code = "prequote",
+            Name = "Предварительные предложения",
+            Specialization = WorkflowSpecializationCodes.Prequote,
+            Columns =
+            [
+                new WorkflowColumnDraft("prequote-column", "ПКП", "#4D8DFF",
+                    [WorkflowCreationActionCodes.Prequote],
+                    fromQuote ? null : new WorkflowTransferDraft("quote", "quote-column")),
+            ],
+        };
+
+        var exception = Record.Exception(() => OnboardingValidator.Validate(
+            draft with { Workflows = [quote, prequote] }, false));
+
+        Assert.Null(exception);
+    }
+
     [Fact]
     public void SpecializedWorkflowRequiresConfiguredCreationColumn()
     {

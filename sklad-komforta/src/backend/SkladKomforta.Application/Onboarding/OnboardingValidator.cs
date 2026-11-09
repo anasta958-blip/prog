@@ -269,10 +269,14 @@ public static class OnboardingValidator
                 var targetIsQuote = target.Specialization is WorkflowSpecializationCodes.Quote
                     or WorkflowSpecializationCodes.Prequote
                     or WorkflowSpecializationCodes.QuoteAndPrequote;
-                if ((isQuote && !targetIsOrder) || (isOrder && !targetIsQuote))
+                var quoteToPrequote = workflow.Specialization == WorkflowSpecializationCodes.Quote &&
+                    target.Specialization == WorkflowSpecializationCodes.Prequote;
+                var prequoteToQuote = workflow.Specialization == WorkflowSpecializationCodes.Prequote &&
+                    target.Specialization == WorkflowSpecializationCodes.Quote;
+                if (!((isQuote && targetIsOrder) || (isOrder && targetIsQuote) ||
+                      quoteToPrequote || prequoteToQuote))
                     Fail("onboarding_transfer_invalid",
-                        $"Из столбца «{column.Name}» можно переносить только " +
-                        (isQuote ? "в канбан комплектации." : "в канбан КП."));
+                        $"Из столбца «{column.Name}» нельзя переносить карточки в канбан «{target.Name}».");
                 if (target.Columns.All(item => item.ClientId != transfer.ColumnClientId))
                     Fail("onboarding_transfer_invalid",
                         $"Столбец «{column.Name}» переносит карточки в неизвестный столбец канбана «{target.Name}».");
