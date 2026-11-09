@@ -1,4 +1,5 @@
 using System.Data.Common;
+using System.Globalization;
 using System.Text.Json;
 using Npgsql;
 using SkladKomforta.Application.Abstractions.Files;
@@ -243,7 +244,8 @@ internal sealed class PostgresOrderService(
                     var positionChanged = newQuantity != position.Quantity;
                     if (positionChanged)
                         changes.Add(new OrderCalculationFieldChange(position.Id, position.Name,
-                            "quantity", position.Quantity.ToString(), newQuantity.ToString()));
+                            "quantity", position.Quantity.ToString(CultureInfo.InvariantCulture),
+                            newQuantity.ToString(CultureInfo.InvariantCulture)));
                     foreach (var code in values.Keys.Union(newValues.Keys).OrderBy(code => code))
                     {
                         // Новые системные значения сами по себе не считаются изменением документа.
