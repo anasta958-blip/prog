@@ -34,6 +34,19 @@ abstract interface class OrderGateway {
     OrderDocument order,
   );
 
+  Future<OrderCalculationPreview> previewCalculation(
+    String accessToken,
+    String boardId,
+    String cardId,
+  );
+
+  Future<OrderDocument> applyCalculation(
+    String accessToken,
+    String boardId,
+    String cardId,
+    OrderCalculationPreview preview,
+  );
+
   /// PDF сохранённой комплектации.
   Future<QuotePdfDownload> downloadPdf(
     String accessToken,
@@ -118,6 +131,39 @@ final class OrderApi implements OrderGateway {
           '${_orderPath(boardId, cardId)}/',
           accessToken,
           body: order.toJson(),
+        )
+        as Map<String, dynamic>,
+  );
+
+  @override
+  Future<OrderCalculationPreview> previewCalculation(
+    String accessToken,
+    String boardId,
+    String cardId,
+  ) async => OrderCalculationPreview.fromJson(
+    await _send(
+          'GET',
+          '${_orderPath(boardId, cardId)}/calculation-preview',
+          accessToken,
+        )
+        as Map<String, dynamic>,
+  );
+
+  @override
+  Future<OrderDocument> applyCalculation(
+    String accessToken,
+    String boardId,
+    String cardId,
+    OrderCalculationPreview preview,
+  ) async => OrderDocument.fromJson(
+    await _send(
+          'POST',
+          '${_orderPath(boardId, cardId)}/apply-calculation',
+          accessToken,
+          body: {
+            'currentCalculationVersion': preview.currentCalculationVersion,
+            'orderUpdatedAt': preview.orderUpdatedAt,
+          },
         )
         as Map<String, dynamic>,
   );

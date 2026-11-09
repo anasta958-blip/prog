@@ -41,6 +41,21 @@ internal static class OrderEndpoints
                 Results.Ok(ApiResponse.Success(await service.SaveAsync(UserId(context.User), boardId, cardId, request, token))))
             .RequireTenantPermission("orders.manage");
 
+        order.MapGet("/calculation-preview", async (
+                HttpContext context, Guid boardId, Guid cardId,
+                IOrderService service, CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.PreviewCalculationAsync(
+                    UserId(context.User), boardId, cardId, token))))
+            .RequireTenantPermission("orders.manage");
+
+        order.MapPost("/apply-calculation", async (
+                HttpContext context, Guid boardId, Guid cardId,
+                ApplyOrderCalculationRequest request,
+                IOrderService service, CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.ApplyCalculationAsync(
+                    UserId(context.User), boardId, cardId, request, token))))
+            .RequireTenantPermission("orders.manage");
+
         order.MapGet("/pdf", async (
                 HttpContext context, Guid boardId, Guid cardId, IOrderPdfService service, CancellationToken token) =>
             {

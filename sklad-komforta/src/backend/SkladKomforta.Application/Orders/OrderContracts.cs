@@ -61,7 +61,23 @@ public sealed record OrderDetails(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     bool CanChangeManager,
-    bool CanManageInvoices);
+    bool CanManageInvoices,
+    string? CalculationVersion = null,
+    string? CurrentCalculationVersion = null);
+
+/// <summary>Изменение расчётного значения в позиции комплектации.</summary>
+public sealed record OrderCalculationFieldChange(
+    Guid PositionId, string PositionName, string FieldCode,
+    string? SavedValue, string? NewValue);
+
+/// <summary>Сравнение сохранённых значений с расчётом по текущим правилам.</summary>
+public sealed record OrderCalculationPreview(
+    string CurrentCalculationVersion, DateTimeOffset OrderUpdatedAt,
+    int ChangedPositions, IReadOnlyList<OrderCalculationFieldChange> Changes);
+
+/// <summary>Подтверждение конкретного сравнения.</summary>
+public sealed record ApplyOrderCalculationRequest(
+    string CurrentCalculationVersion, DateTimeOffset OrderUpdatedAt);
 
 /// <summary>Позиция при сохранении; новая позиция получает UUID на клиенте или сервере.</summary>
 public sealed record SaveOrderPositionRequest(
@@ -132,6 +148,11 @@ public interface IOrderService
 
     /// <summary>Атомарно заменяет шапку и дерево позиций.</summary>
     Task<OrderDetails> SaveAsync(Guid actorUserId, Guid boardId, Guid cardId, SaveOrderRequest request, CancellationToken cancellationToken);
+
+    Task<OrderCalculationPreview> PreviewCalculationAsync(Guid actorUserId, Guid boardId, Guid cardId, CancellationToken cancellationToken);
+
+    Task<OrderDetails> ApplyCalculationAsync(Guid actorUserId, Guid boardId, Guid cardId,
+        ApplyOrderCalculationRequest request, CancellationToken cancellationToken);
 
     /// <summary>Возвращает загруженные счета со ссылками на скачивание.</summary>
     Task<IReadOnlyList<OrderInvoiceSummary>> GetInvoicesAsync(Guid actorUserId, Guid boardId, Guid cardId, CancellationToken cancellationToken);

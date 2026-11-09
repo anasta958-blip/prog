@@ -9,6 +9,7 @@ using SkladKomforta.Application.Identity;
 using SkladKomforta.Application.Kanban;
 using SkladKomforta.Application.Orders;
 using SkladKomforta.Application.Quotes;
+using SkladKomforta.Infrastructure.Quotes;
 using static SkladKomforta.Infrastructure.Orders.OrderStore;
 
 namespace SkladKomforta.Infrastructure.Orders;
@@ -36,8 +37,10 @@ internal sealed class PostgresOrderService(
         await kanbanService.GetCardAsync(actorUserId, boardId, cardId, cancellationToken);
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
         var (canChange, canInvoices) = await CapabilitiesAsync(actorUserId, cancellationToken);
-        return await ReadAsync(connection, null, boardId, cardId, canChange, canInvoices, cancellationToken)
+        var result = await ReadAsync(connection, null, boardId, cardId, canChange, canInvoices, cancellationToken)
                ?? throw new IdentityException(404, "order_not_found", "Комплектация для этой карточки ещё не создана.");
+        var runtime = await PostgresQuoteService.ReadCalculationConfigurationAsync(connection, null, cancellationToken);
+        return result with { CurrentCalculationVersion = PostgresQuoteService.CalculationVersion(runtime) };
     }
 
     /// <inheritdoc />
@@ -52,6 +55,8 @@ internal sealed class PostgresOrderService(
             await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
             var cardId = await CreateCardAsync(connection, transaction, actorUserId, boardId, request, cancellationToken);
             await EnsureReferencesAsync(connection, transaction, boardId, request.Order, null, cancellationToken);
+            var runtime = await PostgresQuoteService.ReadCalculationConfigurationAsync(connection, transaction, cancellationToken);
+            var version = PostgresQuoteService.CalculationVersion(runtime);
 
             // Менеджер — создатель карточки, РОП — его руководитель по структуре.
             var salesHead = await SupervisorOfAsync(
@@ -60,15 +65,16 @@ internal sealed class PostgresOrderService(
             await ExecuteAsync(connection, transaction, """
                 INSERT INTO orders
                     (id, workflow_id, card_id, title, object_type, client_id, executor_company_id,
-                     manager_user_id, sales_head_user_id, created_by, updated_by)
+                     manager_user_id, sales_head_user_id, calculation_version, created_by, updated_by)
                 VALUES
                     (@id, @workflow_id, @card_id, @title, @object_type, @client_id, @executor_id,
-                     @manager_id, @sales_head_id, @actor, @actor)
+                     @manager_id, @sales_head_id, @version, @actor, @actor)
                 """, cancellationToken,
                 ("id", orderId), ("workflow_id", boardId), ("card_id", cardId),
                 ("title", request.Order.Title.Trim()), ("object_type", Db(TrimToNull(request.Order.ObjectType))),
                 ("client_id", request.Order.ClientId), ("executor_id", request.Order.ExecutorCompanyId),
-                ("manager_id", actorUserId), ("sales_head_id", Db(salesHead)), ("actor", actorUserId));
+                ("manager_id", actorUserId), ("sales_head_id", Db(salesHead)),
+                ("version", version), ("actor", actorUserId));
 
             var reorder = await IsReorderColumnAsync(connection, transaction, boardId, request.ColumnId, cancellationToken);
             await ReplaceTreeAsync(connection, transaction, actorUserId, boardId, orderId,
@@ -78,7 +84,7 @@ internal sealed class PostgresOrderService(
             await WriteAuditAsync(connection, transaction, actorUserId, orderId, "created",
                 null, AuditSnapshot(created), cancellationToken);
             await transaction.CommitAsync(cancellationToken);
-            return created;
+            return created with { CurrentCalculationVersion = version };
         }
         catch (PostgresException exception)
         {
@@ -100,6 +106,11 @@ internal sealed class PostgresOrderService(
             await LockOrderCardAsync(connection, transaction, boardId, cardId, cancellationToken);
             var before = await ReadAsync(connection, transaction, boardId, cardId, canChange, canInvoices, cancellationToken)
                          ?? throw new IdentityException(404, "order_not_found", "Комплектация для этой карточки ещё не создана.");
+            var runtime = await PostgresQuoteService.ReadCalculationConfigurationAsync(connection, transaction, cancellationToken);
+            var version = PostgresQuoteService.CalculationVersion(runtime);
+            if (before.CalculationVersion != version)
+                throw new IdentityException(409, "order_calculation_outdated",
+                    "Расчётные правила изменились. Сначала проверьте и примените новый расчёт.");
             await EnsureReferencesAsync(connection, transaction, boardId, request, canChange ? request : null, cancellationToken);
 
             // Без права менеджер и РОП остаются прежними, что бы ни прислал клиент.
@@ -109,13 +120,14 @@ internal sealed class PostgresOrderService(
                 UPDATE orders
                    SET title = @title, object_type = @object_type, client_id = @client_id,
                        executor_company_id = @executor_id, manager_user_id = @manager_id,
-                       sales_head_user_id = @sales_head_id, updated_by = @actor, updated_at = now()
+                       sales_head_user_id = @sales_head_id, calculation_version = @version,
+                       updated_by = @actor, updated_at = now()
                  WHERE id = @id
                 """, cancellationToken,
                 ("id", before.Id), ("title", request.Title.Trim()),
                 ("object_type", Db(TrimToNull(request.ObjectType))), ("client_id", request.ClientId),
                 ("executor_id", request.ExecutorCompanyId), ("manager_id", Db(manager)),
-                ("sales_head_id", Db(salesHead)), ("actor", actorUserId));
+                ("sales_head_id", Db(salesHead)), ("version", version), ("actor", actorUserId));
             await ExecuteAsync(connection, transaction, """
                 UPDATE kanban_cards SET title = @title, updated_by = @actor, updated_at = now()
                  WHERE id = @card_id AND workflow_id = @workflow_id AND deleted_at IS NULL
@@ -132,13 +144,129 @@ internal sealed class PostgresOrderService(
             await WriteAuditAsync(connection, transaction, actorUserId, before.Id, "updated",
                 AuditSnapshot(before), AuditSnapshot(after), cancellationToken);
             await transaction.CommitAsync(cancellationToken);
-            return after;
+            return after with { CurrentCalculationVersion = version };
         }
         catch (PostgresException exception)
         {
             throw Translate(exception);
         }
     }
+
+    public async Task<OrderCalculationPreview> PreviewCalculationAsync(
+        Guid actorUserId, Guid boardId, Guid cardId, CancellationToken cancellationToken)
+    {
+        await kanbanService.GetCardAsync(actorUserId, boardId, cardId, cancellationToken);
+        await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
+        var order = await ReadAsync(connection, null, boardId, cardId, false, false, cancellationToken)
+            ?? throw new IdentityException(404, "order_not_found", "Комплектация не найдена.");
+        var runtime = await PostgresQuoteService.ReadCalculationConfigurationAsync(connection, null, cancellationToken);
+        var boardFields = await ReadBoardFieldsAsync(connection, null, boardId, cancellationToken);
+        return CalculatePreview(order, runtime, boardFields).Preview;
+    }
+
+    public async Task<OrderDetails> ApplyCalculationAsync(
+        Guid actorUserId, Guid boardId, Guid cardId,
+        ApplyOrderCalculationRequest request, CancellationToken cancellationToken)
+    {
+        await kanbanService.GetCardAsync(actorUserId, boardId, cardId, cancellationToken);
+        var (canChange, canInvoices) = await CapabilitiesAsync(actorUserId, cancellationToken);
+        await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await LockOrderCardAsync(connection, transaction, boardId, cardId, cancellationToken);
+        var before = await ReadAsync(connection, transaction, boardId, cardId, canChange, canInvoices, cancellationToken)
+            ?? throw new IdentityException(404, "order_not_found", "Комплектация не найдена.");
+        var runtime = await PostgresQuoteService.ReadCalculationConfigurationAsync(connection, transaction, cancellationToken);
+        var version = PostgresQuoteService.CalculationVersion(runtime);
+        if (request.CurrentCalculationVersion != version || request.OrderUpdatedAt != before.UpdatedAt)
+            throw new IdentityException(409, "order_calculation_preview_outdated",
+                "Комплектация или правила изменились. Откройте сравнение ещё раз.");
+        var boardFields = await ReadBoardFieldsAsync(connection, transaction, boardId, cancellationToken);
+        var calculated = CalculatePreview(before, runtime, boardFields);
+        foreach (var position in calculated.Positions)
+            await ExecuteAsync(connection, transaction, """
+                UPDATE order_positions
+                   SET quantity = @quantity, values = CAST(@values AS jsonb),
+                       updated_by = @actor, updated_at = now()
+                 WHERE id = @id
+                """, cancellationToken,
+                ("id", position.Id), ("quantity", position.Quantity),
+                ("values", JsonSerializer.Serialize(position.Values, JsonOptions)), ("actor", actorUserId));
+        await ExecuteAsync(connection, transaction, """
+            UPDATE orders SET calculation_version = @version,
+                              updated_by = @actor, updated_at = now()
+             WHERE id = @id
+            """, cancellationToken, ("id", before.Id), ("version", version), ("actor", actorUserId));
+        var after = await ReadAsync(connection, transaction, boardId, cardId, canChange, canInvoices, cancellationToken)
+            ?? throw new InvalidOperationException("Пересчитанная комплектация не найдена.");
+        await WriteAuditAsync(connection, transaction, actorUserId, before.Id,
+            "calculation_applied", AuditSnapshot(before), AuditSnapshot(after), cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return after with { CurrentCalculationVersion = version };
+    }
+
+    private static (OrderCalculationPreview Preview,
+        IReadOnlyList<(Guid Id, decimal Quantity, IReadOnlyDictionary<string, JsonElement> Values)> Positions)
+        CalculatePreview(OrderDetails order, PostgresQuoteService.QuoteCalculationConfiguration runtime,
+            IReadOnlyDictionary<Guid, HashSet<string>> boardFields)
+    {
+        var version = PostgresQuoteService.CalculationVersion(runtime);
+        var changes = new List<OrderCalculationFieldChange>();
+        var positions = new List<(Guid, decimal, IReadOnlyDictionary<string, JsonElement>)>();
+        var changedPositions = 0;
+        foreach (var category in order.Categories)
+            foreach (var section in category.Sections)
+                foreach (var position in section.Positions)
+                {
+                    var categoryCode = category.CatalogCategoryId is { } categoryId
+                        ? runtime.CategoryClientIds.GetValueOrDefault(categoryId) : null;
+                    var values = position.Values;
+                    var basePrice = Numeric(values, "base_price") ?? 0m;
+                    var input = new SaveQuotePositionRequest(position.Id, position.CatalogItemId,
+                        position.Name, position.Marking, position.Unit, position.Quantity,
+                        Numeric(values, "purchase_price"), basePrice, null,
+                        Numeric(values, "markup_value"), Numeric(values, "discount_value"),
+                        values.TryGetValue("excluded_from_calc", out var excluded) && excluded.ValueKind == JsonValueKind.True,
+                        values);
+                    var result = categoryCode is null ? null : QuoteConfiguredCalculationEngine.Calculate(
+                        input, categoryCode, runtime.Rules, runtime.Pipelines,
+                        runtime.PercentFields.GetValueOrDefault(categoryCode),
+                        runtime.TotalFields?.GetValueOrDefault(categoryCode));
+                    var allowed = category.CatalogCategoryId is { } catalogId
+                        ? boardFields.GetValueOrDefault(catalogId) : null;
+                    IReadOnlyDictionary<string, JsonElement> newValues = result is null
+                        ? values
+                        : result.Values
+                            .Where(item => values.ContainsKey(item.Key) || (allowed?.Contains(item.Key) ?? false))
+                            .ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
+                    var newQuantity = result?.Quantity ?? position.Quantity;
+                    positions.Add((position.Id, newQuantity, newValues));
+                    var positionChanged = newQuantity != position.Quantity;
+                    if (positionChanged)
+                        changes.Add(new OrderCalculationFieldChange(position.Id, position.Name,
+                            "quantity", position.Quantity.ToString(), newQuantity.ToString()));
+                    foreach (var code in values.Keys.Union(newValues.Keys).OrderBy(code => code))
+                    {
+                        // Новые системные значения сами по себе не считаются изменением документа.
+                        if (!values.ContainsKey(code) &&
+                            code is ("name" or "marking" or "unit" or "quantity" or
+                                "base_price" or "purchase_price" or "markup_value" or
+                                "discount_value" or "excluded_from_calc" or "line_total")) continue;
+                        var oldValue = values.GetValueOrDefault(code);
+                        var newValue = newValues.GetValueOrDefault(code);
+                        var oldText = values.ContainsKey(code) ? oldValue.ToString() : null;
+                        var newText = newValues.ContainsKey(code) ? newValue.ToString() : null;
+                        if (oldText == newText) continue;
+                        changes.Add(new OrderCalculationFieldChange(position.Id, position.Name, code, oldText, newText));
+                        positionChanged = true;
+                    }
+                    if (positionChanged) changedPositions++;
+                }
+        return (new OrderCalculationPreview(version, order.UpdatedAt, changedPositions, changes), positions);
+    }
+
+    private static decimal? Numeric(IReadOnlyDictionary<string, JsonElement> values, string code) =>
+        values.TryGetValue(code, out var value) && value.ValueKind == JsonValueKind.Number &&
+        value.TryGetDecimal(out var number) ? number : null;
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<OrderInvoiceSummary>> GetInvoicesAsync(

@@ -21,14 +21,66 @@ final class QuoteLocalDraft {
   }
 
   Future<void> write(QuoteDraft draft) {
+    final payload = draft.toJson();
+    final types = payload['proposalTypes'] as List;
+    for (
+      var typeIndex = 0;
+      typeIndex < draft.proposalTypes.length;
+      typeIndex++
+    ) {
+      final variants =
+          (types[typeIndex] as Map<String, dynamic>)['variants'] as List;
+      final sourceType = draft.proposalTypes[typeIndex];
+      for (
+        var variantIndex = 0;
+        variantIndex < sourceType.variants.length;
+        variantIndex++
+      ) {
+        final categories =
+            (variants[variantIndex] as Map<String, dynamic>)['categories']
+                as List;
+        final sourceVariant = sourceType.variants[variantIndex];
+        for (
+          var categoryIndex = 0;
+          categoryIndex < sourceVariant.categories.length;
+          categoryIndex++
+        ) {
+          final sections =
+              (categories[categoryIndex] as Map<String, dynamic>)['sections']
+                  as List;
+          final sourceCategory = sourceVariant.categories[categoryIndex];
+          for (
+            var sectionIndex = 0;
+            sectionIndex < sourceCategory.sections.length;
+            sectionIndex++
+          ) {
+            final positions =
+                (sections[sectionIndex] as Map<String, dynamic>)['positions']
+                    as List;
+            final sourceSection = sourceCategory.sections[sectionIndex];
+            for (
+              var positionIndex = 0;
+              positionIndex < sourceSection.positions.length;
+              positionIndex++
+            ) {
+              (positions[positionIndex] as Map<String, dynamic>)['lineTotal'] =
+                  sourceSection.positions[positionIndex].lineTotal;
+            }
+          }
+        }
+      }
+    }
     final snapshot = jsonEncode({
-      ...draft.toJson(),
+      ...payload,
       'id': draft.id,
       'cardId': draft.cardId,
       'clientSelectedProposalTypeId': draft.clientSelectedProposalTypeId,
       'clientSelectionSubmittedAt': draft.clientSelectionSubmittedAt
           ?.toIso8601String(),
       'canChangeManager': draft.canChangeManager,
+      'calculationVersion': draft.calculationVersion,
+      'currentCalculationVersion': draft.currentCalculationVersion,
+      'updatedAt': draft.updatedAt?.toIso8601String(),
     });
     return _enqueue(() => storage.write(key: key, value: snapshot));
   }

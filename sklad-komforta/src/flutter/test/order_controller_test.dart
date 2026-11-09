@@ -36,6 +36,111 @@ void main() {
     tokens: _MemoryTokenRepository(),
   )..accessToken = 'access-token';
 
+  test('устаревшая комплектация требует подтверждённого пересчёта', () async {
+    final auth = authorized();
+    final gateway = _MemoryOrderGateway(
+      json: () => {
+        ..._orderJson(),
+        'calculationVersion': 'old',
+        'currentCalculationVersion': 'new',
+      },
+    );
+    final controller = OrderController(
+      config,
+      auth,
+      orderGateway: gateway,
+      catalogGateway: _CatalogGateway(),
+      companyGateway: _CompanyGateway(),
+    );
+    addTearDown(controller.dispose);
+    addTearDown(auth.dispose);
+    await controller.initializeOrder(board: _orderBoard, card: _card());
+    expect(controller.needsRecalculation, isTrue);
+    expect(await controller.saveOrder(), isFalse);
+    expect(gateway.saved, isNull);
+    gateway.previewResponse = const OrderCalculationPreview(
+      currentCalculationVersion: 'new',
+      orderUpdatedAt: '2026-11-09T00:00:00Z',
+      changedPositions: 1,
+      changes: [],
+    );
+    final preview = await controller.previewOrderCalculation();
+    expect(preview, isNotNull);
+    gateway.applyResponse = OrderDocument.fromJson({
+      ..._orderJson(),
+      'calculationVersion': 'new',
+      'currentCalculationVersion': 'new',
+    });
+    expect(await controller.applyOrderCalculation(preview!), isTrue);
+    expect(controller.needsRecalculation, isFalse);
+  });
+
+  testWidgets('редактор комплектации показывает сравнение и подтверждение', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1500, 1100);
+    addTearDown(tester.view.reset);
+    final auth = authorized();
+    final gateway = _MemoryOrderGateway(
+      json: () => {
+        ..._orderJson(),
+        'calculationVersion': 'old',
+        'currentCalculationVersion': 'new',
+      },
+    );
+    gateway.previewResponse = const OrderCalculationPreview(
+      currentCalculationVersion: 'new',
+      orderUpdatedAt: '2026-11-09T00:00:00Z',
+      changedPositions: 1,
+      changes: [
+        OrderCalculationFieldChange(
+          positionName: 'Кондиционер',
+          fieldCode: 'base_price',
+          savedValue: '100',
+          newValue: '120',
+        ),
+      ],
+    );
+    gateway.applyResponse = OrderDocument.fromJson({
+      ..._orderJson(),
+      'calculationVersion': 'new',
+      'currentCalculationVersion': 'new',
+    });
+    final controller = OrderController(
+      config,
+      auth,
+      orderGateway: gateway,
+      catalogGateway: _CatalogGateway(),
+      companyGateway: _CompanyGateway(),
+    );
+    addTearDown(controller.dispose);
+    addTearDown(auth.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: OrderEditorPage(
+            config: config,
+            authController: auth,
+            board: _orderBoard,
+            card: _card(),
+            controller: controller,
+            onBack: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Расчётные правила изменились'), findsOneWidget);
+    await tester.tap(find.text('Посмотреть новый расчёт'));
+    await tester.pumpAndSettle();
+    expect(find.text('Изменится позиций: 1'), findsOneWidget);
+    await tester.tap(find.text('Применить и сохранить'));
+    await tester.pumpAndSettle();
+    expect(controller.needsRecalculation, isFalse);
+    await tester.pump(const Duration(seconds: 6));
+  });
+
   test('комплектация не сохраняется с заказчиком вне справочника', () async {
     final auth = authorized();
     final gateway = _MemoryOrderGateway();
@@ -702,6 +807,7 @@ const _orderBoard = KanbanBoard(
   code: 'orders',
   name: 'Комплектация',
   specialization: WorkflowSpecialization.order,
+  documentTemplate: {'blocks': []},
   objectTypes: ['Квартира', 'Дом'],
   columns: [
     KanbanColumn(
@@ -783,6 +889,23 @@ final class _MemoryOrderGateway implements OrderGateway {
 
   final Map<String, dynamic> Function() json;
   OrderDocument? saved;
+  OrderCalculationPreview? previewResponse;
+  OrderDocument? applyResponse;
+
+  @override
+  Future<OrderCalculationPreview> previewCalculation(
+    String accessToken,
+    String boardId,
+    String cardId,
+  ) async => previewResponse ?? (throw UnimplementedError());
+
+  @override
+  Future<OrderDocument> applyCalculation(
+    String accessToken,
+    String boardId,
+    String cardId,
+    OrderCalculationPreview preview,
+  ) async => applyResponse ?? (throw UnimplementedError());
 
   @override
   Future<OrderDocument> getOrder(

@@ -29,6 +29,8 @@ final class OrderController extends QuoteController {
 
   /// Загруженная или создаваемая комплектация.
   OrderDocument? order;
+  @override
+  bool get needsRecalculation => order?.needsRecalculation ?? false;
   KanbanBoard? _board;
   KanbanCard? _card;
 
@@ -258,6 +260,9 @@ final class OrderController extends QuoteController {
       salesHeadUserId: value.salesHeadUserId,
       selectionMode: 'variant',
       canChangeManager: value.canChangeManager,
+      calculationVersion: value.calculationVersion,
+      currentCalculationVersion: value.currentCalculationVersion,
+      updatedAt: value.updatedAt,
       proposalTypes: [
         QuoteProposalTypeDraft(
           id: _typeId,
@@ -307,6 +312,12 @@ final class OrderController extends QuoteController {
     final board = _board;
     final document = draft;
     if (board == null || document == null || saving) {
+      return false;
+    }
+    if (needsRecalculation) {
+      error =
+          'Расчётные правила изменились. Сначала проверьте и примените новый расчёт.';
+      notifyListeners();
       return false;
     }
     _removeBlankEntryRows(document);
@@ -376,6 +387,91 @@ final class OrderController extends QuoteController {
       return false;
     } finally {
       saving = false;
+      notifyListeners();
+    }
+  }
+
+  Future<OrderCalculationPreview?> previewOrderCalculation() async {
+    final board = _board;
+    final cardId = persistedCardId;
+    if (board == null || cardId == null || calculationBusy || dirty) {
+      error = dirty
+          ? 'Сначала отмените локальные изменения.'
+          : 'Комплектация не сохранена.';
+      notifyListeners();
+      return null;
+    }
+    calculationBusy = true;
+    error = null;
+    notifyListeners();
+    try {
+      return await _authorized(
+        (token) => _orderGateway.previewCalculation(token, board.id, cardId),
+      );
+    } on ApiException catch (exception) {
+      error = exception.message;
+      return null;
+    } on Object {
+      error = 'Не удалось сравнить расчёты. Проверьте подключение.';
+      return null;
+    } finally {
+      calculationBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> applyOrderCalculation(OrderCalculationPreview preview) async {
+    final board = _board;
+    final cardId = persistedCardId;
+    if (board == null || cardId == null || calculationBusy || dirty) {
+      return false;
+    }
+    calculationBusy = true;
+    error = null;
+    notifyListeners();
+    try {
+      final saved = await _authorized(
+        (token) =>
+            _orderGateway.applyCalculation(token, board.id, cardId, preview),
+      );
+      _applyOrder(saved);
+      dirty = false;
+      successMessage = 'Расчёт по новым правилам сохранён';
+      return true;
+    } on ApiException catch (exception) {
+      error = exception.message;
+      return false;
+    } on Object {
+      error = 'Не удалось применить расчёт. Проверьте подключение.';
+      return false;
+    } finally {
+      calculationBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> discardOrderChanges() async {
+    final board = _board;
+    final cardId = persistedCardId;
+    if (board == null || cardId == null || calculationBusy) return false;
+    calculationBusy = true;
+    error = null;
+    notifyListeners();
+    try {
+      final saved = await _authorized(
+        (token) => _orderGateway.getOrder(token, board.id, cardId),
+      );
+      _applyOrder(saved);
+      dirty = false;
+      return true;
+    } on ApiException catch (exception) {
+      error = exception.message;
+      return false;
+    } on Object {
+      error = 'Не удалось восстановить сохранённую комплектацию.';
+      return false;
+    } finally {
+      calculationBusy = false;
       notifyListeners();
     }
   }

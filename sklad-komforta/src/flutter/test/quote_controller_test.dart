@@ -44,6 +44,71 @@ void main() {
     environment: 'test',
   );
 
+  test(
+    'устаревший расчёт блокирует сохранение до подтверждённого применения',
+    () async {
+      final auth = AuthController(
+        config,
+        api: _NoopAuthGateway(),
+        tokens: _MemoryTokenRepository(),
+      )..accessToken = 'access-token';
+      final gateway = _RecordingQuoteGateway();
+      final controller = QuoteController(config, auth, quoteGateway: gateway)
+        ..persistedCardId = 'card-id'
+        ..draft = QuoteDraft(
+          id: 'quote-id',
+          kind: QuoteKind.quote,
+          title: 'КП',
+          clientId: 'client',
+          executorCompanyId: 'executor',
+          selectionMode: 'variant',
+          proposalTypes: [],
+          calculationVersion: 'old',
+          currentCalculationVersion: 'new',
+        );
+      gateway
+        ..previewResponse = const QuoteCalculationPreview(
+          currentCalculationVersion: 'new',
+          quoteUpdatedAt: '2026-11-09T10:00:00Z',
+          changes: [],
+        )
+        ..applyResponse = QuoteDraft(
+          id: 'quote-id',
+          kind: QuoteKind.quote,
+          title: 'КП',
+          clientId: 'client',
+          executorCompanyId: 'executor',
+          selectionMode: 'variant',
+          proposalTypes: [],
+          calculationVersion: 'new',
+          currentCalculationVersion: 'new',
+        );
+
+      expect(controller.needsRecalculation, isTrue);
+      expect(await controller.save(board: _quoteBoard), isFalse);
+      expect(gateway.savedDraft, isNull);
+      final preview = await controller.previewCalculation(_quoteBoard);
+      expect(preview?.currentCalculationVersion, 'new');
+      expect(await controller.applyCalculation(_quoteBoard, preview!), isTrue);
+      expect(controller.needsRecalculation, isFalse);
+
+      controller.dispose();
+      auth.dispose();
+    },
+  );
+
+  test('сохранённая сумма строки читается без локального пересчёта', () {
+    final row = QuotePositionDraft.fromJson({
+      'id': 'row',
+      'name': 'Позиция',
+      'quantity': 2,
+      'basePrice': 10,
+      'lineTotal': 35,
+      'values': <String, dynamic>{},
+    });
+    expect(row.lineTotal, 35);
+  });
+
   test('отдельный канбан ПКП создаёт предварительное предложение', () async {
     final auth = AuthController(
       config,
@@ -2222,46 +2287,22 @@ void main() {
     expect(find.text('Все типы и варианты: 2 типа'), findsOneWidget);
     await tester.tap(find.byKey(const Key('print-scope-variant')));
     await tester.pumpAndSettle();
-    expect(
-      find.byKey(const Key('quote-preview-variant-variant-premium')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const Key('quote-preview-variant-variant-economy')),
-      findsNothing,
-    );
-    expect(
-      find.byKey(const Key('quote-preview-type-type-boilers')),
-      findsNothing,
-    );
+    expect(find.text('Кондиционеры / Премиум'), findsOneWidget);
+    expect(find.text('Кондиционеры / Эконом'), findsNothing);
+    expect(find.text('Бойлеры / Базовый'), findsNothing);
     await tester.pageBack();
     await tester.pumpAndSettle();
 
     await openPreviewWith('print-scope-type');
-    expect(
-      find.byKey(const Key('quote-preview-variant-variant-premium')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const Key('quote-preview-variant-variant-economy')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const Key('quote-preview-type-type-boilers')),
-      findsNothing,
-    );
+    expect(find.text('Кондиционеры / Премиум'), findsOneWidget);
+    expect(find.text('Кондиционеры / Эконом'), findsOneWidget);
+    expect(find.text('Бойлеры / Базовый'), findsNothing);
     await tester.pageBack();
     await tester.pumpAndSettle();
 
     await openPreviewWith('print-scope-all');
-    expect(
-      find.byKey(const Key('quote-preview-type-type-boilers')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const Key('quote-preview-variant-variant-economy')),
-      findsOneWidget,
-    );
+    expect(find.text('Бойлеры / Базовый'), findsOneWidget);
+    expect(find.text('Кондиционеры / Эконом'), findsOneWidget);
     await tester.pageBack();
     await tester.pumpAndSettle();
 
@@ -2427,6 +2468,23 @@ final class _RecordingQuoteGateway implements QuoteGateway {
   ) => throw UnimplementedError();
 
   QuoteDraft? savedDraft;
+  QuoteCalculationPreview? previewResponse;
+  QuoteDraft? applyResponse;
+
+  @override
+  Future<QuoteCalculationPreview> previewCalculation(
+    String accessToken,
+    String boardId,
+    String cardId,
+  ) async => previewResponse ?? (throw UnimplementedError());
+
+  @override
+  Future<QuoteDraft> applyCalculation(
+    String accessToken,
+    String boardId,
+    String cardId,
+    QuoteCalculationPreview preview,
+  ) async => applyResponse ?? (throw UnimplementedError());
 
   @override
   Future<QuoteDraft> saveQuote(
@@ -2445,6 +2503,7 @@ const _quoteBoard = KanbanBoard(
   code: 'quotes',
   name: 'Коммерческие предложения',
   specialization: WorkflowSpecialization.quote,
+  documentTemplate: {'blocks': []},
   columns: [],
   transitions: [],
   categories: [

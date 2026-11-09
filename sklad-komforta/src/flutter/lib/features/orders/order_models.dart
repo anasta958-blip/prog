@@ -1,5 +1,55 @@
 import 'package:sklad_komforta_app/features/quotes/quote_models.dart';
 
+final class OrderCalculationFieldChange {
+  const OrderCalculationFieldChange({
+    required this.positionName,
+    required this.fieldCode,
+    this.savedValue,
+    this.newValue,
+  });
+
+  final String positionName;
+  final String fieldCode;
+  final String? savedValue;
+  final String? newValue;
+
+  factory OrderCalculationFieldChange.fromJson(Map<String, dynamic> json) =>
+      OrderCalculationFieldChange(
+        positionName: json['positionName'] as String? ?? '',
+        fieldCode: json['fieldCode'] as String? ?? '',
+        savedValue: json['savedValue'] as String?,
+        newValue: json['newValue'] as String?,
+      );
+}
+
+final class OrderCalculationPreview {
+  const OrderCalculationPreview({
+    required this.currentCalculationVersion,
+    required this.orderUpdatedAt,
+    required this.changedPositions,
+    required this.changes,
+  });
+
+  final String currentCalculationVersion;
+  final String orderUpdatedAt;
+  final int changedPositions;
+  final List<OrderCalculationFieldChange> changes;
+
+  factory OrderCalculationPreview.fromJson(Map<String, dynamic> json) =>
+      OrderCalculationPreview(
+        currentCalculationVersion: json['currentCalculationVersion'] as String,
+        orderUpdatedAt: json['orderUpdatedAt'] as String,
+        changedPositions: json['changedPositions'] as int? ?? 0,
+        changes: (json['changes'] as List<dynamic>? ?? const [])
+            .map(
+              (item) => OrderCalculationFieldChange.fromJson(
+                item as Map<String, dynamic>,
+              ),
+            )
+            .toList(),
+      );
+}
+
 /// Комплектация карточки канбана.
 ///
 /// Дерево позиций хранится в моделях редактора КП ([QuoteCategoryDraft] и
@@ -20,6 +70,9 @@ final class OrderDocument {
     this.sourceQuote,
     this.canChangeManager = false,
     this.canManageInvoices = false,
+    this.calculationVersion,
+    this.currentCalculationVersion,
+    this.updatedAt,
     Set<String>? reorderPositionIds,
     Set<String>? fromQuotePositionIds,
   }) : reorderPositionIds = reorderPositionIds ?? <String>{},
@@ -46,6 +99,11 @@ final class OrderDocument {
 
   /// Право загружать и удалять счета (`orders.invoices.manage`).
   bool canManageInvoices;
+  String? calculationVersion;
+  String? currentCalculationVersion;
+  DateTime? updatedAt;
+  bool get needsRecalculation =>
+      id != null && calculationVersion != currentCalculationVersion;
   final List<QuoteCategoryDraft> categories;
 
   /// Позиции-дозаказ (назначает сервер).
@@ -127,6 +185,11 @@ final class OrderDocument {
             ),
       canChangeManager: json['canChangeManager'] as bool? ?? false,
       canManageInvoices: json['canManageInvoices'] as bool? ?? false,
+      calculationVersion: json['calculationVersion'] as String?,
+      currentCalculationVersion: json['currentCalculationVersion'] as String?,
+      updatedAt: json['updatedAt'] == null
+          ? null
+          : DateTime.parse(json['updatedAt'] as String),
       categories: categories,
       reorderPositionIds: reorder,
       fromQuotePositionIds: fromQuote,
@@ -190,6 +253,9 @@ final class OrderDocument {
     'sourceQuote': sourceQuote?.toJson(),
     'canChangeManager': canChangeManager,
     'canManageInvoices': canManageInvoices,
+    'calculationVersion': calculationVersion,
+    'currentCalculationVersion': currentCalculationVersion,
+    'updatedAt': updatedAt?.toIso8601String(),
     'categories': [
       for (final category in (toJson()['categories'] as List<dynamic>))
         {

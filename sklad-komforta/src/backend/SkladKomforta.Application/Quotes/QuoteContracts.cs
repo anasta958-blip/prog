@@ -107,7 +107,23 @@ public sealed record QuoteDetails(
     DateTimeOffset UpdatedAt,
     Guid? ClientSelectedProposalTypeId = null,
     DateTimeOffset? ClientSelectionSubmittedAt = null,
-    bool CanChangeManager = false);
+    bool CanChangeManager = false,
+    string? CalculationVersion = null,
+    string? CurrentCalculationVersion = null);
+
+/// <summary>Разница сохранённого и нового итога одного варианта.</summary>
+public sealed record QuoteCalculationChange(
+    Guid VariantId, string ProposalTypeName, string VariantName,
+    decimal SavedTotal, decimal NewTotal, int ChangedPositions);
+
+/// <summary>Предпросмотр пересчёта без изменения сохранённого предложения.</summary>
+public sealed record QuoteCalculationPreview(
+    string CurrentCalculationVersion, DateTimeOffset QuoteUpdatedAt,
+    IReadOnlyList<QuoteCalculationChange> Changes);
+
+/// <summary>Подтверждение конкретного предпросмотра пересчёта.</summary>
+public sealed record ApplyQuoteCalculationRequest(
+    string CurrentCalculationVersion, DateTimeOffset QuoteUpdatedAt);
 
 /// <summary>Данные одной позиции при атомарном сохранении предложения.</summary>
 public sealed record SaveQuotePositionRequest(
@@ -203,6 +219,15 @@ public interface IQuoteService
         Guid cardId,
         SaveQuoteRequest request,
         CancellationToken cancellationToken);
+
+    /// <summary>Считает разницу по действующим правилам, не меняя документ.</summary>
+    Task<QuoteCalculationPreview> PreviewCalculationAsync(
+        Guid actorUserId, Guid boardId, Guid cardId, CancellationToken cancellationToken);
+
+    /// <summary>Атомарно применяет подтверждённый пересчёт к сохранённому документу.</summary>
+    Task<QuoteDetails> ApplyCalculationAsync(
+        Guid actorUserId, Guid boardId, Guid cardId,
+        ApplyQuoteCalculationRequest request, CancellationToken cancellationToken);
 }
 
 /// <summary>Готовый официальный PDF предложения и безопасное имя файла.</summary>

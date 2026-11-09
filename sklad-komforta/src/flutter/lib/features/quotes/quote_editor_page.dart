@@ -193,6 +193,11 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
       final restored = await localDraft?.read();
       if (!mounted) return;
       if (restored != null && controller.draft != null) {
+        final saved = controller.draft!;
+        restored
+          ..calculationVersion = saved.calculationVersion
+          ..currentCalculationVersion = saved.currentCalculationVersion
+          ..updatedAt = saved.updatedAt;
         controller.draft = restored;
         controller.updateDocument((_) {});
         controller.showDraftRestoredMessage();
@@ -204,6 +209,94 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
     if (!mounted) return;
     controller.addListener(_persistLocalDraft);
     setState(() => draftReady = true);
+  }
+
+  Future<void> _showCalculationPreview() async {
+    final preview = await controller.previewCalculation(widget.board);
+    if (preview == null || !mounted) return;
+    final money = NumberFormat.currency(
+      locale: 'ru_RU',
+      symbol: '₽',
+      decimalDigits: 2,
+    );
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Пересчёт по новым правилам'),
+        content: SizedBox(
+          width: 560,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Сравните сохранённые и новые итоги вариантов. Изменения будут записаны только после подтверждения.',
+                ),
+                const SizedBox(height: 12),
+                for (final change in preview.changes)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${change.proposalTypeName} / ${change.variantName}',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        Text(
+                          '${money.format(change.savedTotal)} → ${money.format(change.newTotal)}'
+                          ' · изменено позиций: ${change.changedPositions}',
+                        ),
+                      ],
+                    ),
+                  ),
+                if (preview.changes.isEmpty)
+                  const Text('В предложении пока нет вариантов.'),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Применить и сохранить'),
+          ),
+        ],
+      ),
+    );
+    if (approved == true && mounted) {
+      await controller.applyCalculation(widget.board, preview);
+    }
+  }
+
+  Future<void> _discardLocalChanges() async {
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Отменить локальные изменения?'),
+        content: const Text(
+          'Несохранённые изменения будут удалены. Сохранённое предложение останется без изменений.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Назад'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Отменить изменения'),
+          ),
+        ],
+      ),
+    );
+    if (approved == true && mounted) {
+      await controller.discardLocalChanges(widget.board);
+    }
   }
 
   void _persistLocalDraft() {
@@ -311,8 +404,18 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
                   _MessageBanner(message: message, error: true),
                 if (controller.successMessage case final message?)
                   _MessageBanner(message: message),
+                if (controller.needsRecalculation)
+                  _CalculationBanner(
+                    busy: controller.calculationBusy,
+                    onPreview: _showCalculationPreview,
+                    hasLocalChanges: controller.dirty,
+                    onDiscard: _discardLocalChanges,
+                  ),
                 Expanded(
-                  child: _body(compact: compact, constraints: constraints),
+                  child: AbsorbPointer(
+                    absorbing: controller.needsRecalculation,
+                    child: _body(compact: compact, constraints: constraints),
+                  ),
                 ),
               ],
             );
@@ -4698,6 +4801,47 @@ final class _MessageBanner extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         Expanded(child: Text(message)),
+      ],
+    ),
+  );
+}
+
+final class _CalculationBanner extends StatelessWidget {
+  const _CalculationBanner({
+    required this.busy,
+    required this.onPreview,
+    required this.hasLocalChanges,
+    required this.onDiscard,
+  });
+
+  final bool busy;
+  final VoidCallback onPreview;
+  final bool hasLocalChanges;
+  final VoidCallback onDiscard;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    color: const Color(0xFF4A3618),
+    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+    child: Wrap(
+      spacing: 12,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        const Text(
+          'Расчётные правила изменились. Сохранённые суммы показаны без изменений.',
+        ),
+        FilledButton.icon(
+          onPressed: busy || hasLocalChanges ? null : onPreview,
+          icon: const Icon(Icons.calculate_outlined),
+          label: const Text('Посмотреть новый расчёт'),
+        ),
+        if (hasLocalChanges)
+          TextButton(
+            onPressed: busy ? null : onDiscard,
+            child: const Text('Отменить локальные изменения'),
+          ),
       ],
     ),
   );

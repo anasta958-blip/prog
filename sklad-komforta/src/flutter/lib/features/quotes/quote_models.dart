@@ -46,6 +46,9 @@ final class QuoteDraft {
     this.clientSelectedProposalTypeId,
     this.clientSelectionSubmittedAt,
     this.canChangeManager = false,
+    this.calculationVersion,
+    this.currentCalculationVersion,
+    this.updatedAt,
   });
 
   String? id;
@@ -64,6 +67,11 @@ final class QuoteDraft {
   /// Право текущего пользователя менять менеджера и РОП
   /// (`quotes.manager.change`); без него поля только для чтения.
   bool canChangeManager;
+  String? calculationVersion;
+  String? currentCalculationVersion;
+  DateTime? updatedAt;
+  bool get needsRecalculation =>
+      id != null && calculationVersion != currentCalculationVersion;
   final List<QuoteProposalTypeDraft> proposalTypes;
 
   factory QuoteDraft.fromJson(Map<String, dynamic> json) => QuoteDraft(
@@ -83,6 +91,11 @@ final class QuoteDraft {
         ? null
         : DateTime.parse(json['clientSelectionSubmittedAt'] as String),
     canChangeManager: json['canChangeManager'] as bool? ?? false,
+    calculationVersion: json['calculationVersion'] as String?,
+    currentCalculationVersion: json['currentCalculationVersion'] as String?,
+    updatedAt: json['updatedAt'] == null
+        ? null
+        : DateTime.parse(json['updatedAt'] as String),
     proposalTypes: ((json['proposalTypes'] as List<dynamic>?) ?? const [])
         .map(
           (item) =>
@@ -102,6 +115,56 @@ final class QuoteDraft {
     'additionalInformation': _nullableText(additionalInformation),
     'proposalTypes': proposalTypes.map((item) => item.toJson()).toList(),
   };
+}
+
+/// Сравнение сохранённых сумм с результатом действующих расчётных правил.
+final class QuoteCalculationPreview {
+  const QuoteCalculationPreview({
+    required this.currentCalculationVersion,
+    required this.quoteUpdatedAt,
+    required this.changes,
+  });
+
+  final String currentCalculationVersion;
+  final String quoteUpdatedAt;
+  final List<QuoteCalculationChange> changes;
+
+  factory QuoteCalculationPreview.fromJson(Map<String, dynamic> json) =>
+      QuoteCalculationPreview(
+        currentCalculationVersion: json['currentCalculationVersion'] as String,
+        quoteUpdatedAt: json['quoteUpdatedAt'] as String,
+        changes: (json['changes'] as List<dynamic>)
+            .map(
+              (item) =>
+                  QuoteCalculationChange.fromJson(item as Map<String, dynamic>),
+            )
+            .toList(),
+      );
+}
+
+final class QuoteCalculationChange {
+  const QuoteCalculationChange({
+    required this.proposalTypeName,
+    required this.variantName,
+    required this.savedTotal,
+    required this.newTotal,
+    required this.changedPositions,
+  });
+
+  final String proposalTypeName;
+  final String variantName;
+  final double savedTotal;
+  final double newTotal;
+  final int changedPositions;
+
+  factory QuoteCalculationChange.fromJson(Map<String, dynamic> json) =>
+      QuoteCalculationChange(
+        proposalTypeName: json['proposalTypeName'] as String,
+        variantName: json['variantName'] as String,
+        savedTotal: _number(json['savedTotal']) ?? 0,
+        newTotal: _number(json['newTotal']) ?? 0,
+        changedPositions: json['changedPositions'] as int? ?? 0,
+      );
 }
 
 /// Тип предложения, например «Кондиционеры» или «Бойлеры».
@@ -410,7 +473,7 @@ final class QuotePositionDraft {
         values: Map<String, dynamic>.from(
           (json['values'] as Map<String, dynamic>?) ?? const {},
         ),
-      );
+      )..configuredLineTotal = _number(json['lineTotal']);
 
   Map<String, dynamic> toJson() => {
     'id': id,

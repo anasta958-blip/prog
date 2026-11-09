@@ -38,4 +38,73 @@ void main() {
       },
     );
   }
+
+  test('локальный черновик сохраняет версию и сумму старого расчёта', () async {
+    final position = QuotePositionDraft(
+      id: 'position',
+      name: 'Позиция',
+      marking: '',
+      unit: 'шт',
+      quantity: 1,
+      basePrice: 100,
+      values: {},
+    )..configuredLineTotal = 150;
+    final draft = QuoteDraft(
+      id: 'quote',
+      cardId: 'card',
+      kind: QuoteKind.quote,
+      title: 'КП',
+      clientId: 'client',
+      executorCompanyId: 'executor',
+      selectionMode: 'variant',
+      calculationVersion: 'old',
+      currentCalculationVersion: 'new',
+      updatedAt: DateTime.utc(2026, 11, 9),
+      proposalTypes: [
+        QuoteProposalTypeDraft(
+          id: 'type',
+          name: 'Тип',
+          variants: [
+            QuoteVariantDraft(
+              id: 'variant',
+              name: 'Вариант',
+              categories: [
+                QuoteCategoryDraft(
+                  id: 'category',
+                  name: 'Категория',
+                  sections: [
+                    QuoteSectionDraft(
+                      id: 'section',
+                      name: 'Раздел',
+                      positions: [position],
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ],
+        ),
+      ],
+    );
+    final store = QuoteLocalDraft('outdated.quote');
+    await store.write(draft);
+    final restored = (await store.read())!;
+    expect(restored.needsRecalculation, isTrue);
+    expect(restored.updatedAt, draft.updatedAt);
+    expect(
+      restored
+          .proposalTypes
+          .single
+          .variants
+          .single
+          .categories
+          .single
+          .sections
+          .single
+          .positions
+          .single
+          .lineTotal,
+      150,
+    );
+  });
 }

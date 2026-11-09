@@ -126,10 +126,11 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
             INSERT INTO quotes
                 (id, workflow_id, card_id, quote_kind, title, client_id, executor_company_id,
                  manager_user_id, sales_head_user_id, selection_mode, additional_information,
-                 client_selection_submitted_at, created_by, updated_by)
+                 client_selection_submitted_at, calculation_version, created_by, updated_by)
             SELECT @target_quote_id, @target_board_id, @target_card_id, @target_kind,
                    title, client_id, executor_company_id, manager_user_id, sales_head_user_id,
                    selection_mode, additional_information, client_selection_submitted_at,
+                   calculation_version,
                    @actor, @actor
               FROM quotes WHERE id = @source_quote_id AND deleted_at IS NULL
             """, token,
@@ -270,6 +271,10 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
         var quote = await ReadQuoteAsync(connection, transaction, quoteCardId, token)
                     ?? throw new IdentityException(409, "order_transfer_quote_missing",
                         "У карточки нет сохранённого КП — переносить в комплектацию нечего.");
+        var sourceRules = await PostgresQuoteService.ReadCalculationConfigurationAsync(connection, transaction, token);
+        if (quote.CalculationVersion != PostgresQuoteService.CalculationVersion(sourceRules))
+            throw new IdentityException(409, "quote_calculation_outdated",
+                "Сначала проверьте и примените новый расчёт КП или ПКП.");
         var boardFields = await ReadBoardFieldsAsync(connection, transaction, targetBoardId, token);
         var rows = await ReadChosenRowsAsync(connection, transaction, quote, boardFields, token);
 
@@ -282,10 +287,14 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
         }
 
         var before = await ReadAsync(connection, transaction, targetBoardId, existing.CardId, false, false, token);
+        var currentRules = await PostgresQuoteService.ReadCalculationConfigurationAsync(connection, transaction, token);
+        var canRecalculateExisting = before is null ||
+            before.CalculationVersion == PostgresQuoteService.CalculationVersion(currentRules);
         var reorder = await IsReorderColumnAsync(connection, transaction, targetBoardId, existing.ColumnId, token);
         var orderId = existing.OrderId ?? await InsertHeaderAsync(
             connection, transaction, actorUserId, quote, targetBoardId, existing.CardId, token);
-        await SyncPositionsAsync(connection, transaction, actorUserId, orderId, rows, reorder, token);
+        await SyncPositionsAsync(connection, transaction, actorUserId, orderId, rows, reorder, token,
+            canRecalculateExisting);
         await ExecuteAsync(connection, transaction, """
             UPDATE orders SET source_quote_id = COALESCE(source_quote_id, @quote_id),
                               updated_by = @actor, updated_at = now()
@@ -342,18 +351,20 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
         CancellationToken token)
     {
         var orderId = Guid.NewGuid();
+        var runtime = await PostgresQuoteService.ReadCalculationConfigurationAsync(connection, transaction, token);
+        var version = PostgresQuoteService.CalculationVersion(runtime);
         await ExecuteAsync(connection, transaction, """
             INSERT INTO orders
                 (id, workflow_id, card_id, title, client_id, executor_company_id,
-                 manager_user_id, sales_head_user_id, source_quote_id, created_by, updated_by)
+                 manager_user_id, sales_head_user_id, source_quote_id, calculation_version, created_by, updated_by)
             VALUES
                 (@id, @workflow_id, @card_id, @title, @client_id, @executor_id,
-                 @manager_id, @sales_head_id, @quote_id, @actor, @actor)
+                 @manager_id, @sales_head_id, @quote_id, @version, @actor, @actor)
             """, token,
             ("id", orderId), ("workflow_id", boardId), ("card_id", cardId), ("title", quote.Title),
             ("client_id", quote.ClientId), ("executor_id", quote.ExecutorCompanyId),
             ("manager_id", Db(quote.ManagerUserId)), ("sales_head_id", Db(quote.SalesHeadUserId)),
-            ("quote_id", quote.Id), ("actor", actorUserId));
+            ("quote_id", quote.Id), ("version", version), ("actor", actorUserId));
         return orderId;
     }
 
@@ -369,7 +380,8 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
         Guid orderId,
         IReadOnlyList<TransferRow> rows,
         bool reorder,
-        CancellationToken token)
+        CancellationToken token,
+        bool recalculateExisting = true)
     {
         var runtime = await PostgresQuoteService.ReadCalculationConfigurationAsync(connection, transaction, token);
         var existing = new Dictionary<string, (Guid Id, decimal? SourceQuantity, decimal Quantity, IReadOnlyDictionary<string, JsonElement> Values)>(StringComparer.Ordinal);
@@ -416,7 +428,8 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
             {
                 var quantity = current.SourceQuantity != row.Quantity ? row.Quantity : current.Quantity;
                 var recalculated = row with { Quantity = quantity };
-                if (runtime.CategoryClientIds.TryGetValue(row.CatalogCategoryId, out var category))
+                if (recalculateExisting &&
+                    runtime.CategoryClientIds.TryGetValue(row.CatalogCategoryId, out var category))
                 {
                     var inputs = (row.CalculationInputs ?? row.Values).ToDictionary(item => item.Key, item => item.Value);
                     foreach (var item in current.Values) inputs[item.Key] = item.Value;
@@ -431,7 +444,7 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
                            updated_by = @actor, updated_at = now()
                      WHERE id = @id
                     """, token, ("id", current.Id), ("quantity", recalculated.Quantity), ("source_quantity", row.Quantity), ("actor", actorUserId),
-                    ("totals", JsonSerializer.Serialize(recalculated.Values.Where(item => recalculated.CalculatedFields.Contains(item.Key))
+                    ("totals", JsonSerializer.Serialize(recalculated.Values.Where(item => recalculateExisting && recalculated.CalculatedFields.Contains(item.Key))
                         .ToDictionary(item => item.Key, item => item.Value), JsonOptions)));
                 continue;
             }
@@ -769,7 +782,8 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
         command.Transaction = transaction;
         command.CommandText = """
             SELECT quote.id, card.work_item_id, quote.title, quote.client_id, quote.executor_company_id,
-                   quote.manager_user_id, quote.sales_head_user_id, quote.selection_mode
+                   quote.manager_user_id, quote.sales_head_user_id, quote.selection_mode,
+                   quote.calculation_version
               FROM quotes AS quote
               JOIN kanban_cards AS card ON card.id = quote.card_id
              WHERE quote.card_id = @card_id AND quote.deleted_at IS NULL
@@ -780,7 +794,7 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
         return new QuoteHeader(
             reader.GetGuid(0), reader.GetGuid(1), reader.GetString(2), reader.GetGuid(3), reader.GetGuid(4),
             reader.IsDBNull(5) ? null : reader.GetGuid(5), reader.IsDBNull(6) ? null : reader.GetGuid(6),
-            reader.GetString(7));
+            reader.GetString(7), reader.IsDBNull(8) ? null : reader.GetString(8));
     }
 
     private static async Task<LinkedOrder?> ReadLinkedOrderAsync(
@@ -806,7 +820,8 @@ internal sealed class OrderTransferHandler : IKanbanColumnEntryHandler
 
     private sealed record QuoteHeader(
         Guid Id, Guid WorkItemId, string Title, Guid ClientId, Guid ExecutorCompanyId,
-        Guid? ManagerUserId, Guid? SalesHeadUserId, string SelectionMode);
+        Guid? ManagerUserId, Guid? SalesHeadUserId, string SelectionMode,
+        string? CalculationVersion);
 
     private sealed record LinkedOrder(Guid CardId, Guid ColumnId, Guid? OrderId);
 

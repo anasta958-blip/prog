@@ -189,6 +189,60 @@ public sealed partial class DatabaseRegressionTests
         var created = await Send(staff, HttpMethod.Post, $"/kanbans/{orders}/orders", new { columnId = compose, order = manual });
         Assert.Equal(Text(quote, "managerUserId"), Text(created, "managerUserId"));
         Assert.Null(created["sourceQuote"]);
+
+        // Изменение расчётного правила не меняет сохранённое КП до явного подтверждения.
+        var savedLineTotal = quote["proposalTypes"]![0]!["variants"]![0]!["categories"]![0]!["sections"]![0]!["positions"]![0]!["lineTotal"]!.GetValue<decimal>();
+        var revisedDraft = OrderDraft() with
+        {
+            Rules =
+            [
+                new CalculationRuleDraft("extra-money", "Доплата", "equipment",
+                    "row_calculation", true, null, [],
+                    [new RuleActionDraft("aggregate_money", SourceFieldCode: "base_price",
+                        AggregationOperation: "add", AggregationTarget: "variant_total")]),
+            ],
+        };
+        await Send(staff, HttpMethod.Put, "/company/configuration",
+            new { draft = revisedDraft, deleteCategoryData = Array.Empty<string>() });
+        var outdated = await Send(staff, HttpMethod.Get, quotePath + "/quote");
+        Assert.NotEqual(Text(outdated, "calculationVersion"), Text(outdated, "currentCalculationVersion"));
+        Assert.Equal(savedLineTotal,
+            outdated["proposalTypes"]![0]!["variants"]![0]!["categories"]![0]!["sections"]![0]!["positions"]![0]!["lineTotal"]!.GetValue<decimal>());
+        await Send(staff, HttpMethod.Put, quotePath + "/quote", quoteBody, HttpStatusCode.Conflict);
+        var preview = await Send(staff, HttpMethod.Get, quotePath + "/quote/calculation-preview");
+        Assert.True(preview["changes"]![0]!["newTotal"]!.GetValue<decimal>() >
+            preview["changes"]![0]!["savedTotal"]!.GetValue<decimal>());
+        var applied = await Send(staff, HttpMethod.Post, quotePath + "/quote/apply-calculation", new
+        {
+            currentCalculationVersion = Text(preview, "currentCalculationVersion"),
+            quoteUpdatedAt = Text(preview, "quoteUpdatedAt"),
+        });
+        Assert.Equal(Text(applied, "calculationVersion"), Text(applied, "currentCalculationVersion"));
+        Assert.True(applied["proposalTypes"]![0]!["variants"]![0]!["categories"]![0]!["sections"]![0]!["positions"]![0]!["lineTotal"]!.GetValue<decimal>() > savedLineTotal);
+        await Send(staff, HttpMethod.Post, quotePath + "/quote/apply-calculation", new
+        {
+            currentCalculationVersion = Text(preview, "currentCalculationVersion"),
+            quoteUpdatedAt = Text(preview, "quoteUpdatedAt"),
+        }, HttpStatusCode.Conflict);
+
+        // Та же смена правил обнаруживается и в сохранённой комплектации.
+        var outdatedOrder = await Send(staff, HttpMethod.Get, orderPath);
+        Assert.NotEqual(Text(outdatedOrder, "calculationVersion"),
+            Text(outdatedOrder, "currentCalculationVersion"));
+        await Send(staff, HttpMethod.Put, orderPath, manual, HttpStatusCode.Conflict);
+        var orderPreview = await Send(staff, HttpMethod.Get, orderPath + "/calculation-preview");
+        var recalculatedOrder = await Send(staff, HttpMethod.Post, orderPath + "/apply-calculation", new
+        {
+            currentCalculationVersion = Text(orderPreview, "currentCalculationVersion"),
+            orderUpdatedAt = Text(orderPreview, "orderUpdatedAt"),
+        });
+        Assert.Equal(Text(recalculatedOrder, "calculationVersion"),
+            Text(recalculatedOrder, "currentCalculationVersion"));
+        await Send(staff, HttpMethod.Post, orderPath + "/apply-calculation", new
+        {
+            currentCalculationVersion = Text(orderPreview, "currentCalculationVersion"),
+            orderUpdatedAt = Text(orderPreview, "orderUpdatedAt"),
+        }, HttpStatusCode.Conflict);
     }
 
     /// <summary>Вход директора и активация переданной конфигурации.</summary>

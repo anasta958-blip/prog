@@ -71,7 +71,9 @@ final class QuoteController extends ChangeNotifier {
   bool saving = false;
   bool creatingClient = false;
   bool printing = false;
+  bool calculationBusy = false;
   bool dirty = false;
+  bool get needsRecalculation => draft?.needsRecalculation ?? false;
 
   /// Строка, в первое поле которой редактор должен перевести фокус. Редактор
   /// сбрасывает значение, как только выполнит запрос.
@@ -223,7 +225,7 @@ final class QuoteController extends ChangeNotifier {
       }
       _synchronizeExecutorVatRates(repairVariants: true);
       _repairActiveSelection();
-      _recalculateConfiguredRules();
+      if (!needsRecalculation) _recalculateConfiguredRules();
     } on ApiException catch (exception) {
       error = exception.message;
     } on Object {
@@ -1500,11 +1502,13 @@ final class QuoteController extends ChangeNotifier {
     String? fieldCode,
     QuoteVariantDraft? consumedVariant,
   }) {
-    _recalculateConfiguredRules(
-      position: position,
-      fieldCode: fieldCode,
-      consumedVariant: consumedVariant,
-    );
+    if (!needsRecalculation) {
+      _recalculateConfiguredRules(
+        position: position,
+        fieldCode: fieldCode,
+        consumedVariant: consumedVariant,
+      );
+    }
     dirty = true;
     successMessage = null;
     notifyListeners();
@@ -1546,6 +1550,12 @@ final class QuoteController extends ChangeNotifier {
   }) async {
     final document = draft;
     if (document == null || saving) return false;
+    if (needsRecalculation) {
+      error =
+          'Расчётные правила изменились. Сначала проверьте и примените новый расчёт.';
+      notifyListeners();
+      return false;
+    }
     _removeBlankEntryRows(document);
     try {
       await Future.wait(_behaviorQueues.values.toList(growable: false));
@@ -1606,6 +1616,91 @@ final class QuoteController extends ChangeNotifier {
       return false;
     } finally {
       saving = false;
+      notifyListeners();
+    }
+  }
+
+  Future<QuoteCalculationPreview?> previewCalculation(KanbanBoard board) async {
+    final cardId = persistedCardId;
+    if (cardId == null || calculationBusy || dirty) {
+      error = dirty
+          ? 'Сначала сохраните локальные изменения.'
+          : 'Предложение не сохранено.';
+      notifyListeners();
+      return null;
+    }
+    calculationBusy = true;
+    error = null;
+    notifyListeners();
+    try {
+      return await _authorized(
+        (token) => _quoteGateway.previewCalculation(token, board.id, cardId),
+      );
+    } on ApiException catch (exception) {
+      error = exception.message;
+      return null;
+    } on Object {
+      error = 'Не удалось сравнить расчёты. Проверьте подключение.';
+      return null;
+    } finally {
+      calculationBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> discardLocalChanges(KanbanBoard board) async {
+    final cardId = persistedCardId;
+    if (cardId == null || calculationBusy) return false;
+    calculationBusy = true;
+    error = null;
+    notifyListeners();
+    try {
+      draft = await _authorized(
+        (token) => _quoteGateway.getQuote(token, board.id, cardId),
+      );
+      dirty = false;
+      _repairActiveSelection();
+      if (!needsRecalculation) _recalculateConfiguredRules();
+      return true;
+    } on ApiException catch (exception) {
+      error = exception.message;
+      return false;
+    } on Object {
+      error = 'Не удалось восстановить сохранённое предложение.';
+      return false;
+    } finally {
+      calculationBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> applyCalculation(
+    KanbanBoard board,
+    QuoteCalculationPreview preview,
+  ) async {
+    final cardId = persistedCardId;
+    if (cardId == null || calculationBusy || dirty) return false;
+    calculationBusy = true;
+    error = null;
+    notifyListeners();
+    try {
+      draft = await _authorized(
+        (token) =>
+            _quoteGateway.applyCalculation(token, board.id, cardId, preview),
+      );
+      dirty = false;
+      _repairActiveSelection();
+      if (!needsRecalculation) _recalculateConfiguredRules();
+      successMessage = 'Расчёт по новым правилам сохранён';
+      return true;
+    } on ApiException catch (exception) {
+      error = exception.message;
+      return false;
+    } on Object {
+      error = 'Не удалось применить расчёт. Проверьте подключение.';
+      return false;
+    } finally {
+      calculationBusy = false;
       notifyListeners();
     }
   }

@@ -1,5 +1,47 @@
 part of 'quote_editor_page.dart';
 
+final class _OrderCalculationBanner extends StatelessWidget {
+  const _OrderCalculationBanner({
+    required this.busy,
+    required this.hasLocalChanges,
+    required this.onPreview,
+    required this.onDiscard,
+  });
+
+  final bool busy;
+  final bool hasLocalChanges;
+  final VoidCallback onPreview;
+  final VoidCallback onDiscard;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: const Color(0xFFFFF3CD),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+      child: Wrap(
+        spacing: 12,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          const Text(
+            'Расчётные правила изменились. Сохранённые значения комплектации показаны без изменений.',
+          ),
+          FilledButton.icon(
+            onPressed: busy || hasLocalChanges ? null : onPreview,
+            icon: const Icon(Icons.calculate_outlined),
+            label: const Text('Посмотреть новый расчёт'),
+          ),
+          if (hasLocalChanges)
+            TextButton(
+              onPressed: busy ? null : onDiscard,
+              child: const Text('Отменить локальные изменения'),
+            ),
+        ],
+      ),
+    ),
+  );
+}
+
 /// Полноэкранный редактор комплектации карточки канбана.
 ///
 /// Таблица позиций общая с редактором КП ([_VariantContent]): категории,
@@ -141,6 +183,11 @@ final class _OrderEditorPageState extends State<OrderEditorPage> {
       final restored = await localDraft?.read();
       if (!mounted) return;
       if (restored != null && controller.order != null) {
+        final saved = controller.order!;
+        restored
+          ..calculationVersion = saved.calculationVersion
+          ..currentCalculationVersion = saved.currentCalculationVersion
+          ..updatedAt = saved.updatedAt;
         controller.restoreDraft(restored);
         controller.showDraftRestoredMessage();
         hadLocalChanges = true;
@@ -193,6 +240,76 @@ final class _OrderEditorPageState extends State<OrderEditorPage> {
       }
       return false;
     }
+  }
+
+  Future<void> _showOrderCalculationPreview() async {
+    final preview = await controller.previewOrderCalculation();
+    if (preview == null || !mounted) return;
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Пересчёт комплектации'),
+        content: SizedBox(
+          width: 620,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Изменится позиций: ${preview.changedPositions}'),
+                const SizedBox(height: 12),
+                if (preview.changes.isEmpty)
+                  const Text(
+                    'Значения полей не изменятся. Подтверждение сохранит новую версию правил.',
+                  ),
+                for (final change in preview.changes)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Text(
+                      '${change.positionName} · ${change.fieldCode}: '
+                      '${change.savedValue ?? '—'} → ${change.newValue ?? '—'}',
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Применить и сохранить'),
+          ),
+        ],
+      ),
+    );
+    if (approved == true && mounted) {
+      await controller.applyOrderCalculation(preview);
+    }
+  }
+
+  Future<void> _discardOrderLocalChanges() async {
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Отменить локальные изменения?'),
+        content: const Text('Несохранённые изменения будут удалены.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Назад'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Отменить изменения'),
+          ),
+        ],
+      ),
+    );
+    if (approved == true && mounted) await controller.discardOrderChanges();
   }
 
   @override
@@ -259,68 +376,78 @@ final class _OrderEditorPageState extends State<OrderEditorPage> {
                   _MessageBanner(message: message, error: true),
                 if (controller.successMessage case final message?)
                   _MessageBanner(message: message),
+                if (controller.needsRecalculation)
+                  _OrderCalculationBanner(
+                    busy: controller.calculationBusy,
+                    hasLocalChanges: controller.dirty,
+                    onPreview: _showOrderCalculationPreview,
+                    onDiscard: _discardOrderLocalChanges,
+                  ),
                 Expanded(
-                  child: ListView(
-                    key: const Key('order-page-scroll'),
-                    padding: EdgeInsets.fromLTRB(
-                      compact ? 12 : 18,
-                      12,
-                      compact ? 12 : 14,
-                      24,
-                    ),
-                    children: [
-                      _OrderMetadataPanel(
-                        controller: controller,
-                        board: widget.board,
+                  child: AbsorbPointer(
+                    absorbing: controller.needsRecalculation,
+                    child: ListView(
+                      key: const Key('order-page-scroll'),
+                      padding: EdgeInsets.fromLTRB(
+                        compact ? 12 : 18,
+                        12,
+                        compact ? 12 : 14,
+                        24,
                       ),
-                      const SizedBox(height: 12),
-                      ...[
-                        _OrderInvoicesPanel(
+                      children: [
+                        _OrderMetadataPanel(
                           controller: controller,
-                          expanded: invoicesExpanded,
-                          onToggle: () => setState(
-                            () => invoicesExpanded = !invoicesExpanded,
-                          ),
-                          onUpload: _uploadInvoice,
-                          selected: selectedInvoices,
-                          onToggleSelected: (invoice) => setState(
-                            () => selectedInvoices.remove(invoice.id)
-                                ? null
-                                : selectedInvoices.add(invoice.id),
-                          ),
-                          onView: _viewInvoices,
-                          onDownload: _downloadInvoice,
-                          onDelete: _deleteInvoice,
+                          board: widget.board,
                         ),
                         const SizedBox(height: 12),
-                      ],
-                      ...[
-                        _OrderFiltersBar(controller: controller),
-                        const SizedBox(height: 10),
-                      ],
-                      _VariantContent(
-                        controller: controller,
-                        board: widget.board,
-                        variant: variant,
-                        expandedCategories: expandedCategories,
-                        expandedSections: expandedSections,
-                        onToggleCategory: (id) => setState(
-                          () => expandedCategories.contains(id)
-                              ? expandedCategories.remove(id)
-                              : expandedCategories.add(id),
+                        ...[
+                          _OrderInvoicesPanel(
+                            controller: controller,
+                            expanded: invoicesExpanded,
+                            onToggle: () => setState(
+                              () => invoicesExpanded = !invoicesExpanded,
+                            ),
+                            onUpload: _uploadInvoice,
+                            selected: selectedInvoices,
+                            onToggleSelected: (invoice) => setState(
+                              () => selectedInvoices.remove(invoice.id)
+                                  ? null
+                                  : selectedInvoices.add(invoice.id),
+                            ),
+                            onView: _viewInvoices,
+                            onDownload: _downloadInvoice,
+                            onDelete: _deleteInvoice,
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+                        ...[
+                          _OrderFiltersBar(controller: controller),
+                          const SizedBox(height: 10),
+                        ],
+                        _VariantContent(
+                          controller: controller,
+                          board: widget.board,
+                          variant: variant,
+                          expandedCategories: expandedCategories,
+                          expandedSections: expandedSections,
+                          onToggleCategory: (id) => setState(
+                            () => expandedCategories.contains(id)
+                                ? expandedCategories.remove(id)
+                                : expandedCategories.add(id),
+                          ),
+                          onToggleSection: (id) => setState(
+                            () => expandedSections.contains(id)
+                                ? expandedSections.remove(id)
+                                : expandedSections.add(id),
+                          ),
+                          onAddCategory: _addCategory,
+                          onAddSection: _addSection,
+                          onAddPosition: _addPosition,
+                          columnWidthStore: columnWidthStore,
+                          emptyTitle: 'В комплектации пока нет позиций',
                         ),
-                        onToggleSection: (id) => setState(
-                          () => expandedSections.contains(id)
-                              ? expandedSections.remove(id)
-                              : expandedSections.add(id),
-                        ),
-                        onAddCategory: _addCategory,
-                        onAddSection: _addSection,
-                        onAddPosition: _addPosition,
-                        columnWidthStore: columnWidthStore,
-                        emptyTitle: 'В комплектации пока нет позиций',
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ],

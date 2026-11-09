@@ -170,7 +170,8 @@ internal static class OrderStore
                 SELECT orders.id, orders.workflow_id, orders.card_id, orders.title, orders.object_type,
                        orders.client_id, orders.executor_company_id, orders.manager_user_id,
                        orders.sales_head_user_id, orders.created_at, orders.updated_at,
-                       quote.id, quote.workflow_id, quote.card_id, quote_card.card_number, quote.title
+                       quote.id, quote.workflow_id, quote.card_id, quote_card.card_number, quote.title,
+                       orders.calculation_version
                   FROM orders
                   LEFT JOIN quotes AS quote
                     ON quote.id = orders.source_quote_id AND quote.deleted_at IS NULL
@@ -195,7 +196,8 @@ internal static class OrderStore
                     ? null
                     : new OrderSourceQuote(
                         reader.GetGuid(11), reader.GetGuid(12), reader.GetGuid(13),
-                        checked((int)reader.GetInt64(14)), reader.GetString(15)));
+                        checked((int)reader.GetInt64(14)), reader.GetString(15)),
+                reader.IsDBNull(16) ? null : reader.GetString(16));
         }
 
         var categories = new List<MutableCategory>();
@@ -277,7 +279,8 @@ internal static class OrderStore
             header.Id, header.WorkflowId, header.CardId, header.Title, header.ObjectType,
             header.ClientId, header.ExecutorCompanyId, header.ManagerUserId, header.SalesHeadUserId,
             header.SourceQuote, categories.Select(item => item.ToDetails()).ToArray(),
-            header.CreatedAt, header.UpdatedAt, canChangeManager, canManageInvoices);
+            header.CreatedAt, header.UpdatedAt, canChangeManager, canManageInvoices,
+            header.CalculationVersion);
     }
 
     /// <summary>Пишет изменение комплектации в журнал аудита (без пустых diff).</summary>
@@ -358,7 +361,8 @@ internal static class OrderStore
     private sealed record Header(
         Guid Id, Guid WorkflowId, Guid CardId, string Title, string? ObjectType,
         Guid ClientId, Guid ExecutorCompanyId, Guid? ManagerUserId, Guid? SalesHeadUserId,
-        DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, OrderSourceQuote? SourceQuote);
+        DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, OrderSourceQuote? SourceQuote,
+        string? CalculationVersion);
 
     private sealed class MutableCategory(Guid id, Guid? catalogCategoryId, string name, int sortOrder)
     {

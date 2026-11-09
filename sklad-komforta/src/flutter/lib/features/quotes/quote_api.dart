@@ -31,6 +31,19 @@ abstract interface class QuoteGateway {
     QuoteDraft draft,
   );
 
+  Future<QuoteCalculationPreview> previewCalculation(
+    String accessToken,
+    String boardId,
+    String cardId,
+  );
+
+  Future<QuoteDraft> applyCalculation(
+    String accessToken,
+    String boardId,
+    String cardId,
+    QuoteCalculationPreview preview,
+  );
+
   /// Скачивает PDF сохранённого предложения. Если указан [variantId], в документ
   /// попадают только этот вариант и его тип; иначе печатается весь документ.
   Future<QuotePdfDownload> downloadPdf(
@@ -96,6 +109,43 @@ final class QuoteApi implements QuoteGateway {
   );
 
   @override
+  Future<QuoteCalculationPreview> previewCalculation(
+    String accessToken,
+    String boardId,
+    String cardId,
+  ) async => QuoteCalculationPreview.fromJson(
+    await _send(
+          'GET',
+          boardId,
+          cardId,
+          accessToken,
+          subpath: 'calculation-preview',
+        )
+        as Map<String, dynamic>,
+  );
+
+  @override
+  Future<QuoteDraft> applyCalculation(
+    String accessToken,
+    String boardId,
+    String cardId,
+    QuoteCalculationPreview preview,
+  ) async => QuoteDraft.fromJson(
+    await _send(
+          'POST',
+          boardId,
+          cardId,
+          accessToken,
+          subpath: 'apply-calculation',
+          body: {
+            'currentCalculationVersion': preview.currentCalculationVersion,
+            'quoteUpdatedAt': preview.quoteUpdatedAt,
+          },
+        )
+        as Map<String, dynamic>,
+  );
+
+  @override
   Future<QuotePdfDownload> downloadPdf(
     String accessToken,
     String boardId,
@@ -136,10 +186,11 @@ final class QuoteApi implements QuoteGateway {
     String cardId,
     String accessToken, {
     Map<String, dynamic>? body,
+    String subpath = '',
   }) async {
     final path =
         '/kanbans/${Uri.encodeComponent(boardId)}/cards/'
-        '${Uri.encodeComponent(cardId)}/quote/';
+        '${Uri.encodeComponent(cardId)}/quote/$subpath';
     final request =
         http.Request(method, Uri.parse('${_config.apiBaseUrl}$path'))
           ..headers.addAll({

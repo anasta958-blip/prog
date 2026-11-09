@@ -110,6 +110,21 @@ internal static class QuoteEndpoints
                     UserId(context.User), boardId, cardId, request, token))))
             .RequireTenantPermission("quotes.manage");
 
+        quotes.MapGet("/calculation-preview", async (
+                HttpContext context, Guid boardId, Guid cardId,
+                IQuoteService service, CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.PreviewCalculationAsync(
+                    UserId(context.User), boardId, cardId, token))))
+            .RequireTenantPermission("quotes.manage");
+
+        quotes.MapPost("/apply-calculation", async (
+                HttpContext context, Guid boardId, Guid cardId,
+                ApplyQuoteCalculationRequest request,
+                IQuoteService service, CancellationToken token) =>
+                Results.Ok(ApiResponse.Success(await service.ApplyCalculationAsync(
+                    UserId(context.User), boardId, cardId, request, token))))
+            .RequireTenantPermission("quotes.manage");
+
         var client = endpoints.MapGroup("/api/v1/client/quotes");
         client.MapPost("/login", async (
                 HttpContext context,

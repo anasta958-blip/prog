@@ -1,4 +1,6 @@
 using System.Data.Common;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Npgsql;
 using SkladKomforta.Application.Abstractions.Persistence;
@@ -39,7 +41,12 @@ internal sealed class PostgresQuoteService(
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
         var quote = await ReadQuoteAsync(connection, null, boardId, cardId, cancellationToken)
             ?? throw new IdentityException(404, "quote_not_found", "КП или ПКП для этой карточки ещё не создано.");
-        return quote with { CanChangeManager = await CanChangeManagerAsync(actorUserId, cancellationToken) };
+        var runtime = await ReadCalculationConfigurationAsync(connection, null, cancellationToken);
+        return quote with
+        {
+            CanChangeManager = await CanChangeManagerAsync(actorUserId, cancellationToken),
+            CurrentCalculationVersion = CalculationVersion(runtime),
+        };
     }
 
     /// <inheritdoc />
@@ -72,16 +79,19 @@ internal sealed class PostgresQuoteService(
             var quoteId = await UpsertHeaderAsync(
                 connection, transaction, actorUserId, boardId, cardId,
                 Guid.NewGuid(), quoteRequest, cancellationToken);
+            var runtime = await ReadCalculationConfigurationAsync(connection, transaction, cancellationToken);
+            var version = CalculationVersion(runtime);
             await ReplaceProposalTreeAsync(
                 connection, transaction, actorUserId, quoteId,
-                quoteRequest.ProposalTypes, null, null, cancellationToken);
+                quoteRequest.ProposalTypes, null, null, runtime, cancellationToken);
+            await StoreCalculationVersionAsync(connection, transaction, quoteId, version, cancellationToken);
             var created = await ReadQuoteAsync(connection, transaction, boardId, cardId, cancellationToken)
                 ?? throw new InvalidOperationException("Созданное предложение не найдено в текущей транзакции.");
             await WriteAuditAsync(
                 connection, transaction, actorUserId, quoteId,
                 "created", null, created, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
-            return created with { CanChangeManager = canChangeManager };
+            return created with { CanChangeManager = canChangeManager, CurrentCalculationVersion = version };
         }
         catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.ForeignKeyViolation)
         {
@@ -116,6 +126,11 @@ internal sealed class PostgresQuoteService(
             await EnsureCompatibleCardAsync(
                 connection, transaction, boardId, cardId, request.QuoteKind, cancellationToken);
             var before = await ReadQuoteAsync(connection, transaction, boardId, cardId, cancellationToken);
+            var runtime = await ReadCalculationConfigurationAsync(connection, transaction, cancellationToken);
+            var version = CalculationVersion(runtime);
+            if (before is not null && before.CalculationVersion != version)
+                throw new IdentityException(409, "quote_calculation_outdated",
+                    "Расчётные правила изменились. Сначала проверьте и примените новый расчёт.");
             // Без права менеджер и РОП остаются прежними, что бы ни прислал клиент.
             if (!canChangeManager)
                 request = before is not null
@@ -140,7 +155,8 @@ internal sealed class PostgresQuoteService(
                     .Where(type => type.SelectedByClient && type.SelectedVariantId.HasValue)
                     .ToDictionary(type => type.Id, type => type.SelectedVariantId!.Value),
                 before?.ClientSelectionSubmittedAt,
-                cancellationToken);
+                runtime, cancellationToken);
+            await StoreCalculationVersionAsync(connection, transaction, quoteId, version, cancellationToken);
             await RestoreClientTypeSelectionAsync(
                 connection, transaction, quoteId, request.SelectionMode,
                 before?.ClientSelectedProposalTypeId,
@@ -153,7 +169,7 @@ internal sealed class PostgresQuoteService(
                 connection, transaction, actorUserId, quoteId,
                 before is null ? "created" : "updated", before, after, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
-            return after with { CanChangeManager = canChangeManager };
+            return after with { CanChangeManager = canChangeManager, CurrentCalculationVersion = version };
         }
         catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.ForeignKeyViolation)
         {
@@ -173,6 +189,128 @@ internal sealed class PostgresQuoteService(
                 409, "quote_workflow_incompatible",
                 "Тип предложения несовместим с выбранным канбаном или содержит недопустимое значение.");
         }
+    }
+
+    /// <inheritdoc />
+    public async Task<QuoteCalculationPreview> PreviewCalculationAsync(
+        Guid actorUserId, Guid boardId, Guid cardId, CancellationToken cancellationToken)
+    {
+        await kanbanService.GetCardAsync(actorUserId, boardId, cardId, cancellationToken);
+        await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
+        var quote = await ReadQuoteAsync(connection, null, boardId, cardId, cancellationToken)
+            ?? throw new IdentityException(404, "quote_not_found", "КП или ПКП не найдено.");
+        var runtime = await ReadCalculationConfigurationAsync(connection, null, cancellationToken);
+        return CalculatePreview(quote, runtime).Preview;
+    }
+
+    /// <inheritdoc />
+    public async Task<QuoteDetails> ApplyCalculationAsync(
+        Guid actorUserId, Guid boardId, Guid cardId,
+        ApplyQuoteCalculationRequest request, CancellationToken cancellationToken)
+    {
+        await kanbanService.GetCardAsync(actorUserId, boardId, cardId, cancellationToken);
+        var canChangeManager = await CanChangeManagerAsync(actorUserId, cancellationToken);
+        await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using (var lockCard = connection.CreateCommand())
+        {
+            lockCard.Transaction = transaction;
+            lockCard.CommandText = "SELECT id FROM kanban_cards WHERE id = @id AND workflow_id = @board FOR UPDATE";
+            Add(lockCard, "id", cardId);
+            Add(lockCard, "board", boardId);
+            await lockCard.ExecuteScalarAsync(cancellationToken);
+        }
+        var before = await ReadQuoteAsync(connection, transaction, boardId, cardId, cancellationToken)
+            ?? throw new IdentityException(404, "quote_not_found", "КП или ПКП не найдено.");
+        var runtime = await ReadCalculationConfigurationAsync(connection, transaction, cancellationToken);
+        var version = CalculationVersion(runtime);
+        if (request.CurrentCalculationVersion != version || request.QuoteUpdatedAt != before.UpdatedAt)
+            throw new IdentityException(409, "quote_calculation_preview_outdated",
+                "Предложение или правила изменились. Откройте сравнение ещё раз.");
+        var calculation = CalculatePreview(before, runtime);
+        foreach (var (positionId, result) in calculation.Positions)
+            await ExecuteAsync(connection, transaction, """
+                UPDATE quote_positions
+                   SET quantity = @quantity, purchase_price = @purchase_price,
+                       base_price = @base_price, manual_price = @manual_price,
+                       markup_percent = @markup, discount_percent = @discount,
+                       line_total = @line_total, exclude_from_totals = @exclude,
+                       values = CAST(@values AS jsonb), updated_by = @actor, updated_at = now()
+                 WHERE id = @id
+                """, cancellationToken,
+                ("id", positionId), ("quantity", result.Quantity),
+                ("purchase_price", Db(result.PurchasePrice)), ("base_price", result.BasePrice),
+                ("manual_price", Db(result.ManualPrice)), ("markup", Db(result.MarkupPercent)),
+                ("discount", Db(result.DiscountPercent)), ("line_total", result.LineTotal),
+                ("exclude", result.ExcludeFromTotals),
+                ("values", JsonSerializer.Serialize(result.Values, JsonOptions)), ("actor", actorUserId));
+        await ExecuteAsync(connection, transaction, """
+            UPDATE quotes SET calculation_version = @version,
+                              updated_by = @actor, updated_at = now()
+             WHERE id = @id
+            """, cancellationToken,
+            ("id", before.Id), ("version", version), ("actor", actorUserId));
+        var after = await ReadQuoteAsync(connection, transaction, boardId, cardId, cancellationToken)
+            ?? throw new InvalidOperationException("Пересчитанное предложение не найдено.");
+        await WriteAuditAsync(connection, transaction, actorUserId, before.Id,
+            "calculation_applied", before, after, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return after with { CanChangeManager = canChangeManager, CurrentCalculationVersion = version };
+    }
+
+    private static (QuoteCalculationPreview Preview,
+        IReadOnlyList<(Guid PositionId, QuoteConfiguredCalculationResult Result)> Positions)
+        CalculatePreview(QuoteDetails quote, QuoteCalculationConfiguration runtime)
+    {
+        var version = CalculationVersion(runtime);
+        var changes = new List<QuoteCalculationChange>();
+        var positions = new List<(Guid, QuoteConfiguredCalculationResult)>();
+        foreach (var type in quote.ProposalTypes)
+            foreach (var variant in type.Variants)
+            {
+                decimal savedSubtotal = 0, newSubtotal = 0;
+                var changedPositions = 0;
+                foreach (var category in variant.Categories)
+                    foreach (var section in category.Sections)
+                        foreach (var position in section.Positions)
+                        {
+                            var input = new SaveQuotePositionRequest(position.Id, position.CatalogItemId,
+                                position.Name, position.Marking, position.Unit, position.Quantity,
+                                position.PurchasePrice, position.BasePrice, position.ManualPrice,
+                                position.MarkupPercent, position.DiscountPercent,
+                                position.ExcludeFromTotals, position.Values);
+                            var categoryCode = category.CatalogCategoryId is { } categoryId
+                                ? runtime.CategoryClientIds.GetValueOrDefault(categoryId) : null;
+                            var result = categoryCode is null
+                                ? new QuoteConfiguredCalculationResult(position.Quantity, position.PurchasePrice,
+                                    position.BasePrice, position.ManualPrice, position.MarkupPercent,
+                                    position.DiscountPercent, QuoteCalculationEngine.Calculate(input).LineTotal,
+                                    position.ExcludeFromTotals, position.Values)
+                                : QuoteConfiguredCalculationEngine.Calculate(input, categoryCode,
+                                    runtime.Rules, runtime.Pipelines,
+                                    runtime.PercentFields.GetValueOrDefault(categoryCode),
+                                    runtime.TotalFields?.GetValueOrDefault(categoryCode));
+                            positions.Add((position.Id, result));
+                            if (!position.ExcludeFromTotals) savedSubtotal += position.LineTotal;
+                            if (!result.ExcludeFromTotals) newSubtotal += result.LineTotal;
+                            if (position.LineTotal != result.LineTotal ||
+                                position.ExcludeFromTotals != result.ExcludeFromTotals ||
+                                position.Quantity != result.Quantity ||
+                                position.PurchasePrice != result.PurchasePrice ||
+                                position.BasePrice != result.BasePrice ||
+                                position.ManualPrice != result.ManualPrice ||
+                                position.MarkupPercent != result.MarkupPercent ||
+                                position.DiscountPercent != result.DiscountPercent ||
+                                JsonSerializer.Serialize(position.Values, JsonOptions) !=
+                                JsonSerializer.Serialize(result.Values, JsonOptions))
+                                changedPositions++;
+                        }
+                var savedTotal = savedSubtotal + QuoteVatCalculator.Calculate(savedSubtotal, variant.VatRate);
+                var newTotal = newSubtotal + QuoteVatCalculator.Calculate(newSubtotal, variant.VatRate);
+                changes.Add(new QuoteCalculationChange(variant.Id, type.Name, variant.Name,
+                    savedTotal, newTotal, changedPositions));
+            }
+        return (new QuoteCalculationPreview(version, quote.UpdatedAt, changes), positions);
     }
 
     /// <summary>
@@ -521,9 +659,9 @@ internal sealed class PostgresQuoteService(
         IReadOnlyList<SaveQuoteProposalTypeRequest> proposalTypes,
         Dictionary<Guid, Guid>? clientVariantSelections,
         DateTimeOffset? clientSelectionSubmittedAt,
+        QuoteCalculationConfiguration runtime,
         CancellationToken token)
     {
-        var runtime = await ReadCalculationConfigurationAsync(connection, transaction, token);
         await ExecuteAsync(connection, transaction,
             "DELETE FROM quote_proposal_types WHERE quote_id = @quote_id",
             token, ("quote_id", quoteId));
@@ -703,7 +841,7 @@ internal sealed class PostgresQuoteService(
 
     internal static async Task<QuoteCalculationConfiguration> ReadCalculationConfigurationAsync(
         DbConnection connection,
-        DbTransaction transaction,
+        DbTransaction? transaction,
         CancellationToken token)
     {
         var categoryClientIds = new Dictionary<Guid, string>();
@@ -755,6 +893,41 @@ internal sealed class PostgresQuoteService(
         IReadOnlyDictionary<string, IReadOnlySet<string>> MoneyFields,
         IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> FieldLabels,
         IReadOnlyDictionary<string, IReadOnlySet<string>>? TotalFields = null);
+
+    private static readonly HashSet<string> CalculationActions =
+        ["set_field", "calculate_field", "aggregate_money", "exclude_row"];
+
+    internal static string CalculationVersion(QuoteCalculationConfiguration runtime)
+    {
+        var signature = JsonSerializer.Serialize(new
+        {
+            Rules = runtime.Rules
+                .Where(rule => (rule.EventType is "row_calculation" or "card_saving") &&
+                    rule.Actions.Any(action => CalculationActions.Contains(action.ActionType)))
+                .Select(rule => new
+                {
+                    rule.ClientId, rule.CategoryClientId, rule.EventType,
+                    rule.EventFieldCode, rule.Conditions,
+                    Actions = rule.Actions.Where(action => CalculationActions.Contains(action.ActionType))
+                        .Select(action => action with { Message = null, HighlightColor = null })
+                        .ToArray(),
+                }).ToArray(),
+            runtime.Pipelines,
+            PercentFields = runtime.PercentFields.OrderBy(entry => entry.Key)
+                .Select(entry => new { entry.Key, Codes = entry.Value.OrderBy(code => code).ToArray() }).ToArray(),
+            MoneyFields = runtime.MoneyFields.OrderBy(entry => entry.Key)
+                .Select(entry => new { entry.Key, Codes = entry.Value.OrderBy(code => code).ToArray() }).ToArray(),
+            TotalFields = runtime.TotalFields?.OrderBy(entry => entry.Key)
+                .Select(entry => new { entry.Key, Codes = entry.Value.OrderBy(code => code).ToArray() }).ToArray(),
+        }, JsonOptions);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(signature))).ToLowerInvariant();
+    }
+
+    private static Task StoreCalculationVersionAsync(DbConnection connection, DbTransaction transaction,
+        Guid quoteId, string version, CancellationToken token) =>
+        ExecuteAsync(connection, transaction,
+            "UPDATE quotes SET calculation_version = @version WHERE id = @id",
+            token, ("id", quoteId), ("version", version));
 
     private static async Task ExecuteAsync(
         DbConnection connection,
@@ -845,7 +1018,7 @@ internal sealed class PostgresQuoteService(
                        quote.selection_mode, quote.additional_information,
                        quote.created_at, quote.updated_at,
                        selected_type.proposal_type_id,
-                       quote.client_selection_submitted_at
+                       quote.client_selection_submitted_at, quote.calculation_version
                   FROM quotes AS quote
                   LEFT JOIN quote_client_type_selections AS selected_type
                          ON selected_type.quote_id = quote.id
@@ -865,7 +1038,8 @@ internal sealed class PostgresQuoteService(
                 reader.IsDBNull(10) ? null : reader.GetString(10),
                 ReadTimestamp(reader, 11), ReadTimestamp(reader, 12),
                 reader.IsDBNull(13) ? null : reader.GetGuid(13),
-                reader.IsDBNull(14) ? null : ReadTimestamp(reader, 14));
+                reader.IsDBNull(14) ? null : ReadTimestamp(reader, 14),
+                reader.IsDBNull(15) ? null : reader.GetString(15));
         }
 
         var types = new List<MutableType>();
@@ -1015,7 +1189,8 @@ internal sealed class PostgresQuoteService(
             header.ClientId, header.ExecutorCompanyId, header.ManagerUserId,
             header.SalesHeadUserId, header.SelectionMode, header.AdditionalInformation,
             types.Select(type => type.ToDetails()).ToArray(), header.CreatedAt, header.UpdatedAt,
-            header.ClientSelectedProposalTypeId, header.ClientSelectionSubmittedAt);
+            header.ClientSelectedProposalTypeId, header.ClientSelectionSubmittedAt,
+            CalculationVersion: header.CalculationVersion);
     }
 
     private sealed record QuoteHeader(
@@ -1023,7 +1198,8 @@ internal sealed class PostgresQuoteService(
         Guid ClientId, Guid ExecutorCompanyId, Guid? ManagerUserId, Guid? SalesHeadUserId,
         string SelectionMode, string? AdditionalInformation,
         DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt,
-        Guid? ClientSelectedProposalTypeId, DateTimeOffset? ClientSelectionSubmittedAt);
+        Guid? ClientSelectedProposalTypeId, DateTimeOffset? ClientSelectionSubmittedAt,
+        string? CalculationVersion);
 
     private sealed class MutableType(
         Guid id,
