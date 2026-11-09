@@ -15,6 +15,8 @@ final class MissingCalculationValueException extends FormatException {
 final class QuoteConfiguredCalculationEngine {
   const QuoteConfiguredCalculationEngine(this.configuration);
 
+  static const _activeHighlightRulesKey = '_active_highlight_rules';
+
   final CatalogConfiguration configuration;
 
   void calculateDocument(
@@ -169,6 +171,7 @@ final class QuoteConfiguredCalculationEngine {
     position.fieldHighlights.clear();
     if (categoryClientId == null) {
       position.activatedHighlightRuleIds.clear();
+      position.values.remove(_activeHighlightRulesKey);
       return;
     }
     final categoryFields = configuration.categories
@@ -483,20 +486,30 @@ final class QuoteConfiguredCalculationEngine {
           ),
         )
         .toList();
+    position.activatedHighlightRuleIds
+      ..clear()
+      ..addAll(_highlightRuleIds(values));
     final eligibleIds = highlightRules.map((rule) => rule.clientId).toSet();
     position.activatedHighlightRuleIds.removeWhere(
       (id) => !eligibleIds.contains(id),
     );
     for (final rule in highlightRules) {
+      final matches = _matchesAll({
+        ...values,
+        'variant_total': ?variantTotal,
+      }, rule.conditions);
       if (rules.contains(rule)) {
-        if (_matchesAll({
-          ...values,
-          'variant_total': ?variantTotal,
-        }, rule.conditions)) {
+        if (matches) {
           position.activatedHighlightRuleIds.add(rule.clientId);
         } else {
           position.activatedHighlightRuleIds.remove(rule.clientId);
         }
+      } else if (!matches &&
+          (variantTotal != null ||
+              !rule.conditions.any(
+                (condition) => condition.fieldCode == 'variant_total',
+              ))) {
+        position.activatedHighlightRuleIds.remove(rule.clientId);
       }
       if (!position.activatedHighlightRuleIds.contains(rule.clientId)) continue;
       for (final action in rule.actions) {
@@ -511,6 +524,12 @@ final class QuoteConfiguredCalculationEngine {
           message: action.message?.trim() ?? '',
         );
       }
+    }
+    if (position.activatedHighlightRuleIds.isEmpty) {
+      position.values.remove(_activeHighlightRulesKey);
+    } else {
+      position.values[_activeHighlightRulesKey] =
+          position.activatedHighlightRuleIds.toList()..sort();
     }
   }
 
@@ -530,6 +549,11 @@ final class QuoteConfiguredCalculationEngine {
   static Set<String> _effectRuleIds(Map<String, dynamic> values) =>
       values['_active_effect_rules'] is List
       ? (values['_active_effect_rules'] as List).whereType<String>().toSet()
+      : <String>{};
+
+  static Set<String> _highlightRuleIds(Map<String, dynamic> values) =>
+      values[_activeHighlightRulesKey] is List
+      ? (values[_activeHighlightRulesKey] as List).whereType<String>().toSet()
       : <String>{};
 
   Map<String, dynamic> _valuesOf(QuotePositionDraft position) =>

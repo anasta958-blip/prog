@@ -569,8 +569,19 @@ void main() {
         color: '#F59E0B',
         message: 'Проверьте цену',
       ));
+      expect(row.values['_active_highlight_rules'], ['highlight']);
       expect(row.lineTotal, 10);
       expect(row.toJson().containsKey('fieldHighlights'), isFalse);
+      final reopened = QuotePositionDraft.fromJson(row.toJson());
+      calculator.calculateDocument(_document(reopened));
+      expect(reopened.fieldHighlights['base_price'], (
+        color: '#F59E0B',
+        message: 'Проверьте цену',
+      ));
+      reopened.basePrice = 30;
+      calculator.calculateDocument(_document(reopened));
+      expect(reopened.fieldHighlights, isEmpty);
+      expect(reopened.values.containsKey('_active_highlight_rules'), isFalse);
       calculator.calculateDocument(document);
       expect(row.fieldHighlights, isNotEmpty);
       row.basePrice = 30;
@@ -580,6 +591,7 @@ void main() {
         changedFieldCode: 'base_price',
       );
       expect(row.fieldHighlights, isEmpty);
+      expect(row.values.containsKey('_active_highlight_rules'), isFalse);
       row.basePrice = 10;
       calculator.calculateDocument(
         document,
@@ -596,6 +608,7 @@ void main() {
       rule.isEnabled = false;
       calculator.calculateDocument(document);
       expect(row.fieldHighlights, isEmpty);
+      expect(row.values.containsKey('_active_highlight_rules'), isFalse);
     },
   );
 

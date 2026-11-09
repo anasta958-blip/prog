@@ -86,6 +86,21 @@ public sealed class QuoteConfiguredCalculationEngineTests
         Assert.Equal("Нужно согласование.", exception.Message);
     }
 
+    [Fact]
+    public void CalculationPreservesVisualRuleActivationInPositionValues()
+    {
+        var values = new Dictionary<string, JsonElement>
+        {
+            ["_active_highlight_rules"] = JsonSerializer.SerializeToElement(new[] { "price-warning" }),
+        };
+
+        var result = QuoteConfiguredCalculationEngine.Calculate(
+            Position(basePrice: 100m, values: values), "equipment", [], []);
+
+        Assert.Equal("price-warning",
+            result.Values["_active_highlight_rules"].EnumerateArray().Single().GetString());
+    }
+
     private static SaveQuotePositionRequest Position(
         decimal quantity = 1m,
         decimal? purchasePrice = null,
