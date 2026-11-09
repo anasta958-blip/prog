@@ -50,7 +50,8 @@ class _DocumentCanvasViewState extends State<DocumentCanvasView> {
     const partyGap = 16.0;
     final partyWidth = (template.width - template.margin * 2 - partyGap) / 2;
     final children = <Widget>[];
-    final completed = <({DocumentBlock block, double bottom})>[];
+    final completed =
+        <({DocumentBlock block, double bottom, double contentBottom})>[];
     var height = compact ? 0.0 : template.height;
     final topOffset = compact && !clientLink && blocks.isNotEmpty
         ? blocks.map((block) => block.y).reduce(math.min) - template.margin
@@ -83,13 +84,34 @@ class _DocumentCanvasViewState extends State<DocumentCanvasView> {
         }
         y = rowTop;
       } else {
-        for (final previous in completed) {
+        final predecessors = completed
+            .where(
+              (previous) =>
+                  previous.block.y + previous.block.height <= block.y + .01 &&
+                  previous.block.x < block.x + block.width &&
+                  previous.block.x + previous.block.width > block.x,
+            )
+            .toList();
+        final nearestBottom = predecessors.isEmpty
+            ? double.negativeInfinity
+            : predecessors
+                  .map((previous) => previous.block.y + previous.block.height)
+                  .reduce(math.max);
+        final nearest = predecessors
+            .where(
+              (previous) =>
+                  previous.block.y + previous.block.height >=
+                  nearestBottom - .01,
+            )
+            .toList();
+        final afterTable =
+            block.kind == 'totals' &&
+            nearest.any((previous) => previous.block.kind == 'table');
+        if (afterTable) y = double.negativeInfinity;
+        for (final previous in afterTable ? nearest : predecessors) {
           final prior = previous.block;
-          if (prior.y + prior.height <= block.y + .01 &&
-              prior.x < block.x + block.width &&
-              prior.x + prior.width > block.x) {
-            y = math.max(y, previous.bottom + block.y - prior.y - prior.height);
-          }
+          final bottom = afterTable ? previous.contentBottom : previous.bottom;
+          y = math.max(y, bottom + block.y - prior.y - prior.height);
         }
       }
       final displayWidth = linkTable
@@ -316,7 +338,11 @@ class _DocumentCanvasViewState extends State<DocumentCanvasView> {
       final blockHeight = clientLink
           ? contentHeight + displayPadding * 2
           : math.max(block.height, contentHeight + block.padding * 2);
-      completed.add((block: block, bottom: y + blockHeight));
+      completed.add((
+        block: block,
+        bottom: y + blockHeight,
+        contentBottom: y + contentHeight + displayPadding * 2,
+      ));
       if (clientLink) rowBottom = math.max(rowBottom, y + blockHeight);
       height = math.max(
         height,

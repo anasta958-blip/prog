@@ -110,4 +110,56 @@ public sealed class DocumentCanvasTests
             File.WriteAllBytes(Path.Combine(output, $"canvas-{font}.pdf"), bytes);
         }
     }
+
+    [Fact]
+    public void ConsecutiveVariantsSharePageWithConfiguredTableTotalsGap()
+    {
+        var template = Template() with
+        {
+            Blocks =
+            [
+                Block("client") with { Y = 30, Height = 100, Fields = ["name"] },
+                Block("table") with { Y = 180, Height = 400 },
+                Block("totals") with { Y = 800, Height = 100 },
+            ],
+        };
+        var client = new Dictionary<string, string?> { ["name"] = "Заказчик" };
+        var parties = DocumentCanvasBuilder.Parties(template, client, new Dictionary<string, string?>());
+        var body = DocumentCanvasBuilder.WithoutParties(DocumentCanvasBuilder.Build(template,
+            client, new Dictionary<string, string?>(),
+            [new DocumentCanvasTable("Оборудование / Монтаж", ["Название", "Цена"], [3, 1],
+                [["Кондиционер", "100 ₽"]])], ["Итого: 100 ₽"]));
+
+        var bytes = DocumentCanvasPdfRenderer.RenderParts("КП", [
+            new DocumentCanvasPdfPart(parties),
+            new DocumentCanvasPdfPart(body, "Оборудование", "Первый", true),
+            new DocumentCanvasPdfPart(body, "Оборудование", "Второй"),
+        ]);
+
+        using var stream = new MemoryStream(bytes);
+        using var pdf = PdfReader.Open(stream, PdfDocumentOpenMode.Import);
+        Assert.Equal(1, pdf.PageCount);
+    }
+
+    [Fact]
+    public void DeliberatelyLargeTableTotalsGapRemainsInGenericPdf()
+    {
+        var template = Template() with
+        {
+            Blocks =
+            [
+                Block("table") with { Y = 30, Height = 100 },
+                Block("totals") with { Y = 850, Height = 100 },
+            ],
+        };
+        var content = DocumentCanvasBuilder.Build(template,
+            new Dictionary<string, string?>(), new Dictionary<string, string?>(),
+            [new DocumentCanvasTable("Оборудование", ["Название"], [1], [["Товар"]])],
+            ["Итого: 100 ₽"]);
+        var bytes = DocumentCanvasPdfRenderer.Render("Комплектация", [content, content]);
+
+        using var stream = new MemoryStream(bytes);
+        using var pdf = PdfReader.Open(stream, PdfDocumentOpenMode.Import);
+        Assert.Equal(2, pdf.PageCount);
+    }
 }

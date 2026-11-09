@@ -564,6 +564,78 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('preview keeps the configured gap after a short table', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1600, 1200);
+    addTearDown(tester.view.reset);
+    Future<double> gap(double totalsY) async {
+      final template = DocumentTemplate(
+        blocks: [
+          DocumentBlock(
+            id: 'table',
+            kind: 'table',
+            x: 30,
+            y: 30,
+            width: 734,
+            height: 400,
+          ),
+          DocumentBlock(
+            id: 'totals',
+            kind: 'totals',
+            x: 30,
+            y: totalsY,
+            width: 734,
+          ),
+        ],
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: DocumentCanvasView(
+              document: {
+                'template': template.toJson(),
+                'blocks': [
+                  {
+                    'id': 'table',
+                    'title': '',
+                    'lines': <String>[],
+                    'tables': [
+                      {
+                        'title': 'Оборудование',
+                        'columns': ['Название'],
+                        'widths': [1],
+                        'rows': [
+                          ['Товар'],
+                        ],
+                      },
+                    ],
+                  },
+                  {
+                    'id': 'totals',
+                    'title': 'Итоги',
+                    'lines': ['Итого: 100 ₽'],
+                    'tables': <Object>[],
+                  },
+                ],
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      return tester.getTopLeft(find.text('Итоги')).dy -
+          tester.getBottomLeft(find.text('Товар')).dy;
+    }
+
+    final first = await gap(500);
+    final second = await gap(560);
+    expect(first, lessThan(250));
+    expect(second - first, greaterThan(40));
+    expect(second - first, lessThan(80));
+  });
+
   testWidgets('client link keeps PDF columns without empty A4 gaps', (
     tester,
   ) async {

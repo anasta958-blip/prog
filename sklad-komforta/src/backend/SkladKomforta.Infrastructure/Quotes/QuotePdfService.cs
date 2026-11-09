@@ -44,11 +44,18 @@ internal sealed class QuotePdfService(
             throw new IdentityException(409, "document_layout_required",
                 "Настройте внешний вид ссылки и PDF для этого канбана в разделе «Компания → Конструктор ссылки и PDF».");
         var fields = await layouts.GetFieldsAsync(boardId, cancellationToken);
-        var content = DocumentCanvasPdfRenderer.Render(quote.Title,
-            quote.ProposalTypes.OrderBy(t => t.SortOrder).SelectMany(t => t.Variants.OrderBy(v => v.SortOrder)
-                .Select(v => DocumentCanvasBuilder.Quote(template, v, client, executor, fields)
-                    with { Caption = $"{quote.Title} / {t.Name} / {v.Name}" })).Select((document, index) =>
-                index == 0 ? document : DocumentCanvasBuilder.WithoutParties(document)).ToArray());
+        var parts = new List<DocumentCanvasPdfPart>();
+        var parties = DocumentCanvasBuilder.Parties(template,
+            DocumentCanvasBuilder.Party(client), DocumentCanvasBuilder.Party(executor));
+        if (parties.Template.Blocks.Count > 0)
+            parts.Add(new DocumentCanvasPdfPart(parties));
+        foreach (var type in quote.ProposalTypes.OrderBy(t => t.SortOrder))
+            foreach (var variant in type.Variants.OrderBy(v => v.SortOrder))
+                parts.Add(new DocumentCanvasPdfPart(
+                    DocumentCanvasBuilder.WithoutParties(
+                        DocumentCanvasBuilder.Quote(template, variant, client, executor, fields)),
+                    type.Name, variant.Name, type.SelectedVariantId == variant.Id));
+        var content = DocumentCanvasPdfRenderer.RenderParts(quote.Title, parts);
         // Для печати одного варианта или одного типа в имя файла добавляются их названия.
         var printedType = variantId is null && proposalTypeId is null ? null : quote.ProposalTypes[0];
         var printedVariant = variantId is null ? null : printedType!.Variants[0];

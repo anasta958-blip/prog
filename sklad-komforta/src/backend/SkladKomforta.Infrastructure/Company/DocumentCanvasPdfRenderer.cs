@@ -5,25 +5,40 @@ using SkladKomforta.Infrastructure.Quotes;
 
 namespace SkladKomforta.Infrastructure.Company;
 
+internal sealed record DocumentCanvasPdfPart(DocumentCanvasContent Content,
+    string? TypeName = null, string? VariantName = null, bool Selected = false);
+
 internal static class DocumentCanvasPdfRenderer
 {
-    public static byte[] Render(string title, IReadOnlyList<DocumentCanvasContent> documents)
+    public static byte[] Render(string title, IReadOnlyList<DocumentCanvasContent> documents) =>
+        RenderParts(title, documents.Select(content => new DocumentCanvasPdfPart(content)).ToArray());
+
+    public static byte[] RenderParts(string title, IReadOnlyList<DocumentCanvasPdfPart> parts)
     {
         QuotePdfFontResolver.EnsureRegistered();
         using var pdf = new PdfDocument();
         pdf.Info.Title = title;
-        foreach (var content in documents) AddDocument(pdf, content);
+        var pages = new List<XGraphics>();
+        try
+        {
+            var cursor = 0.0;
+            string? lastType = null;
+            foreach (var part in parts)
+                cursor = AddDocument(pdf, pages, part, cursor, ref lastType);
+        }
+        finally { foreach (var graphics in pages) graphics.Dispose(); }
         if (pdf.PageCount == 0) pdf.AddPage();
         using var output = new MemoryStream();
         pdf.Save(output, false);
         return output.ToArray();
     }
 
-    private static void AddDocument(PdfDocument pdf, DocumentCanvasContent content)
+    private static double AddDocument(PdfDocument pdf, List<XGraphics> pages,
+        DocumentCanvasPdfPart part, double startOffset, ref string? lastType)
     {
+        var content = part.Content;
         var template = content.Template;
         var pageHeight = template.Height - template.Margin * 2;
-        var pages = new List<XGraphics>();
         XGraphics Graphics(int page)
         {
             while (pages.Count <= page)
@@ -36,7 +51,7 @@ internal static class DocumentCanvasPdfRenderer
                 if (template.Margin >= 16)
                 {
                     var footerFont = new XFont("QuoteSans", 8);
-                    var caption = content.Caption ?? pdf.Info.Title;
+                    var caption = pdf.Info.Title;
                     while (caption.Length > 0 && graphics.MeasureString(caption, footerFont).Width > template.Width - template.Margin * 2 - 50)
                         caption = caption[..^1];
                     graphics.DrawString($"{caption} · {pdf.PageCount}", footerFont, XBrushes.Gray,
@@ -47,18 +62,67 @@ internal static class DocumentCanvasPdfRenderer
             return pages[page];
         }
 
-        var completed = new List<(DocumentBlock Block, double End)>();
-        Graphics(0);
-        try
+        var cursorBase = startOffset;
+        void Heading(string label, XColor background, XColor foreground,
+            double fontSize, double gap, double followingSpace)
         {
-            foreach (var block in template.Blocks.OrderBy(b => b.Y).ThenBy(b => b.X))
+            var font = new XFont("QuoteSans", fontSize, XFontStyleEx.Bold);
+            var width = template.Width - template.Margin * 2;
+            var lines = Wrap(Graphics((int)(cursorBase / pageHeight)), label, font, width - 24);
+            var height = lines.Count * (fontSize * 1.3) + 14;
+            cursorBase += gap;
+            if (cursorBase % pageHeight + height + followingSpace > pageHeight)
+                cursorBase = (Math.Floor(cursorBase / pageHeight) + 1) * pageHeight;
+            var page = (int)(cursorBase / pageHeight);
+            var graphics = Graphics(page);
+            var y = template.Margin + cursorBase % pageHeight;
+            graphics.DrawRectangle(new XSolidBrush(background), template.Margin, y, width, height);
+            graphics.DrawRectangle(new XSolidBrush(XColor.FromArgb(54, 105, 171)),
+                template.Margin, y, 4, height);
+            for (var i = 0; i < lines.Count; i++)
+                graphics.DrawString(lines[i], font, new XSolidBrush(foreground),
+                    new XPoint(template.Margin + 12, y + 7 + i * fontSize * 1.3), XStringFormats.TopLeft);
+            cursorBase += height;
+        }
+
+        if (part.TypeName is { } typeName && lastType != typeName)
+        {
+            Heading($"Тип: {typeName}", XColor.FromArgb(36, 58, 86), XColors.White, 13, 14, 75);
+            lastType = typeName;
+        }
+        if (part.VariantName is { } variantName)
+            Heading($"Вариант: {variantName}" + (part.Selected ? "  ·  ВЫБРАН" : ""),
+                part.Selected ? XColor.FromArgb(210, 228, 252) : XColor.FromArgb(225, 233, 243),
+                XColor.FromArgb(23, 32, 51), 11, 5, 35);
+
+        var completed = new List<(DocumentBlock Block, double End, double ActualEnd)>();
+        Graphics(0);
+        var top = part.VariantName is null || template.Blocks.Count == 0
+            ? template.Margin : template.Blocks.Min(block => block.Y);
+        var orderedBlocks = template.Blocks.OrderBy(block => block.Y).ThenBy(block => block.X);
+        foreach (var block in orderedBlocks)
             {
                 var data = content.Blocks.FirstOrDefault(b => b.Id == block.Id);
                 if (data is null) continue;
-                var start = block.Y - template.Margin;
-                foreach (var prior in completed.Where(p => p.Block.Y + p.Block.Height <= block.Y + .01
-                    && p.Block.X < block.X + block.Width && p.Block.X + p.Block.Width > block.X))
-                    start = Math.Max(start, prior.End + block.Y - (prior.Block.Y + prior.Block.Height));
+                var start = cursorBase + block.Y - top;
+                var predecessors = completed.Where(p => p.Block.Y + p.Block.Height <= block.Y + .01
+                    && p.Block.X < block.X + block.Width && p.Block.X + p.Block.Width > block.X)
+                    .ToArray();
+                var nearestBottom = predecessors.Length == 0 ? double.NegativeInfinity
+                    : predecessors.Max(prior => prior.Block.Y + prior.Block.Height);
+                var nearest = predecessors.Where(prior =>
+                    prior.Block.Y + prior.Block.Height >= nearestBottom - .01).ToArray();
+                var afterTable = block.Kind == "totals" &&
+                    nearest.Any(prior => prior.Block.Kind == "table");
+                if (afterTable) start = double.NegativeInfinity;
+                foreach (var prior in afterTable ? nearest : predecessors)
+                {
+                    var gap = block.Y - (prior.Block.Y + prior.Block.Height);
+                    // Сохраняем зазор, заданный расположением блоков в конструкторе.
+                    // Пустую часть прямоугольника таблицы при печати не резервируем.
+                    var end = afterTable ? prior.ActualEnd : prior.End;
+                    start = Math.Max(start, end + gap);
+                }
                 var cursor = start + block.Padding;
                 var width = block.Width - block.Padding * 2;
                 var font = new XFont(template.FontFamily == "serif" ? "QuoteSerif" : "QuoteSans", block.FontSize);
@@ -156,10 +220,10 @@ internal static class DocumentCanvasPdfRenderer
                     foreach (var row in table.Rows) Row(row, table.Widths, false, true);
                     cursor += 12;
                 }
-                completed.Add((block, Math.Max(start + block.Height, cursor + block.Padding)));
+                completed.Add((block, Math.Max(start + block.Height, cursor + block.Padding),
+                    cursor + block.Padding));
             }
-        }
-        finally { foreach (var graphics in pages) graphics.Dispose(); }
+        return completed.Count == 0 ? cursorBase : Math.Max(cursorBase, completed.Max(item => item.ActualEnd)) + 12;
     }
 
     internal static IReadOnlyList<(IReadOnlyList<string> Cells, IReadOnlyList<double> Widths)> PartyRows(
