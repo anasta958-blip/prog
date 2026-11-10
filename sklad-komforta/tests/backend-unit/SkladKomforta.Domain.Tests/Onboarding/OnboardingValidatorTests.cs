@@ -16,7 +16,7 @@ public sealed class OnboardingValidatorTests
         var source = ValidDraft();
         var category = CategoryWithCalculationFields();
         var fields = category.Fields.ToList();
-        fields.Add(new CatalogFieldDraft("reference_amount", true, false,
+        fields.Add(new CatalogFieldDraft("custom_reference_amount", true, false,
             FieldType: fieldType, Label: "Справочная сумма", TotalMode: "separate_only"));
         var draft = source with { Categories = [category with { Fields = fields }] };
 

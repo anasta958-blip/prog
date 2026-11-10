@@ -246,40 +246,45 @@ final class OrderDocument {
   };
 
   /// Снимок для локального черновика: вместе со служебными полями документа.
-  Map<String, dynamic> toSnapshot() => {
-    ...toJson(),
-    'id': id,
-    'cardId': cardId,
-    'sourceQuote': sourceQuote?.toJson(),
-    'canChangeManager': canChangeManager,
-    'canManageInvoices': canManageInvoices,
-    'calculationVersion': calculationVersion,
-    'currentCalculationVersion': currentCalculationVersion,
-    'updatedAt': updatedAt?.toIso8601String(),
-    'categories': [
-      for (final category in (toJson()['categories'] as List<dynamic>))
-        {
-          ...(category as Map<String, dynamic>),
-          'sections': [
-            for (final section in (category['sections'] as List<dynamic>))
-              {
-                ...(section as Map<String, dynamic>),
-                'positions': [
-                  for (final position
-                      in (section['positions'] as List<dynamic>))
-                    {
-                      ...(position as Map<String, dynamic>),
-                      'isReorder': reorderPositionIds.contains(position['id']),
-                      'fromQuote': fromQuotePositionIds.contains(
-                        position['id'],
-                      ),
-                    },
-                ],
-              },
-          ],
-        },
-    ],
-  };
+  Map<String, dynamic> toSnapshot() {
+    final snapshot = toJson();
+    return {
+      ...snapshot,
+      'id': id,
+      'cardId': cardId,
+      'sourceQuote': sourceQuote?.toJson(),
+      'canChangeManager': canChangeManager,
+      'canManageInvoices': canManageInvoices,
+      'calculationVersion': calculationVersion,
+      'currentCalculationVersion': currentCalculationVersion,
+      'updatedAt': updatedAt?.toIso8601String(),
+      'categories': [
+        for (final category in (snapshot['categories'] as List<dynamic>))
+          {
+            ...(category as Map<String, dynamic>),
+            'sections': [
+              for (final section in (category['sections'] as List<dynamic>))
+                {
+                  ...(section as Map<String, dynamic>),
+                  'positions': [
+                    for (final position
+                        in (section['positions'] as List<dynamic>))
+                      {
+                        ...(position as Map<String, dynamic>),
+                        'isReorder': reorderPositionIds.contains(
+                          position['id'],
+                        ),
+                        'fromQuote': fromQuotePositionIds.contains(
+                          position['id'],
+                        ),
+                      },
+                  ],
+                },
+            ],
+          },
+      ],
+    };
+  }
 }
 
 /// Исходное КП комплектации, созданной переносом.

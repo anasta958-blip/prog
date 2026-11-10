@@ -748,7 +748,7 @@ void main() {
     );
   }
 
-  testWidgets('category move menu changes the document order', (tester) async {
+  testWidgets('large variant keeps category and section drag', (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1200, 1600);
     addTearDown(tester.view.reset);
@@ -763,10 +763,26 @@ void main() {
     variant.categories.addAll([
       QuoteCategoryDraft(
         id: 'first',
+        catalogCategoryId: 'equipment-category',
         name: 'First',
         sections: [
           QuoteSectionDraft(id: 's1', name: 'One', positions: []),
-          QuoteSectionDraft(id: 's2', name: 'Two', positions: []),
+          QuoteSectionDraft(
+            id: 's2',
+            name: 'Two',
+            positions: [
+              for (var index = 0; index < 50; index++)
+                QuotePositionDraft(
+                  id: 'multi-$index',
+                  name: 'Position $index',
+                  marking: '',
+                  unit: 'pcs',
+                  quantity: 1,
+                  basePrice: 10,
+                  values: {},
+                ),
+            ],
+          ),
         ],
       ),
       QuoteCategoryDraft(id: 'second', name: 'Second', sections: []),
@@ -795,6 +811,9 @@ void main() {
         ),
       ),
     );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('multi-49')), findsNothing);
+    await tester.tap(find.byTooltip('Свернуть раздел').last);
     await tester.pumpAndSettle();
     final menu = find.byTooltip('Переместить категорию').first;
     await tester.ensureVisible(menu);
@@ -827,6 +846,31 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(variant.categories.map((c) => c.id), ['first', 'second']);
+    await tester.tap(find.byTooltip('Развернуть раздел'));
+    await tester.pumpAndSettle();
+    final lastRow = find.byKey(const ValueKey('multi-49'));
+    await tester.scrollUntilVisible(
+      lastRow,
+      600,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const Key('quote-page-scroll')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    final nameInput = find.descendant(
+      of: find.byKey(const ValueKey('quote-entry-multi-49-name')),
+      matching: find.byType(TextField),
+    );
+    expect(lastRow, findsOneWidget);
+    expect(nameInput, findsOneWidget);
+    await tester.enterText(nameInput, 'Last in second section');
+    await tester.pump();
+    expect(
+      variant.categories.first.sections.last.positions.last.name,
+      'Last in second section',
+    );
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
     controller.dispose();
@@ -2020,6 +2064,257 @@ void main() {
           .single;
       expect(savedSection.positions.map((item) => item.id), [row.id]);
 
+      controller.dispose();
+      auth.dispose();
+    },
+  );
+
+  testWidgets('thousand rows across sections stay lazy', (tester) async {
+    tester.view.physicalSize = const Size(1600, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final auth = AuthController(
+      config,
+      api: _NoopAuthGateway(),
+      tokens: _MemoryTokenRepository(),
+    )..accessToken = 'access-token';
+    final controller = QuoteController(config, auth);
+    final type = QuoteProposalTypeDraft.create();
+    final variant = type.variants.first;
+    variant.categories.add(
+      QuoteCategoryDraft(
+        id: 'bulk-category',
+        catalogCategoryId: 'equipment-category',
+        name: 'Bulk category',
+        sections: [
+          for (var sectionIndex = 0; sectionIndex < 10; sectionIndex++)
+            QuoteSectionDraft(
+              id: 'bulk-section-$sectionIndex',
+              name: 'Section $sectionIndex',
+              positions: [
+                for (var rowIndex = 0; rowIndex < 100; rowIndex++)
+                  QuotePositionDraft(
+                    id: 'bulk-${sectionIndex * 100 + rowIndex}',
+                    name: 'Position $rowIndex',
+                    marking: '',
+                    unit: 'pcs',
+                    quantity: 1,
+                    basePrice: 10,
+                    values: {},
+                  ),
+              ],
+            ),
+        ],
+      ),
+    );
+    controller
+      ..draft = QuoteDraft(
+        kind: QuoteKind.quote,
+        title: 'Bulk quote',
+        clientId: '',
+        executorCompanyId: '',
+        selectionMode: 'variant',
+        proposalTypes: [type],
+      )
+      ..activeTypeId = type.id
+      ..activeVariantId = variant.id;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: QuoteEditorPage(
+            config: config,
+            authController: auth,
+            board: _quoteBoard,
+            controller: controller,
+            onBack: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    final mountedRows = find.byWidgetPredicate((widget) {
+      final key = widget.key;
+      return key is ValueKey<String> &&
+          key.value.startsWith('bulk-') &&
+          int.tryParse(key.value.substring(5)) != null;
+    });
+    expect(find.byKey(const ValueKey('bulk-0')), findsOneWidget);
+    expect(find.byKey(const ValueKey('bulk-999')), findsNothing);
+    expect(mountedRows.evaluate().length, lessThan(60));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+    auth.dispose();
+  });
+
+  testWidgets(
+    'long section keeps edited values after scrolling and reordering',
+    (tester) async {
+      tester.view.physicalSize = const Size(1600, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final auth = AuthController(
+        config,
+        api: _NoopAuthGateway(),
+        tokens: _MemoryTokenRepository(),
+      )..accessToken = 'access-token';
+      final controller = QuoteController(
+        config,
+        auth,
+        catalogGateway: _CatalogGatewayWithRelations(),
+      );
+      final section = QuoteSectionDraft(
+        id: 'long-section',
+        catalogSectionId: _equipmentSection.id,
+        name: _equipmentSection.name,
+        positions: [
+          for (var index = 0; index < 100; index++)
+            QuotePositionDraft(
+              id: 'long-$index',
+              name: 'Position $index',
+              marking: '',
+              unit: 'pcs',
+              quantity: 1,
+              basePrice: 10,
+              values: {},
+            ),
+        ],
+      );
+      final trailingSection = QuoteSectionDraft(
+        id: 'trailing-section',
+        name: 'Following section',
+        positions: [
+          for (var index = 0; index < 60; index++)
+            QuotePositionDraft(
+              id: 'trailing-$index',
+              name: 'Following $index',
+              marking: '',
+              unit: 'pcs',
+              quantity: 1,
+              basePrice: 10,
+              values: {},
+            ),
+        ],
+      );
+      final variant = QuoteVariantDraft(
+        id: 'long-variant',
+        name: 'Variant',
+        categories: [
+          QuoteCategoryDraft(
+            id: 'long-category',
+            catalogCategoryId: _equipmentCategory.id,
+            name: _equipmentCategory.name,
+            sections: [section, trailingSection],
+          ),
+        ],
+      );
+      final type = QuoteProposalTypeDraft(
+        id: 'long-type',
+        name: 'Type',
+        variants: [variant],
+      );
+      controller
+        ..catalog = _configuration
+        ..draft = QuoteDraft(
+          kind: QuoteKind.quote,
+          title: 'Long quote',
+          clientId: 'client',
+          executorCompanyId: 'executor',
+          selectionMode: 'variant',
+          proposalTypes: [type],
+        )
+        ..activeTypeId = type.id
+        ..activeVariantId = variant.id;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: QuoteEditorPage(
+              config: config,
+              authController: auth,
+              board: _quoteBoard,
+              controller: controller,
+              onBack: () {},
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      final first = section.positions.first;
+      first.quantity = 7;
+      await controller.positionChanged(position: first, fieldCode: 'quantity');
+      await tester.pump();
+      final lastRow = find.byKey(const ValueKey('long-99'));
+      expect(lastRow, findsNothing);
+      await tester.scrollUntilVisible(
+        lastRow,
+        600,
+        scrollable: find
+            .descendant(
+              of: find.byKey(const Key('quote-page-scroll')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+      await tester.pump();
+      expect(section.positions.first.quantity, 7);
+      expect(lastRow, findsOneWidget);
+      final nameInput = find.descendant(
+        of: find.byKey(const ValueKey('quote-entry-long-99-name')),
+        matching: find.byType(TextField),
+      );
+      await tester.tap(nameInput);
+      await tester.enterText(nameInput, 'Edited at end');
+      await tester.pump();
+      expect(
+        FocusManager.instance.primaryFocus?.debugLabel,
+        'quote-entry-long-99-name',
+      );
+      expect(section.positions.last.name, 'Edited at end');
+      final handle = find.descendant(
+        of: lastRow,
+        matching: find.byIcon(Icons.drag_indicator),
+      );
+      await Scrollable.ensureVisible(tester.element(handle), alignment: 0.5);
+      await tester.pump();
+      await tester.drag(handle, const Offset(0, -130));
+      await tester.pumpAndSettle();
+      expect(
+        section.positions.indexWhere((row) => row.id == 'long-99'),
+        lessThan(99),
+      );
+      expect(
+        section.positions.singleWhere((row) => row.id == 'long-99').name,
+        'Edited at end',
+      );
+      expect(section.positions.first.quantity, 7);
+      final vertical = tester.state<ScrollableState>(
+        find
+            .descendant(
+              of: find.byKey(const Key('quote-page-scroll')),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+      vertical.position.jumpTo(0);
+      await tester.pump();
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey('long-section')),
+          matching: find.byTooltip('Добавить позицию'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(section.positions, hasLength(101));
+      expect(
+        FocusManager.instance.primaryFocus?.debugLabel,
+        'quote-entry-${section.positions.last.id}-name',
+      );
+      expect(
+        vertical.position.pixels,
+        lessThan(vertical.position.maxScrollExtent),
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
       controller.dispose();
       auth.dispose();
     },

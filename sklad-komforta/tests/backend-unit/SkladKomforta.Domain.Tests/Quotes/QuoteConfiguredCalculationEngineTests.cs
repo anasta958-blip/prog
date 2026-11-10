@@ -7,6 +7,8 @@ namespace SkladKomforta.Domain.Tests.Quotes;
 
 public sealed class QuoteConfiguredCalculationEngineTests
 {
+    private static readonly string[] HighlightRuleIds = ["price-warning"];
+
     [Fact]
     public void MoneyPipelineUsesConfiguredFieldsAndFixedOperationOrder()
     {
@@ -91,7 +93,7 @@ public sealed class QuoteConfiguredCalculationEngineTests
     {
         var values = new Dictionary<string, JsonElement>
         {
-            ["_active_highlight_rules"] = JsonSerializer.SerializeToElement(new[] { "price-warning" }),
+            ["_active_highlight_rules"] = JsonSerializer.SerializeToElement(HighlightRuleIds),
         };
 
         var result = QuoteConfiguredCalculationEngine.Calculate(

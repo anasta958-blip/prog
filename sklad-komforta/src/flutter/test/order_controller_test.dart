@@ -528,6 +528,104 @@ void main() {
     auth.dispose();
   });
 
+  testWidgets('long order section builds rows lazily and preserves edits', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1600, 1000);
+    addTearDown(tester.view.reset);
+    final auth = authorized();
+    final gateway = _MemoryOrderGateway(
+      json: () {
+        final json = _orderJson();
+        final sections =
+            ((json['categories'] as List).first as Map)['sections'] as List;
+        final section = sections.first as Map;
+        section['positions'] = [
+          for (var index = 0; index < 100; index++)
+            {
+              'id': 'long-$index',
+              'name': 'Position $index',
+              'marking': '',
+              'unit': 'шт',
+              'quantity': 1,
+              'isReorder': false,
+              'fromQuote': true,
+              'values': <String, dynamic>{},
+            },
+        ];
+        sections.add({
+          'id': 'following-section',
+          'name': 'Following section',
+          'positions': [
+            for (var index = 0; index < 60; index++)
+              {
+                'id': 'following-$index',
+                'name': 'Following $index',
+                'unit': 'шт',
+                'quantity': 1,
+                'values': <String, dynamic>{},
+              },
+          ],
+        });
+        return json;
+      },
+    );
+    final controller = OrderController(
+      config,
+      auth,
+      orderGateway: gateway,
+      catalogGateway: _CatalogGateway(),
+      companyGateway: _CompanyGateway(),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: OrderEditorPage(
+            config: config,
+            authController: auth,
+            board: _orderBoard,
+            card: _card(),
+            controller: controller,
+            onBack: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final section = controller.activeVariant!.categories.single.sections.first;
+    final lastRow = find.byKey(const ValueKey('long-99'));
+    expect(lastRow, findsNothing);
+    await tester.scrollUntilVisible(
+      lastRow,
+      600,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const Key('order-page-scroll')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.pump();
+    expect(lastRow, findsOneWidget);
+    final nameInput = find.descendant(
+      of: find.byKey(const ValueKey('quote-entry-long-99-name')),
+      matching: find.byType(TextField),
+    );
+    await tester.tap(nameInput);
+    await tester.enterText(nameInput, 'Edited order row');
+    await tester.pump();
+    expect(section.positions.last.name, 'Edited order row');
+    expect(
+      FocusManager.instance.primaryFocus?.debugLabel,
+      'quote-entry-long-99-name',
+    );
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    controller.dispose();
+    auth.dispose();
+  });
+
   testWidgets('редактор комплектации: шапка, фильтры, счета и таблица', (
     tester,
   ) async {

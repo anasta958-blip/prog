@@ -111,6 +111,7 @@ final class _OrderEditorPageState extends State<OrderEditorPage> {
   OrderLocalDraft? localDraft;
   bool draftReady = false;
   bool hadLocalChanges = false;
+  Timer? _draftWriteTimer;
 
   String get _storagePrefix => _columnWidthStorageKey(
     widget.authController.accessToken,
@@ -197,6 +198,7 @@ final class _OrderEditorPageState extends State<OrderEditorPage> {
     }
     if (!mounted) return;
     controller.addListener(_persistLocalDraft);
+    controller.draftChanges.addListener(_persistLocalDraft);
     setState(() => draftReady = true);
   }
 
@@ -205,9 +207,15 @@ final class _OrderEditorPageState extends State<OrderEditorPage> {
     if (store == null || controller.order == null) return;
     if (controller.dirty) {
       hadLocalChanges = true;
-      unawaited(_writeLocalDraft());
+      _draftWriteTimer?.cancel();
+      _draftWriteTimer = Timer(const Duration(milliseconds: 500), () {
+        _draftWriteTimer = null;
+        if (controller.dirty) unawaited(_writeLocalDraft());
+      });
     } else if (hadLocalChanges) {
       hadLocalChanges = false;
+      _draftWriteTimer?.cancel();
+      _draftWriteTimer = null;
       unawaited(
         store.clear().catchError((Object _) {
           if (mounted) {
@@ -227,12 +235,14 @@ final class _OrderEditorPageState extends State<OrderEditorPage> {
   }
 
   Future<bool> _writeLocalDraft() async {
+    _draftWriteTimer?.cancel();
+    _draftWriteTimer = null;
     try {
       final order = controller.snapshot;
       if (order != null) await localDraft?.write(order);
       return true;
     } on Object {
-      if (mounted) {
+      if (mounted && controller.dirty) {
         setState(
           () => controller.error =
               'Не удалось сохранить локальный черновик. Не закрывайте редактор.',
@@ -318,7 +328,9 @@ final class _OrderEditorPageState extends State<OrderEditorPage> {
 
   @override
   void dispose() {
+    _draftWriteTimer?.cancel();
     controller.removeListener(_persistLocalDraft);
+    controller.draftChanges.removeListener(_persistLocalDraft);
     columnWidthStore.dispose();
     if (ownsController) controller.dispose();
     super.dispose();
@@ -390,68 +402,70 @@ final class _OrderEditorPageState extends State<OrderEditorPage> {
                 Expanded(
                   child: AbsorbPointer(
                     absorbing: controller.needsRecalculation,
-                    child: ListView(
-                      key: const Key('order-page-scroll'),
-                      padding: EdgeInsets.fromLTRB(
-                        compact ? 12 : 18,
-                        12,
-                        compact ? 12 : 14,
-                        24,
-                      ),
-                      children: [
-                        _OrderMetadataPanel(
-                          controller: controller,
-                          board: widget.board,
-                        ),
-                        const SizedBox(height: 12),
-                        ...[
-                          _OrderInvoicesPanel(
-                            controller: controller,
-                            expanded: invoicesExpanded,
-                            onToggle: () => setState(
-                              () => invoicesExpanded = !invoicesExpanded,
+                    child: _usesLazyStructure(variant)
+                        ? _lazyBody(compact: compact, variant: variant)
+                        : ListView(
+                            key: const Key('order-page-scroll'),
+                            padding: EdgeInsets.fromLTRB(
+                              compact ? 12 : 18,
+                              12,
+                              compact ? 12 : 14,
+                              24,
                             ),
-                            onUpload: _uploadInvoice,
-                            selected: selectedInvoices,
-                            onToggleSelected: (invoice) => setState(
-                              () => selectedInvoices.remove(invoice.id)
-                                  ? null
-                                  : selectedInvoices.add(invoice.id),
-                            ),
-                            onView: _viewInvoices,
-                            onDownload: _downloadInvoice,
-                            onDelete: _deleteInvoice,
+                            children: [
+                              _OrderMetadataPanel(
+                                controller: controller,
+                                board: widget.board,
+                              ),
+                              const SizedBox(height: 12),
+                              ...[
+                                _OrderInvoicesPanel(
+                                  controller: controller,
+                                  expanded: invoicesExpanded,
+                                  onToggle: () => setState(
+                                    () => invoicesExpanded = !invoicesExpanded,
+                                  ),
+                                  onUpload: _uploadInvoice,
+                                  selected: selectedInvoices,
+                                  onToggleSelected: (invoice) => setState(
+                                    () => selectedInvoices.remove(invoice.id)
+                                        ? null
+                                        : selectedInvoices.add(invoice.id),
+                                  ),
+                                  onView: _viewInvoices,
+                                  onDownload: _downloadInvoice,
+                                  onDelete: _deleteInvoice,
+                                ),
+                                const SizedBox(height: 12),
+                              ],
+                              ...[
+                                _OrderFiltersBar(controller: controller),
+                                const SizedBox(height: 10),
+                              ],
+                              _VariantContent(
+                                controller: controller,
+                                board: widget.board,
+                                variant: variant,
+                                expandedCategories: expandedCategories,
+                                expandedSections: expandedSections,
+                                onToggleCategory: (id) => setState(
+                                  () => expandedCategories.contains(id)
+                                      ? expandedCategories.remove(id)
+                                      : expandedCategories.add(id),
+                                ),
+                                onToggleSection: (id) => setState(
+                                  () => expandedSections.contains(id)
+                                      ? expandedSections.remove(id)
+                                      : expandedSections.add(id),
+                                ),
+                                onAddCategory: _addCategory,
+                                onAddSection: _addSection,
+                                onAddPosition: _addPosition,
+                                columnWidthStore: columnWidthStore,
+                                emptyTitle: 'В комплектации пока нет позиций',
+                              ),
+                            ],
                           ),
-                          const SizedBox(height: 12),
-                        ],
-                        ...[
-                          _OrderFiltersBar(controller: controller),
-                          const SizedBox(height: 10),
-                        ],
-                        _VariantContent(
-                          controller: controller,
-                          board: widget.board,
-                          variant: variant,
-                          expandedCategories: expandedCategories,
-                          expandedSections: expandedSections,
-                          onToggleCategory: (id) => setState(
-                            () => expandedCategories.contains(id)
-                                ? expandedCategories.remove(id)
-                                : expandedCategories.add(id),
-                          ),
-                          onToggleSection: (id) => setState(
-                            () => expandedSections.contains(id)
-                                ? expandedSections.remove(id)
-                                : expandedSections.add(id),
-                          ),
-                          onAddCategory: _addCategory,
-                          onAddSection: _addSection,
-                          onAddPosition: _addPosition,
-                          columnWidthStore: columnWidthStore,
-                          emptyTitle: 'В комплектации пока нет позиций',
-                        ),
-                      ],
-                    ),
                   ),
                 ),
               ],
@@ -460,6 +474,76 @@ final class _OrderEditorPageState extends State<OrderEditorPage> {
         ),
       );
     },
+  );
+
+  Widget _lazyBody({
+    required bool compact,
+    required QuoteVariantDraft variant,
+  }) => CustomScrollView(
+    key: const Key('order-page-scroll'),
+    slivers: [
+      SliverPadding(
+        padding: EdgeInsets.fromLTRB(
+          compact ? 12 : 18,
+          12,
+          compact ? 12 : 14,
+          24,
+        ),
+        sliver: SliverMainAxisGroup(
+          slivers: [
+            SliverToBoxAdapter(
+              child: _OrderMetadataPanel(
+                controller: controller,
+                board: widget.board,
+              ),
+            ),
+            const SliverToBoxAdapter(child: SizedBox(height: 12)),
+            SliverToBoxAdapter(
+              child: _OrderInvoicesPanel(
+                controller: controller,
+                expanded: invoicesExpanded,
+                onToggle: () =>
+                    setState(() => invoicesExpanded = !invoicesExpanded),
+                onUpload: _uploadInvoice,
+                selected: selectedInvoices,
+                onToggleSelected: (invoice) => setState(
+                  () => selectedInvoices.remove(invoice.id)
+                      ? null
+                      : selectedInvoices.add(invoice.id),
+                ),
+                onView: _viewInvoices,
+                onDownload: _downloadInvoice,
+                onDelete: _deleteInvoice,
+              ),
+            ),
+            const SliverToBoxAdapter(child: SizedBox(height: 12)),
+            SliverToBoxAdapter(child: _OrderFiltersBar(controller: controller)),
+            const SliverToBoxAdapter(child: SizedBox(height: 10)),
+            ..._variantStructureSlivers(
+              controller: controller,
+              board: widget.board,
+              variant: variant,
+              expandedCategories: expandedCategories,
+              expandedSections: expandedSections,
+              onToggleCategory: (id) => setState(
+                () => expandedCategories.contains(id)
+                    ? expandedCategories.remove(id)
+                    : expandedCategories.add(id),
+              ),
+              onToggleSection: (id) => setState(
+                () => expandedSections.contains(id)
+                    ? expandedSections.remove(id)
+                    : expandedSections.add(id),
+              ),
+              onAddCategory: _addCategory,
+              onAddSection: _addSection,
+              onAddPosition: _addPosition,
+              columnWidthStore: columnWidthStore,
+            ),
+          ],
+        ),
+      ),
+    ],
   );
 
   Future<void> _openPreview() async {
@@ -674,6 +758,8 @@ final class _OrderEditorPageState extends State<OrderEditorPage> {
       ),
     );
     if (leave == 'discard') {
+      _draftWriteTimer?.cancel();
+      _draftWriteTimer = null;
       try {
         await localDraft?.clear();
         if (mounted) widget.onBack();

@@ -9,6 +9,143 @@ import 'package:sklad_komforta_app/features/quotes/quote_configured_calculation.
 import 'package:sklad_komforta_app/features/quotes/quote_models.dart';
 
 void main() {
+  test('selecting rows does not recalculate or dirty the draft', () {
+    const config = AppConfig(
+      apiBaseUrl: 'https://api.example.test',
+      environment: 'test',
+    );
+    final auth = AuthController(config);
+    final controller = QuoteController(config, auth);
+    addTearDown(controller.dispose);
+    addTearDown(auth.dispose);
+    final row = _position(basePrice: 10);
+    controller.draft = _document(row);
+    controller.catalog = _configuration();
+    row.configuredLineTotal = 99;
+    var selectionNotifications = 0;
+    var pageNotifications = 0;
+    controller.selectionChanges.addListener(() => selectionNotifications++);
+    controller.addListener(() => pageNotifications++);
+    controller.setPositionSelection(row, true);
+    final section = controller
+        .draft!
+        .proposalTypes
+        .single
+        .variants
+        .single
+        .categories
+        .single
+        .sections
+        .single;
+    controller.setSectionSelection(section, false);
+    expect(controller.dirty, isFalse);
+    expect(selectionNotifications, 2);
+    expect(pageNotifications, 0);
+    expect(row.lineTotal, 99);
+  });
+
+  test(
+    'editing a second cell notifies its row and totals without rebuilding the page',
+    () async {
+      const config = AppConfig(
+        apiBaseUrl: 'https://api.example.test',
+        environment: 'test',
+      );
+      final auth = AuthController(config);
+      final controller = QuoteController(config, auth);
+      addTearDown(controller.dispose);
+      addTearDown(auth.dispose);
+      final row = _position(basePrice: 10);
+      controller.draft = _document(row);
+      controller.catalog = _configuration();
+      var pageNotices = 0;
+      var rowNotices = 0;
+      var totalNotices = 0;
+      var draftNotices = 0;
+      controller.addListener(() => pageNotices++);
+      controller.changesForPosition(row.id).addListener(() => rowNotices++);
+      controller.totalChanges.addListener(() => totalNotices++);
+      controller.draftChanges.addListener(() => draftNotices++);
+      row.quantity = 2;
+      await controller.positionChanged(position: row, fieldCode: 'quantity');
+      expect(pageNotices, 1);
+      row.quantity = 3;
+      await controller.positionChanged(position: row, fieldCode: 'quantity');
+      expect(pageNotices, 1);
+      expect(rowNotices, 2);
+      expect(totalNotices, 2);
+      expect(draftNotices, 2);
+    },
+  );
+
+  for (final kind in QuoteKind.values) {
+    for (final count in [100, 500, 1000]) {
+      test(
+        'partial calculation agrees with full pass for $kind and $count rows',
+        () {
+          final configuration = _configuration(
+            pipelines: [
+              MoneyPipelineDraft(
+                categoryClientId: 'equipment',
+                basePriceFieldCode: 'base_price',
+                quantityFieldCode: 'quantity',
+                resultFieldCode: 'line_total',
+              ),
+            ],
+          );
+          final engine = QuoteConfiguredCalculationEngine(configuration);
+          final document = _document(_position(basePrice: 10))..kind = kind;
+          final positions = document
+              .proposalTypes
+              .single
+              .variants
+              .single
+              .categories
+              .single
+              .sections
+              .single
+              .positions;
+          for (var index = 1; index < count; index++) {
+            positions.add(
+              QuotePositionDraft.fromJson({
+                ...positions.first.toJson(),
+                'id': 'position-$index',
+              }),
+            );
+          }
+          engine.calculateDocument(document);
+          final full = QuoteDraft.fromJson(document.toJson());
+          final changed = positions[count ~/ 2];
+          final fullChanged = full
+              .proposalTypes
+              .single
+              .variants
+              .single
+              .categories
+              .single
+              .sections
+              .single
+              .positions[count ~/ 2];
+          changed.quantity = 7;
+          fullChanged.quantity = 7;
+          engine.calculateDocument(
+            document,
+            changedPosition: changed,
+            changedVariant: document.proposalTypes.single.variants.single,
+            changedCategory:
+                document.proposalTypes.single.variants.single.categories.single,
+            changedFieldCode: 'quantity',
+          );
+          engine.calculateDocument(full);
+          expect(changed.lineTotal, fullChanged.lineTotal);
+          expect(
+            document.proposalTypes.single.variants.single.totalWithVat,
+            full.proposalTypes.single.variants.single.totalWithVat,
+          );
+        },
+      );
+    }
+  }
   for (final event in ['field_changed', 'variant_calculation']) {
     test(
       'explicit formula refresh evaluates $event without replaying other actions',
@@ -216,6 +353,79 @@ void main() {
       onVariantTotalChanged: (_, _) => events++,
     );
     expect(events, 1);
+  });
+
+  test('independent variant field keeps full totals and row values', () {
+    final document = _document(_position(basePrice: 10));
+    final section = document
+        .proposalTypes
+        .single
+        .variants
+        .single
+        .categories
+        .single
+        .sections
+        .single;
+    section.positions.add(
+      QuotePositionDraft.fromJson({
+        ...section.positions.first.toJson(),
+        'id': 'other-position',
+      }),
+    );
+    final engine = QuoteConfiguredCalculationEngine(
+      _configuration(
+        pipelines: [
+          MoneyPipelineDraft(
+            categoryClientId: 'equipment',
+            basePriceFieldCode: 'base_price',
+            quantityFieldCode: 'quantity',
+            resultFieldCode: 'line_total',
+          ),
+        ],
+        rules: [
+          CalculationRuleDraft(
+            clientId: 'variant-note',
+            name: 'Variant note',
+            categoryClientId: 'equipment',
+            eventType: 'variant_calculation',
+            isEnabled: true,
+            conditions: [],
+            actions: [
+              RuleActionDraft(
+                actionType: 'set_field',
+                targetFieldCode: 'note',
+                sourceFieldCode: 'variant_total',
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+    engine.calculateDocument(document);
+    final full = QuoteDraft.fromJson(document.toJson());
+    engine.calculateDocument(full);
+    final variant = document.proposalTypes.single.variants.single;
+    final category = variant.categories.single;
+    final changed = category.sections.single.positions.first..quantity = 3;
+    full.proposalTypes.single.variants.single.categories.single.sections.single
+        .positions.first.quantity = 3;
+    engine.calculateDocument(
+      document,
+      changedPosition: changed,
+      changedVariant: variant,
+      changedCategory: category,
+      changedFieldCode: 'quantity',
+    );
+    engine.calculateDocument(full);
+    final actual = category.sections.single.positions;
+    final expected = full.proposalTypes.single.variants.single.categories.single
+        .sections.single.positions;
+    expect(actual.map((row) => row.lineTotal),
+        expected.map((row) => row.lineTotal));
+    expect(actual.map((row) => row.values['note']),
+        expected.map((row) => row.values['note']));
+    expect(variant.totalWithVat,
+        full.proposalTypes.single.variants.single.totalWithVat);
   });
 
   test('variant event reads client total with VAT only when it changes', () {

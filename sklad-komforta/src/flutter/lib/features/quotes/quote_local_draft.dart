@@ -21,6 +21,10 @@ final class QuoteLocalDraft {
   }
 
   Future<void> write(QuoteDraft draft) {
+    return _enqueue(() => _writeSnapshot(draft));
+  }
+
+  Future<void> _writeSnapshot(QuoteDraft draft) {
     final payload = draft.toJson();
     final types = payload['proposalTypes'] as List;
     for (
@@ -82,7 +86,7 @@ final class QuoteLocalDraft {
       'currentCalculationVersion': draft.currentCalculationVersion,
       'updatedAt': draft.updatedAt?.toIso8601String(),
     });
-    return _enqueue(() => storage.write(key: key, value: snapshot));
+    return storage.write(key: key, value: snapshot);
   }
 
   Future<void> clear() => _enqueue(() => storage.delete(key: key));

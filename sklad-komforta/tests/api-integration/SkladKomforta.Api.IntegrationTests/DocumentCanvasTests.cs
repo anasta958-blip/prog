@@ -50,9 +50,9 @@ public sealed class DocumentCanvasTests
 
         Assert.Equal(["client", "executor"], header.Template.Blocks.Select(block => block.Kind));
         Assert.Equal(["table", "totals"], body.Template.Blocks.Select(block => block.Kind));
-        Assert.Contains("Заказчик", System.Text.Json.JsonSerializer.Serialize(header));
-        Assert.DoesNotContain("Заказчик", System.Text.Json.JsonSerializer.Serialize(body));
-        Assert.DoesNotContain("Исполнитель", System.Text.Json.JsonSerializer.Serialize(body));
+        Assert.Contains(header.Blocks.SelectMany(block => block.Lines), line => line.Contains("Заказчик", StringComparison.Ordinal));
+        Assert.DoesNotContain(body.Blocks.SelectMany(block => block.Lines), line => line.Contains("Заказчик", StringComparison.Ordinal));
+        Assert.DoesNotContain(body.Blocks.SelectMany(block => block.Lines), line => line.Contains("Исполнитель", StringComparison.Ordinal));
     }
 
     [Fact]

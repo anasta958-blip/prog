@@ -966,6 +966,9 @@ final class _MemoryKanbanGateway implements KanbanGateway {
     return KanbanBoard(
       id: 'board-quotes',
       specialization: specialization,
+      documentTemplate: specialization == WorkflowSpecialization.order
+          ? const {}
+          : null,
       code: 'quotes',
       name: 'Коммерческие предложения',
       columns: [

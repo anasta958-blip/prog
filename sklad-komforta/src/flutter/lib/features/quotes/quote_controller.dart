@@ -57,6 +57,34 @@ final class QuoteController extends ChangeNotifier {
   String? _calculationBoardId;
   bool _checkingCalculationVersion = false;
   bool _disposed = false;
+  final ValueNotifier<int> draftChanges = ValueNotifier<int>(0);
+  final ValueNotifier<int> totalChanges = ValueNotifier<int>(0);
+  final ValueNotifier<int> selectionChanges = ValueNotifier<int>(0);
+  final Map<String, ValueNotifier<int>> _rowChanges = {};
+
+  ValueListenable<int> changesForPosition(String id) =>
+      _rowChanges.putIfAbsent(id, () => ValueNotifier<int>(0));
+
+  QuoteConfiguredCalculationEngine? _cachedCalculationEngine;
+  CatalogConfiguration? _cachedCalculationConfiguration;
+  QuoteDraft? _indexedDraft;
+  Map<
+    QuotePositionDraft,
+    ({QuoteVariantDraft variant, QuoteCategoryDraft category})
+  >?
+  _positionLocations;
+
+  QuoteConfiguredCalculationEngine _engineFor(
+    CatalogConfiguration configuration,
+  ) {
+    if (!identical(_cachedCalculationConfiguration, configuration)) {
+      _cachedCalculationConfiguration = configuration;
+      _cachedCalculationEngine = QuoteConfiguredCalculationEngine(
+        configuration,
+      );
+    }
+    return _cachedCalculationEngine!;
+  }
 
   void _startCalculationUpdates(String boardId) {
     _calculationBoardId = boardId;
@@ -461,6 +489,7 @@ final class QuoteController extends ChangeNotifier {
     );
     activeTypeId = copy.id;
     activeVariantId = copy.variants.firstOrNull?.id;
+    _positionLocations = null;
     dirty = true;
     successMessage = null;
     notifyListeners();
@@ -475,6 +504,7 @@ final class QuoteController extends ChangeNotifier {
       ..name = _copyName(source.name, type.variants.map((item) => item.name));
     type.variants.insert(type.variants.indexOf(source) + 1, copy);
     activeVariantId = copy.id;
+    _positionLocations = null;
     dirty = true;
     successMessage = null;
     notifyListeners();
@@ -1108,8 +1138,15 @@ final class QuoteController extends ChangeNotifier {
   void setSectionSelection(QuoteSectionDraft section, bool selected) {
     for (final position in section.positions) {
       position.selected = selected;
+      _rowChanges[position.id]?.value++;
     }
-    _changed();
+    selectionChanges.value++;
+  }
+
+  void setPositionSelection(QuotePositionDraft position, bool selected) {
+    position.selected = selected;
+    _rowChanges[position.id]?.value++;
+    selectionChanges.value++;
   }
 
   void removeSelectedPositions(QuoteSectionDraft section) {
@@ -1239,23 +1276,21 @@ final class QuoteController extends ChangeNotifier {
     String? eventType,
     double? variantTotal,
   }) async {
+    if (!attachesCatalogRelations) return;
     final configuration = catalog;
     final location = _locationOf(position);
     if (configuration == null || location == null) return;
-    final categoryClientId = configuration.categories
-        .where((item) => item.id == location.category.catalogCategoryId)
-        .firstOrNull
-        ?.clientId;
+    final evaluator = _engineFor(configuration);
+    final categoryClientId = evaluator.clientIdForCategory(
+      location.category.catalogCategoryId,
+    );
     if (categoryClientId == null || position.catalogItemId == null) return;
 
-    final evaluator = QuoteConfiguredCalculationEngine(configuration);
     var changed = false;
-    for (final rule in configuration.rules.where(
-      (item) =>
-          item.isEnabled &&
-          item.categoryClientId == categoryClientId &&
-          _ruleRunsFor(item, changedFieldCode, eventType),
-    )) {
+    for (final rule
+        in evaluator
+            .rulesForCategory(categoryClientId)
+            .where((item) => _ruleRunsFor(item, changedFieldCode, eventType))) {
       if (!evaluator.matchesRule(position, rule, variantTotal: variantTotal)) {
         continue;
       }
@@ -1429,18 +1464,27 @@ final class QuoteController extends ChangeNotifier {
   ) {
     final document = draft;
     if (document == null) return null;
-    for (final type in document.proposalTypes) {
-      for (final variant in type.variants) {
-        for (final category in variant.categories) {
-          if (category.sections.any(
-            (section) => section.positions.contains(position),
-          )) {
-            return (variant: variant, category: category);
+    if (!identical(_indexedDraft, document) || _positionLocations == null) {
+      final locations =
+          <
+            QuotePositionDraft,
+            ({QuoteVariantDraft variant, QuoteCategoryDraft category})
+          >{};
+      for (final type in document.proposalTypes) {
+        for (final variant in type.variants) {
+          for (final category in variant.categories) {
+            for (final section in category.sections) {
+              for (final row in section.positions) {
+                locations[row] = (variant: variant, category: category);
+              }
+            }
           }
         }
       }
+      _indexedDraft = document;
+      _positionLocations = locations;
     }
-    return null;
+    return _positionLocations![position];
   }
 
   QuoteVariantDraft? _variantContaining(QuotePositionDraft position) =>
@@ -1591,6 +1635,10 @@ final class QuoteController extends ChangeNotifier {
     String? fieldCode,
     QuoteVariantDraft? consumedVariant,
   }) {
+    final wasDirty = dirty;
+    final oldError = error;
+    final oldSuccess = successMessage;
+    if (position == null) _positionLocations = null;
     if (!needsRecalculation) {
       _recalculateConfiguredRules(
         position: position,
@@ -1600,7 +1648,17 @@ final class QuoteController extends ChangeNotifier {
     }
     dirty = true;
     successMessage = null;
-    notifyListeners();
+    draftChanges.value++;
+    if (position != null) {
+      _rowChanges[position.id]?.value++;
+      totalChanges.value++;
+    }
+    if (position == null ||
+        !wasDirty ||
+        error != oldError ||
+        oldSuccess != null) {
+      notifyListeners();
+    }
   }
 
   void _recalculateConfiguredRules({
@@ -1616,9 +1674,12 @@ final class QuoteController extends ChangeNotifier {
     _calculationError = null;
     if (error == previousCalculationError) error = null;
     try {
-      QuoteConfiguredCalculationEngine(configuration).calculateDocument(
+      final location = position == null ? null : _locationOf(position);
+      _engineFor(configuration).calculateDocument(
         document,
         changedPosition: position,
+        changedVariant: location?.variant,
+        changedCategory: location?.category,
         changedFieldCode: fieldCode,
         saving: saving,
         consumedVariant: consumedVariant,
@@ -1795,6 +1856,7 @@ final class QuoteController extends ChangeNotifier {
       }
     }
     catalog = _candidateConfiguration;
+    _positionLocations = null;
     document.calculationVersion = version;
     _setCurrentCalculationVersion(version);
     _calculationCandidate = null;
@@ -2020,6 +2082,12 @@ final class QuoteController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    draftChanges.dispose();
+    totalChanges.dispose();
+    selectionChanges.dispose();
+    for (final changes in _rowChanges.values) {
+      changes.dispose();
+    }
     _calculationVersionTimer?.cancel();
     unawaited(_calculationSubscription?.cancel());
     if (_ownsCalculationRealtime) unawaited(_calculationRealtime?.close());

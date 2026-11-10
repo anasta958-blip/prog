@@ -38,6 +38,7 @@ import 'package:sklad_komforta_app/features/quotes/quote_preview_page.dart';
 import 'package:sklad_komforta_app/features/quotes/party_search_field.dart';
 
 part 'order_editor_page.dart';
+part 'quote_editor_long_section.dart';
 
 const _background = Color(0xFF0B1119);
 const _surface = Color(0xFF111A27);
@@ -108,6 +109,7 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
   QuoteLocalDraft? localDraft;
   bool draftReady = false;
   bool hadLocalChanges = false;
+  Timer? _draftWriteTimer;
 
   @override
   void initState() {
@@ -208,6 +210,7 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
     }
     if (!mounted) return;
     controller.addListener(_persistLocalDraft);
+    controller.draftChanges.addListener(_persistLocalDraft);
     setState(() => draftReady = true);
   }
 
@@ -305,9 +308,15 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
     if (store == null || draft == null) return;
     if (controller.dirty) {
       hadLocalChanges = true;
-      unawaited(_writeLocalDraft());
+      _draftWriteTimer?.cancel();
+      _draftWriteTimer = Timer(const Duration(milliseconds: 500), () {
+        _draftWriteTimer = null;
+        if (controller.dirty) unawaited(_writeLocalDraft());
+      });
     } else if (hadLocalChanges) {
       hadLocalChanges = false;
+      _draftWriteTimer?.cancel();
+      _draftWriteTimer = null;
       unawaited(
         store.clear().catchError((Object _) {
           if (mounted) {
@@ -328,12 +337,14 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
   }
 
   Future<bool> _writeLocalDraft() async {
+    _draftWriteTimer?.cancel();
+    _draftWriteTimer = null;
     try {
       final draft = controller.draft;
       if (draft != null) await localDraft?.write(draft);
       return true;
     } on Object {
-      if (mounted) {
+      if (mounted && controller.dirty) {
         setState(
           () => controller.error =
               'Не удалось сохранить локальный черновик. Не закрывайте редактор.',
@@ -345,7 +356,9 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
 
   @override
   void dispose() {
+    _draftWriteTimer?.cancel();
     controller.removeListener(_persistLocalDraft);
+    controller.draftChanges.removeListener(_persistLocalDraft);
     variantScrollController.dispose();
     columnWidthStore.dispose();
     clientAccessApi.close();
@@ -426,6 +439,14 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
   );
 
   Widget _body({required bool compact, required BoxConstraints constraints}) {
+    final lazyVariant = controller.activeVariant;
+    if (_usesLazyStructure(lazyVariant)) {
+      return _lazyBody(
+        compact: compact,
+        constraints: constraints,
+        variant: lazyVariant!,
+      );
+    }
     if (compact) {
       return ListView(
         key: const Key('quote-page-scroll'),
@@ -521,6 +542,95 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
               onAddPosition: _addPosition,
               columnWidthStore: columnWidthStore,
             ),
+        ],
+      ),
+    );
+  }
+
+  Widget _lazyBody({
+    required bool compact,
+    required BoxConstraints constraints,
+    required QuoteVariantDraft variant,
+  }) {
+    final horizontalSummaries = constraints.maxWidth >= 1400;
+    final summaryWidth = horizontalSummaries
+        ? 552.0
+        : constraints.maxWidth < 1180
+        ? 230.0
+        : 270.0;
+    return Scrollbar(
+      controller: variantScrollController,
+      thumbVisibility: true,
+      child: CustomScrollView(
+        key: const Key('quote-page-scroll'),
+        controller: variantScrollController,
+        slivers: [
+          SliverPadding(
+            padding: EdgeInsets.fromLTRB(
+              compact ? 12 : 18,
+              12,
+              compact ? 12 : 14,
+              24,
+            ),
+            sliver: SliverMainAxisGroup(
+              slivers: [
+                SliverToBoxAdapter(
+                  child: compact
+                      ? _MetadataPanel(
+                          controller: controller,
+                          board: widget.board,
+                        )
+                      : Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: _MetadataPanel(
+                                controller: controller,
+                                board: widget.board,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            SizedBox(
+                              width: summaryWidth,
+                              child: _SummaryColumn(
+                                controller: controller,
+                                variant: variant,
+                                horizontal: horizontalSummaries,
+                              ),
+                            ),
+                          ],
+                        ),
+                ),
+                const SliverToBoxAdapter(child: SizedBox(height: 12)),
+                SliverToBoxAdapter(
+                  child: _ProposalSelectors(controller: controller),
+                ),
+                const SliverToBoxAdapter(child: SizedBox(height: 10)),
+                ..._variantStructureSlivers(
+                  controller: controller,
+                  board: widget.board,
+                  variant: variant,
+                  expandedCategories: expandedCategories,
+                  expandedSections: expandedSections,
+                  onToggleCategory: _toggleCategory,
+                  onToggleSection: _toggleSection,
+                  onAddCategory: _addCategory,
+                  onAddSection: _addSection,
+                  onAddPosition: _addPosition,
+                  columnWidthStore: columnWidthStore,
+                ),
+                if (compact) ...[
+                  const SliverToBoxAdapter(child: SizedBox(height: 12)),
+                  SliverToBoxAdapter(
+                    child: _SummaryColumn(
+                      controller: controller,
+                      variant: variant,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -743,6 +853,8 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
       ),
     );
     if (leave == 'discard') {
+      _draftWriteTimer?.cancel();
+      _draftWriteTimer = null;
       try {
         await localDraft?.clear();
         if (mounted) widget.onBack();
@@ -2036,38 +2148,43 @@ final class _VariantContent extends StatelessWidget {
 final class _CategoryHeading extends StatelessWidget {
   const _CategoryHeading({
     super.key,
+    required this.controller,
     required this.leading,
     required this.children,
   });
+  final QuoteController controller;
   final List<Widget> leading;
   final List<Widget> children;
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      if (constraints.maxWidth >= 670) {
-        return Row(children: [...leading, ...children]);
-      }
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              ...leading,
-              Expanded(child: (children.first as Flexible).child),
-            ],
-          ),
-          Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: children
-                .skip(1)
-                .where((child) => child is! SizedBox)
-                .toList(),
-          ),
-        ],
-      );
-    },
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: controller.totalChanges,
+    builder: (context, _) => LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth >= 670) {
+          return Row(children: [...leading, ...children]);
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                ...leading,
+                Expanded(child: (children.first as Flexible).child),
+              ],
+            ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: children
+                  .skip(1)
+                  .where((child) => child is! SizedBox)
+                  .toList(),
+            ),
+          ],
+        );
+      },
+    ),
   );
 }
 
@@ -2335,6 +2452,7 @@ final class _CategoryBlock extends StatelessWidget {
     required this.onAddSection,
     required this.onAddPosition,
     required this.columnWidthStore,
+    this.showContents = true,
   });
 
   final QuoteController controller;
@@ -2348,6 +2466,7 @@ final class _CategoryBlock extends StatelessWidget {
   final VoidCallback onAddSection;
   final ValueChanged<QuoteSectionDraft> onAddPosition;
   final _ColumnWidthStore columnWidthStore;
+  final bool showContents;
 
   @override
   Widget build(BuildContext context) {
@@ -2369,6 +2488,7 @@ final class _CategoryBlock extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(4, 4, 12, 4),
             child: _CategoryHeading(
               key: Key('quote-category-heading-${category.id}'),
+              controller: controller,
               leading: [
                 reorderControls,
                 CollapseToggle(
@@ -2442,7 +2562,7 @@ final class _CategoryBlock extends StatelessWidget {
               ],
             ),
           ),
-          if (expanded) ...[
+          if (expanded && showContents) ...[
             const Divider(height: 1),
             if (category.sections.isEmpty)
               Padding(
@@ -2520,6 +2640,7 @@ final class _SectionBlock extends StatefulWidget {
     required this.onAddPosition,
     required this.widthScope,
     required this.columnWidthStore,
+    this.showContents = true,
   });
 
   final QuoteController controller;
@@ -2532,6 +2653,7 @@ final class _SectionBlock extends StatefulWidget {
   final VoidCallback onAddPosition;
   final String widthScope;
   final _ColumnWidthStore columnWidthStore;
+  final bool showContents;
 
   @override
   State<_SectionBlock> createState() => _SectionBlockState();
@@ -2634,7 +2756,8 @@ final class _SectionBlockState extends State<_SectionBlock> {
     _pruneEntryNodes();
     final entryCodes = _entryCodes;
     final requested = controller.focusRequestPositionId;
-    if (requested != null &&
+    if (widget.showContents &&
+        requested != null &&
         widget.expanded &&
         entryCodes.isNotEmpty &&
         section.positions.any((item) => item.id == requested)) {
@@ -2676,7 +2799,7 @@ final class _SectionBlockState extends State<_SectionBlock> {
             onAddPosition: onAddPosition,
           ),
         ),
-        if (expanded)
+        if (expanded && widget.showContents)
           Listener(
             onPointerMove: (event) {
               if (event.down) columnWidthStore.updateResize(event.delta.dx);
@@ -2736,21 +2859,30 @@ final class _SectionBlockState extends State<_SectionBlock> {
                           width: tableWidth,
                           child: Column(
                             children: [
-                              _SectionColumnHeader(
-                                fields: fields,
-                                fieldWidths: fieldWidths,
-                                selectedCount: section.positions
-                                    .where((position) => position.selected)
-                                    .length,
-                                positionCount: section.positions.length,
-                                onSelectionChanged: (selected) => controller
-                                    .setSectionSelection(section, selected),
-                                onResizeStart: (fieldIndex) =>
-                                    columnWidthStore.beginResize(
-                                      scope: widthScope,
+                              ValueListenableBuilder<int>(
+                                valueListenable: controller.selectionChanges,
+                                builder: (context, _, _) =>
+                                    _SectionColumnHeader(
                                       fields: fields,
-                                      currentWidths: fieldWidths,
-                                      fieldIndex: fieldIndex,
+                                      fieldWidths: fieldWidths,
+                                      selectedCount: section.positions
+                                          .where(
+                                            (position) => position.selected,
+                                          )
+                                          .length,
+                                      positionCount: section.positions.length,
+                                      onSelectionChanged: (selected) =>
+                                          controller.setSectionSelection(
+                                            section,
+                                            selected,
+                                          ),
+                                      onResizeStart: (fieldIndex) =>
+                                          columnWidthStore.beginResize(
+                                            scope: widthScope,
+                                            fields: fields,
+                                            currentWidths: fieldWidths,
+                                            fieldIndex: fieldIndex,
+                                          ),
                                     ),
                               ),
                               if (section.positions.isEmpty)
@@ -2784,16 +2916,23 @@ final class _SectionBlockState extends State<_SectionBlock> {
                                       newIndex,
                                     );
                                   },
-                                  itemBuilder: (context, index) => _PositionRow(
-                                    key: ValueKey(visiblePositions[index].id),
-                                    controller: controller,
-                                    entry: entry,
-                                    section: section,
-                                    position: visiblePositions[index],
-                                    fields: fields,
-                                    fieldWidths: fieldWidths,
-                                    index: index,
-                                  ),
+                                  itemBuilder: (context, index) {
+                                    final position = visiblePositions[index];
+                                    return ValueListenableBuilder<int>(
+                                      key: ValueKey(position.id),
+                                      valueListenable: controller
+                                          .changesForPosition(position.id),
+                                      builder: (context, _, _) => _PositionRow(
+                                        controller: controller,
+                                        entry: entry,
+                                        section: section,
+                                        position: position,
+                                        fields: fields,
+                                        fieldWidths: fieldWidths,
+                                        index: index,
+                                      ),
+                                    );
+                                  },
                                 ),
                             ],
                           ),
@@ -2854,143 +2993,149 @@ final class _SectionHeader extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      final markupField = _percentField(true);
-      final discountField = _percentField(false);
-      final title = Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          reorderControls,
-          CollapseToggle(
-            expanded: expanded,
-            compact: true,
-            expandTooltip: 'Развернуть раздел',
-            collapseTooltip: 'Свернуть раздел',
-            onPressed: onToggle,
-          ),
-          const Icon(Icons.folder_open_outlined, size: 17),
-          const SizedBox(width: 7),
-          Flexible(
-            child: Text(
-              this.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w700),
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: Listenable.merge([
+      controller.totalChanges,
+      controller.selectionChanges,
+    ]),
+    builder: (context, _) => LayoutBuilder(
+      builder: (context, constraints) {
+        final markupField = _percentField(true);
+        final discountField = _percentField(false);
+        final title = Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            reorderControls,
+            CollapseToggle(
+              expanded: expanded,
+              compact: true,
+              expandTooltip: 'Развернуть раздел',
+              collapseTooltip: 'Свернуть раздел',
+              onPressed: onToggle,
             ),
-          ),
-          IconButton(
-            tooltip: 'Добавить позицию',
-            onPressed: onAddPosition,
-            icon: const Icon(Icons.add_circle_outline),
-          ),
-        ],
-      );
-      final actions = Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (section.positions.any((position) => position.selected)) ...[
-            OutlinedButton.icon(
-              onPressed: () => controller.removeSelectedPositions(section),
-              icon: const Icon(Icons.delete_outline, size: 16),
-              label: Text(
-                'Удалить выбранные (${section.positions.where((position) => position.selected).length})',
-              ),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFFFF7676),
-                padding: const EdgeInsets.symmetric(horizontal: 9),
-                visualDensity: VisualDensity.compact,
+            const Icon(Icons.folder_open_outlined, size: 17),
+            const SizedBox(width: 7),
+            Flexible(
+              child: Text(
+                this.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w700),
               ),
             ),
-            const SizedBox(width: 8),
+            IconButton(
+              tooltip: 'Добавить позицию',
+              onPressed: onAddPosition,
+              icon: const Icon(Icons.add_circle_outline),
+            ),
           ],
-          if (markupField != null) ...[
-            _PercentAction(
-              label: 'Наценка',
-              initialValue: section.markupPercent,
-              onApply: (value) => controller.applyPercent(
-                section,
-                value: value,
-                markup: true,
-                fieldCode: markupField.code,
+        );
+        final actions = Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (section.positions.any((position) => position.selected)) ...[
+              OutlinedButton.icon(
+                onPressed: () => controller.removeSelectedPositions(section),
+                icon: const Icon(Icons.delete_outline, size: 16),
+                label: Text(
+                  'Удалить выбранные (${section.positions.where((position) => position.selected).length})',
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFFFF7676),
+                  padding: const EdgeInsets.symmetric(horizontal: 9),
+                  visualDensity: VisualDensity.compact,
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-          ],
-          if (discountField != null) ...[
-            _PercentAction(
-              label: 'Скидка',
-              initialValue: section.discountPercent,
-              onApply: (value) => controller.applyPercent(
-                section,
-                value: value,
-                markup: false,
-                fieldCode: discountField.code,
-              ),
-            ),
-            const SizedBox(width: 10),
-          ],
-          if (controller.showsMoney) ...[
-            _MoneyLabel('Итого', section.clientTotal),
-            const SizedBox(width: 8),
-          ],
-          TooltipTheme(
-            data: const TooltipThemeData(
-              triggerMode: TooltipTriggerMode.manual,
-            ),
-            child: IconButton(
-              tooltip: 'Удалить раздел',
-              color: const Color(0xFFFF7676),
-              icon: const Icon(Icons.delete_outline, size: 20),
-              onPressed: controller.saving
-                  ? null
-                  : () => _confirmTabRemoval(
-                      context,
-                      title: 'Удалить раздел «${section.name}»?',
-                      content:
-                          'Раздел и все его позиции будут удалены из этого варианта. Связанные автоматические позиции будут пересчитаны. Каталог товаров не изменится.',
-                      onConfirmed: () => controller.removeSection(section),
-                    ),
-            ),
-          ),
-        ],
-      );
-      if (constraints.maxWidth >= 760) {
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
-          child: Row(
-            children: [
-              Flexible(child: title),
               const SizedBox(width: 8),
-              actions,
+            ],
+            if (markupField != null) ...[
+              _PercentAction(
+                label: 'Наценка',
+                initialValue: section.markupPercent,
+                onApply: (value) => controller.applyPercent(
+                  section,
+                  value: value,
+                  markup: true,
+                  fieldCode: markupField.code,
+                ),
+              ),
+              const SizedBox(width: 8),
+            ],
+            if (discountField != null) ...[
+              _PercentAction(
+                label: 'Скидка',
+                initialValue: section.discountPercent,
+                onApply: (value) => controller.applyPercent(
+                  section,
+                  value: value,
+                  markup: false,
+                  fieldCode: discountField.code,
+                ),
+              ),
+              const SizedBox(width: 10),
+            ],
+            if (controller.showsMoney) ...[
+              _MoneyLabel('Итого', section.clientTotal),
+              const SizedBox(width: 8),
+            ],
+            TooltipTheme(
+              data: const TooltipThemeData(
+                triggerMode: TooltipTriggerMode.manual,
+              ),
+              child: IconButton(
+                tooltip: 'Удалить раздел',
+                color: const Color(0xFFFF7676),
+                icon: const Icon(Icons.delete_outline, size: 20),
+                onPressed: controller.saving
+                    ? null
+                    : () => _confirmTabRemoval(
+                        context,
+                        title: 'Удалить раздел «${section.name}»?',
+                        content:
+                            'Раздел и все его позиции будут удалены из этого варианта. Связанные автоматические позиции будут пересчитаны. Каталог товаров не изменится.',
+                        onConfirmed: () => controller.removeSection(section),
+                      ),
+              ),
+            ),
+          ],
+        );
+        if (constraints.maxWidth >= 760) {
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
+            child: Row(
+              children: [
+                Flexible(child: title),
+                const SizedBox(width: 8),
+                actions,
+              ],
+            ),
+          );
+        }
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(child: title),
+                  actions.children.last,
+                ],
+              ),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: actions.children
+                      .take(actions.children.length - 1)
+                      .toList(),
+                ),
+              ),
             ],
           ),
         );
-      }
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Expanded(child: title),
-                actions.children.last,
-              ],
-            ),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: actions.children
-                    .take(actions.children.length - 1)
-                    .toList(),
-              ),
-            ),
-          ],
-        ),
-      );
-    },
+      },
+    ),
   );
 }
 
@@ -3780,7 +3925,6 @@ final class _PositionRow extends StatelessWidget {
     required this.fields,
     required this.fieldWidths,
     required this.index,
-    super.key,
   });
 
   final QuoteController controller;
@@ -3837,8 +3981,7 @@ final class _PositionRow extends StatelessWidget {
             child: Checkbox(
               value: position.selected,
               onChanged: (value) {
-                position.selected = value ?? false;
-                controller.positionChanged();
+                controller.setPositionSelection(position, value ?? false);
               },
             ),
           ),
@@ -3890,7 +4033,12 @@ final class _SummaryColumn extends StatelessWidget {
   final bool horizontal;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: controller.totalChanges,
+    builder: (context, _) => _build(context),
+  );
+
+  Widget _build(BuildContext context) {
     final cards = <Widget>[
       _SummaryCard(
         title: 'Сводка варианта',

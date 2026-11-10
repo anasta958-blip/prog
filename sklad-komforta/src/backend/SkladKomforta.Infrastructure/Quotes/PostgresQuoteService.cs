@@ -665,6 +665,7 @@ internal sealed class PostgresQuoteService(
         await ExecuteAsync(connection, transaction,
             "DELETE FROM quote_proposal_types WHERE quote_id = @quote_id",
             token, ("quote_id", quoteId));
+        var positionInserts = new PostgresPositionInsertBatch(connection, transaction);
 
         for (var typeIndex = 0; typeIndex < proposalTypes.Count; typeIndex++)
         {
@@ -761,7 +762,7 @@ internal sealed class PostgresQuoteService(
                                 category.CatalogCategoryId, section.CatalogSectionId,
                                 position.Name, position.Marking, position.Unit, position.Values,
                                 position.BasePrice, token);
-                            await ExecuteAsync(connection, transaction, """
+                            await positionInserts.AddAsync("""
                                 INSERT INTO quote_positions
                                     (id, variant_section_id, catalog_item_id, name_snapshot,
                                      marking_snapshot, unit_snapshot, quantity, purchase_price,
@@ -811,6 +812,7 @@ internal sealed class PostgresQuoteService(
                         : DateTimeOffset.UtcNow));
             }
         }
+        await positionInserts.FlushAsync(token);
     }
 
     /// <summary>

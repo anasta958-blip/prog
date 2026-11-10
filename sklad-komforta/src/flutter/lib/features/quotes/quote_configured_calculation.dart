@@ -13,15 +13,122 @@ final class MissingCalculationValueException extends FormatException {
 /// It mirrors the backend evaluator so the editor updates immediately while
 /// the backend remains authoritative when the document is saved.
 final class QuoteConfiguredCalculationEngine {
-  const QuoteConfiguredCalculationEngine(this.configuration);
+  QuoteConfiguredCalculationEngine(this.configuration)
+    : _categoriesById = {
+        for (final category in configuration.categories) category.id: category,
+      },
+      _fieldsByCategory = _indexFields(configuration.categories),
+      _rulesByCategory = _indexRules(configuration.rules),
+      _pipelinesByCategory = _indexPipelines(configuration.moneyPipelines),
+      _rowInputsByCategory = _indexRowInputs(configuration);
 
   static const _activeHighlightRulesKey = '_active_highlight_rules';
 
   final CatalogConfiguration configuration;
+  final Map<String, CatalogCategory> _categoriesById;
+  final Map<String, List<CatalogField>> _fieldsByCategory;
+  final Map<String, List<CalculationRuleDraft>> _rulesByCategory;
+  final Map<String, List<MoneyPipelineDraft>> _pipelinesByCategory;
+  final Map<String, Set<String>> _rowInputsByCategory;
+
+  String? clientIdForCategory(String? catalogCategoryId) =>
+      _categoriesById[catalogCategoryId]?.clientId;
+
+  Iterable<CalculationRuleDraft> rulesForCategory(String categoryClientId) =>
+      _rulesFor(categoryClientId);
+
+  static Map<String, List<CatalogField>> _indexFields(
+    List<CatalogCategory> categories,
+  ) {
+    final result = <String, List<CatalogField>>{};
+    for (final category in categories) {
+      result.putIfAbsent(category.clientId, () => []).addAll(category.fields);
+    }
+    return result;
+  }
+
+  static Map<String, List<CalculationRuleDraft>> _indexRules(
+    List<CalculationRuleDraft> rules,
+  ) {
+    final result = <String, List<CalculationRuleDraft>>{};
+    for (final rule in rules) {
+      if (const {
+        'field_changed',
+        'row_calculation',
+        'card_saving',
+        'variant_calculation',
+      }.contains(rule.eventType)) {
+        result.putIfAbsent(rule.categoryClientId, () => []).add(rule);
+      }
+    }
+    return result;
+  }
+
+  static Map<String, List<MoneyPipelineDraft>> _indexPipelines(
+    List<MoneyPipelineDraft> pipelines,
+  ) {
+    final result = <String, List<MoneyPipelineDraft>>{};
+    for (final pipeline in pipelines) {
+      result.putIfAbsent(pipeline.categoryClientId, () => []).add(pipeline);
+    }
+    return result;
+  }
+
+  static Map<String, Set<String>> _indexRowInputs(
+    CatalogConfiguration configuration,
+  ) {
+    final result = <String, Set<String>>{};
+    Set<String> inputs(String categoryId) =>
+        result.putIfAbsent(categoryId, () => <String>{});
+    for (final category in configuration.categories) {
+      inputs(category.clientId).addAll(
+        category.fields
+            .where((field) => field.totalMode != null)
+            .map((field) => field.code),
+      );
+    }
+    for (final rule in configuration.rules) {
+      if (rule.eventType == 'variant_calculation') continue;
+      final codes = inputs(rule.categoryClientId);
+      for (final condition in rule.conditions) {
+        codes.add(condition.fieldCode);
+        if (condition.comparisonFieldCode case final comparison?) {
+          codes.add(comparison);
+        }
+      }
+      for (final action in rule.actions) {
+        if (action.targetFieldCode case final target?) codes.add(target);
+        if (action.sourceFieldCode case final source?) codes.add(source);
+        if (action.quantityFieldCode case final quantity?) codes.add(quantity);
+        if (action.formula case final formula?) {
+          codes.addAll(
+            formula.tokens
+                .where((token) => token.tokenType == 'field')
+                .map((token) => token.fieldCode)
+                .whereType<String>(),
+          );
+        }
+      }
+    }
+    for (final pipeline in configuration.moneyPipelines) {
+      final codes = inputs(pipeline.categoryClientId);
+      codes.addAll([
+        pipeline.basePriceFieldCode,
+        pipeline.resultFieldCode,
+        ?pipeline.manualPriceFieldCode,
+        ?pipeline.markupFieldCode,
+        ?pipeline.discountFieldCode,
+        ?pipeline.quantityFieldCode,
+      ]);
+    }
+    return result;
+  }
 
   void calculateDocument(
     QuoteDraft document, {
     QuotePositionDraft? changedPosition,
+    QuoteVariantDraft? changedVariant,
+    QuoteCategoryDraft? changedCategory,
     String? changedFieldCode,
     bool saving = false,
     bool refreshFormulas = false,
@@ -29,39 +136,64 @@ final class QuoteConfiguredCalculationEngine {
     void Function(QuoteVariantDraft variant, double total)?
     onVariantTotalChanged,
   }) {
+    void calculateRow(
+      QuoteCategoryDraft category,
+      QuotePositionDraft position,
+    ) {
+      final configuredCategory = _categoriesById[category.catalogCategoryId];
+      try {
+        _calculatePosition(
+          configuredCategory?.clientId,
+          position,
+          changedFieldCode: identical(position, changedPosition)
+              ? changedFieldCode
+              : null,
+          saving: saving,
+          refreshFormulas: refreshFormulas,
+        );
+      } on FormatException catch (error) {
+        var message = error.message;
+        for (final field in configuredCategory?.fields ?? <CatalogField>[]) {
+          message = message.replaceAll('«${field.code}»', '«${field.label}»');
+        }
+        final details = 'Позиция «${position.name}»: $message';
+        if (error is MissingCalculationValueException) {
+          throw MissingCalculationValueException(details);
+        }
+        throw FormatException(details);
+      }
+    }
+
     for (final type in document.proposalTypes) {
       for (final variant in type.variants) {
+        if (changedPosition != null &&
+            changedVariant != null &&
+            !identical(variant, changedVariant)) {
+          continue;
+        }
+        if (changedPosition != null &&
+            changedVariant == null &&
+            !variant.categories.any(
+              (category) => category.sections.any(
+                (section) => section.positions.contains(changedPosition),
+              ),
+            )) {
+          continue;
+        }
         final previousTotal = variant.lastRuleTotal;
-        for (final category in variant.categories) {
-          final configuredCategory = configuration.categories
-              .where((item) => item.id == category.catalogCategoryId)
-              .firstOrNull;
-          for (final section in category.sections) {
-            for (final position in section.positions) {
-              try {
-                _calculatePosition(
-                  configuredCategory?.clientId,
-                  position,
-                  changedFieldCode: identical(position, changedPosition)
-                      ? changedFieldCode
-                      : null,
-                  saving: saving,
-                  refreshFormulas: refreshFormulas,
-                );
-              } on FormatException catch (error) {
-                var message = error.message;
-                for (final field
-                    in configuredCategory?.fields ?? <CatalogField>[]) {
-                  message = message.replaceAll(
-                    '«${field.code}»',
-                    '«${field.label}»',
-                  );
+        if (changedPosition != null &&
+            changedVariant != null &&
+            changedCategory != null) {
+          calculateRow(changedCategory, changedPosition);
+        } else {
+          for (final category in variant.categories) {
+            for (final section in category.sections) {
+              for (final position in section.positions) {
+                if (changedPosition != null &&
+                    !identical(position, changedPosition)) {
+                  continue;
                 }
-                final details = 'Позиция «${position.name}»: $message';
-                if (error is MissingCalculationValueException) {
-                  throw MissingCalculationValueException(details);
-                }
-                throw FormatException(details);
+                calculateRow(category, position);
               }
             }
           }
@@ -71,19 +203,24 @@ final class QuoteConfiguredCalculationEngine {
                 (previousTotal != null && total != previousTotal)) &&
             !identical(variant, consumedVariant)) {
           for (final category in variant.categories) {
-            final clientId = configuration.categories
-                .where((item) => item.id == category.catalogCategoryId)
-                .firstOrNull
-                ?.clientId;
+            final clientId =
+                _categoriesById[category.catalogCategoryId]?.clientId;
             if (clientId == null ||
                 !_rulesFor(
                   clientId,
                 ).any((rule) => rule.eventType == 'variant_calculation')) {
               continue;
             }
+            final independentActions = _independentVariantActions(clientId);
             for (final position in category.sections.expand(
               (item) => item.positions,
             )) {
+              if (independentActions != null) {
+                for (final action in independentActions) {
+                  position.values[action.targetFieldCode!] = total;
+                }
+                continue;
+              }
               final before = _valuesOf(position);
               _calculatePosition(
                 clientId,
@@ -95,9 +232,12 @@ final class QuoteConfiguredCalculationEngine {
               // Recalculate dependent row formulas after an event changes their inputs.
               // Do not re-run row actions for purely visual variant events.
               final after = _valuesOf(position);
+              final rowInputs =
+                  _rowInputsByCategory[clientId] ?? const <String>{};
               if (after.entries.any(
                 (entry) =>
                     !entry.key.startsWith('_') &&
+                    rowInputs.contains(entry.key) &&
                     before[entry.key] != entry.value,
               )) {
                 _calculatePosition(clientId, position);
@@ -118,10 +258,9 @@ final class QuoteConfiguredCalculationEngine {
     for (final type in document.proposalTypes) {
       for (final variant in type.variants) {
         for (final category in variant.categories) {
-          final categoryClientId = configuration.categories
-              .where((item) => item.id == category.catalogCategoryId)
-              .firstOrNull
-              ?.clientId;
+          final categoryClientId = clientIdForCategory(
+            category.catalogCategoryId,
+          );
           if (categoryClientId == null) continue;
           for (final position in category.sections.expand(
             (item) => item.positions,
@@ -178,18 +317,14 @@ final class QuoteConfiguredCalculationEngine {
       position.values.remove(_activeHighlightRulesKey);
       return;
     }
-    final categoryFields = configuration.categories
-        .where((category) => category.clientId == categoryClientId)
-        .expand((category) => category.fields)
-        .toList();
+    final categoryFields =
+        _fieldsByCategory[categoryClientId] ?? <CatalogField>[];
     final fieldTotalsConfigured = categoryFields.any(
       (field) => field.totalMode != null,
     );
     final values = _valuesOf(position);
     if (variantTotal != null) values['variant_total'] = variantTotal;
-    final percentFields = configuration.categories
-        .where((category) => category.clientId == categoryClientId)
-        .expand((category) => category.fields)
+    final percentFields = categoryFields
         .where((field) => field.fieldType == 'percent')
         .map((field) => field.code)
         .toSet();
@@ -357,9 +492,8 @@ final class QuoteConfiguredCalculationEngine {
 
     // Pipeline outputs must not become the next calculation's system inputs.
     systemInputs.addAll(values);
-    final pipelines = configuration.moneyPipelines
-        .where((item) => item.categoryClientId == categoryClientId)
-        .toList(growable: false);
+    final pipelines =
+        _pipelinesByCategory[categoryClientId] ?? <MoneyPipelineDraft>[];
     double? total = pipelines.isEmpty ? null : 0;
     for (final pipeline in pipelines) {
       calculations.add((
@@ -554,17 +688,45 @@ final class QuoteConfiguredCalculationEngine {
   }
 
   Iterable<CalculationRuleDraft> _rulesFor(String categoryClientId) =>
-      configuration.rules.where(
-        (rule) =>
-            rule.isEnabled &&
-            rule.categoryClientId == categoryClientId &&
-            const {
-              'field_changed',
-              'row_calculation',
-              'card_saving',
-              'variant_calculation',
-            }.contains(rule.eventType),
-      );
+      (_rulesByCategory[categoryClientId] ?? const <CalculationRuleDraft>[])
+          .where((rule) => rule.isEnabled);
+
+  List<RuleActionDraft>? _independentVariantActions(String categoryClientId) {
+    const systemFields = {
+      'group',
+      'name',
+      'marking',
+      'unit',
+      'quantity',
+      'purchase_price',
+      'base_price',
+      'markup_value',
+      'discount_value',
+      'excluded_from_calc',
+      'line_total',
+      'variant_total',
+    };
+    final rowInputs =
+        _rowInputsByCategory[categoryClientId] ?? const <String>{};
+    final actions = <RuleActionDraft>[];
+    for (final rule in _rulesFor(categoryClientId)) {
+      if (rule.eventType != 'variant_calculation') continue;
+      if (rule.conditions.isNotEmpty) return null;
+      for (final action in rule.actions) {
+        final target = action.targetFieldCode;
+        if (action.actionType != 'set_field' ||
+            action.sourceFieldCode != 'variant_total' ||
+            target == null ||
+            target.startsWith('_') ||
+            systemFields.contains(target) ||
+            rowInputs.contains(target)) {
+          return null;
+        }
+        actions.add(action);
+      }
+    }
+    return actions;
+  }
 
   static Set<String> _effectRuleIds(Map<String, dynamic> values) =>
       values['_active_effect_rules'] is List
@@ -710,8 +872,4 @@ final class QuoteConfiguredCalculationEngine {
     final factor = math.pow(10, places).toDouble();
     return (value * factor).round() / factor;
   }
-}
-
-extension<T> on Iterable<T> {
-  T? get firstOrNull => isEmpty ? null : first;
 }

@@ -22,8 +22,9 @@ final class OrderLocalDraft {
   }
 
   Future<void> write(OrderDocument order) {
-    final snapshot = jsonEncode(order.toSnapshot());
-    return _enqueue(() => storage.write(key: key, value: snapshot));
+    return _enqueue(
+      () => storage.write(key: key, value: jsonEncode(order.toSnapshot())),
+    );
   }
 
   Future<void> clear() => _enqueue(() => storage.delete(key: key));

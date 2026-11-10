@@ -539,6 +539,7 @@ internal sealed class PostgresOrderService(
         var boardFields = await ReadBoardFieldsAsync(connection, transaction, boardId, token);
         await ExecuteAsync(connection, transaction,
             "DELETE FROM order_categories WHERE order_id = @order_id", token, ("order_id", orderId));
+        var positionInserts = new PostgresPositionInsertBatch(connection, transaction);
         var categoryList = categories ?? [];
         for (var categoryIndex = 0; categoryIndex < categoryList.Count; categoryIndex++)
         {
@@ -581,7 +582,7 @@ internal sealed class PostgresOrderService(
                         connection, transaction, actorUserId, position.CatalogItemId,
                         category.CatalogCategoryId, section.CatalogSectionId,
                         position.Name, position.Marking, position.Unit, position.Values, null, token);
-                    await ExecuteAsync(connection, transaction, """
+                    await positionInserts.AddAsync("""
                         INSERT INTO order_positions
                             (id, order_section_id, catalog_item_id, name_snapshot, marking_snapshot,
                              unit_snapshot, quantity, is_reorder, source_key, source_quantity,
@@ -602,6 +603,7 @@ internal sealed class PostgresOrderService(
                 }
             }
         }
+        await positionInserts.FlushAsync(token);
     }
 
     private static async Task<Guid> RequireOrderIdAsync(
