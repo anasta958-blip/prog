@@ -17,6 +17,7 @@ final class OrderController extends QuoteController {
     OrderGateway? orderGateway,
     super.catalogGateway,
     super.companyGateway,
+    super.calculationRealtime,
   }) : _orderGateway = orderGateway ?? OrderApi(config),
        _ownsOrderGateway = orderGateway == null,
        super(quoteGateway: _NoQuoteGateway.instance);
@@ -29,6 +30,20 @@ final class OrderController extends QuoteController {
 
   /// Загруженная или создаваемая комплектация.
   OrderDocument? order;
+  @override
+  Future<String?> _fetchCalculationVersion(
+    String boardId,
+    String cardId,
+  ) async => (await _authorized(
+    (token) => _orderGateway.getOrder(token, boardId, cardId),
+  )).currentCalculationVersion;
+
+  @override
+  void _setCurrentCalculationVersion(String version) {
+    super._setCurrentCalculationVersion(version);
+    order?.currentCalculationVersion = version;
+  }
+
   @override
   bool get needsRecalculation => order?.needsRecalculation ?? false;
   KanbanBoard? _board;
@@ -219,6 +234,7 @@ final class OrderController extends QuoteController {
       }
       reorderActive = _isReorderColumn(board, card?.columnId);
       _applyOrder(order!);
+      _startCalculationUpdates(board.id);
     } on ApiException catch (exception) {
       error = exception.message;
     } on Object {
@@ -394,10 +410,8 @@ final class OrderController extends QuoteController {
   Future<OrderCalculationPreview?> previewOrderCalculation() async {
     final board = _board;
     final cardId = persistedCardId;
-    if (board == null || cardId == null || calculationBusy || dirty) {
-      error = dirty
-          ? 'Сначала отмените локальные изменения.'
-          : 'Комплектация не сохранена.';
+    if (board == null || cardId == null || calculationBusy || saving) {
+      error = 'Комплектация не сохранена или выполняется сохранение.';
       notifyListeners();
       return null;
     }
@@ -405,9 +419,52 @@ final class OrderController extends QuoteController {
     error = null;
     notifyListeners();
     try {
-      return await _authorized(
-        (token) => _orderGateway.previewCalculation(token, board.id, cardId),
+      final candidate = await _prepareCalculation(board.id);
+      final originals = {for (final row in _documentRows(draft!)) row.id: row};
+      final changes = <OrderCalculationFieldChange>[];
+      var changed = 0;
+      for (final row in _documentRows(candidate)) {
+        final old = originals[row.id]!;
+        final before = {
+          ...old.values,
+          'quantity': old.quantity,
+          'name': old.name,
+          'marking': old.marking,
+          'unit': old.unit,
+        };
+        final after = {
+          ...row.values,
+          'quantity': row.quantity,
+          'name': row.name,
+          'marking': row.marking,
+          'unit': row.unit,
+        };
+        final start = changes.length;
+        for (final code in {...before.keys, ...after.keys}) {
+          if (code.startsWith('_') ||
+              jsonEncode(before[code]) == jsonEncode(after[code])) {
+            continue;
+          }
+          changes.add(
+            OrderCalculationFieldChange(
+              positionName: row.name,
+              fieldCode: code,
+              savedValue: before[code]?.toString(),
+              newValue: after[code]?.toString(),
+            ),
+          );
+        }
+        if (changes.length != start) changed++;
+      }
+      return OrderCalculationPreview(
+        currentCalculationVersion: _candidateVersion!,
+        orderUpdatedAt: '',
+        changedPositions: changed,
+        changes: changes,
       );
+    } on FormatException catch (exception) {
+      error = exception.message;
+      return null;
     } on ApiException catch (exception) {
       error = exception.message;
       return null;
@@ -423,21 +480,22 @@ final class OrderController extends QuoteController {
   Future<bool> applyOrderCalculation(OrderCalculationPreview preview) async {
     final board = _board;
     final cardId = persistedCardId;
-    if (board == null || cardId == null || calculationBusy || dirty) {
+    if (board == null || cardId == null || calculationBusy || saving) {
       return false;
     }
     calculationBusy = true;
     error = null;
     notifyListeners();
     try {
-      final saved = await _authorized(
-        (token) =>
-            _orderGateway.applyCalculation(token, board.id, cardId, preview),
+      await _applyCalculationCandidate(
+        board.id,
+        preview.currentCalculationVersion,
       );
-      _applyOrder(saved);
-      dirty = false;
-      successMessage = 'Расчёт по новым правилам сохранён';
+      order?.calculationVersion = preview.currentCalculationVersion;
       return true;
+    } on FormatException catch (exception) {
+      error = exception.message;
+      return false;
     } on ApiException catch (exception) {
       error = exception.message;
       return false;

@@ -256,11 +256,15 @@ final class _OrderEditorPageState extends State<OrderEditorPage> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                const Text(
+                  'Пересчёт учитывает текущий черновик. После применения результата нажмите «Сохранить», чтобы записать изменения на сервер.',
+                ),
+                const SizedBox(height: 12),
                 Text('Изменится позиций: ${preview.changedPositions}'),
                 const SizedBox(height: 12),
                 if (preview.changes.isEmpty)
                   const Text(
-                    'Значения полей не изменятся. Подтверждение сохранит новую версию правил.',
+                    'Значения полей не изменятся. Новая версия правил будет применена к черновику.',
                   ),
                 for (final change in preview.changes)
                   Padding(
@@ -281,7 +285,7 @@ final class _OrderEditorPageState extends State<OrderEditorPage> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Применить и сохранить'),
+            child: const Text('Применить к черновику'),
           ),
         ],
       ),

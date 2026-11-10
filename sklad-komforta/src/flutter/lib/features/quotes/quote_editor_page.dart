@@ -231,7 +231,7 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Сравните сохранённые и новые итоги вариантов. Изменения будут записаны только после подтверждения.',
+                  'Сравните текущий черновик и расчёт по новым правилам. Подтверждение применит результат к черновику без потери ваших правок. Для записи на сервер затем нажмите «Сохранить».',
                 ),
                 const SizedBox(height: 12),
                 for (final change in preview.changes)
@@ -264,7 +264,7 @@ final class _QuoteEditorPageState extends State<QuoteEditorPage> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Применить и сохранить'),
+            child: const Text('Применить к черновику'),
           ),
         ],
       ),
@@ -4833,15 +4833,12 @@ final class _CalculationBanner extends StatelessWidget {
           'Расчётные правила изменились. Сохранённые суммы показаны без изменений.',
         ),
         FilledButton.icon(
-          onPressed: busy || hasLocalChanges ? null : onPreview,
+          onPressed: busy ? null : onPreview,
           icon: const Icon(Icons.calculate_outlined),
           label: const Text('Посмотреть новый расчёт'),
         ),
         if (hasLocalChanges)
-          TextButton(
-            onPressed: busy ? null : onDiscard,
-            child: const Text('Отменить локальные изменения'),
-          ),
+          const Text('Пересчёт учитывает несохранённые изменения.'),
       ],
     ),
   );

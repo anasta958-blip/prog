@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/core/models/workflow_specialization.dart';
 import 'package:sklad_komforta_app/core/network/api_exception.dart';
+import 'package:sklad_komforta_app/core/network/realtime_client.dart';
 import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_api.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_models.dart';
@@ -34,13 +35,100 @@ final class QuoteController extends ChangeNotifier {
     QuoteGateway? quoteGateway,
     CatalogGateway? catalogGateway,
     CompanyWorkspaceGateway? companyGateway,
+    RealtimeSource? calculationRealtime,
   }) : _config = config,
        _quoteGateway = quoteGateway ?? QuoteApi(config),
        _catalogGateway = catalogGateway ?? CatalogApi(config),
        _companyGateway = companyGateway ?? CompanyApi(config),
        _ownsQuoteGateway = quoteGateway == null,
        _ownsCatalogGateway = catalogGateway == null,
-       _ownsCompanyGateway = companyGateway == null;
+       _ownsCompanyGateway = companyGateway == null,
+       _calculationRealtime = calculationRealtime,
+       _ownsCalculationRealtime = calculationRealtime == null,
+       _enableCalculationRealtime =
+           calculationRealtime != null ||
+           (catalogGateway == null && companyGateway == null);
+
+  RealtimeSource? _calculationRealtime;
+  final bool _ownsCalculationRealtime;
+  final bool _enableCalculationRealtime;
+  StreamSubscription<RealtimeEvent>? _calculationSubscription;
+  Timer? _calculationVersionTimer;
+  String? _calculationBoardId;
+  bool _checkingCalculationVersion = false;
+  bool _disposed = false;
+
+  void _startCalculationUpdates(String boardId) {
+    _calculationBoardId = boardId;
+    if (!_enableCalculationRealtime ||
+        _disposed ||
+        _calculationSubscription != null) {
+      return;
+    }
+    final source = _calculationRealtime ??= RealtimeClient(
+      config: _config,
+      topic: 'catalog',
+      ticketPath: '/catalog/realtime-ticket',
+      authorized: _auth.executeAuthorized,
+    );
+    _calculationSubscription = source.events.listen((event) {
+      if (event.kind == RealtimeEvent.configuration ||
+          event.kind == RealtimeEvent.resync) {
+        _scheduleCalculationVersionCheck();
+      }
+    });
+    source.start();
+    _scheduleCalculationVersionCheck();
+  }
+
+  void _scheduleCalculationVersionCheck([
+    Duration delay = const Duration(milliseconds: 300),
+  ]) {
+    if (_disposed) return;
+    _calculationVersionTimer?.cancel();
+    _calculationVersionTimer = Timer(delay, _refreshCalculationVersion);
+  }
+
+  Future<String?> _fetchCalculationVersion(
+    String boardId,
+    String cardId,
+  ) async => (await _authorized(
+    (token) => _quoteGateway.getQuote(token, boardId, cardId),
+  )).currentCalculationVersion;
+
+  void _setCurrentCalculationVersion(String version) {
+    draft?.currentCalculationVersion = version;
+  }
+
+  Future<void> _refreshCalculationVersion() async {
+    if (_disposed) return;
+    if (loading || saving || calculationBusy || _checkingCalculationVersion) {
+      _scheduleCalculationVersionCheck();
+      return;
+    }
+    final document = draft;
+    final boardId = _calculationBoardId;
+    final cardId = persistedCardId ?? document?.cardId;
+    if (document?.id == null || boardId == null || cardId == null) return;
+    _checkingCalculationVersion = true;
+    try {
+      final version = await _fetchCalculationVersion(boardId, cardId);
+      if (_disposed) return;
+      if (!identical(draft, document) || saving || calculationBusy) {
+        _scheduleCalculationVersionCheck();
+        return;
+      }
+      if (version != null && document!.currentCalculationVersion != version) {
+        _setCurrentCalculationVersion(version);
+        notifyListeners();
+      }
+    } on Object {
+      // A background connectivity failure must not replace editor validation messages.
+      _scheduleCalculationVersionCheck(const Duration(seconds: 5));
+    } finally {
+      _checkingCalculationVersion = false;
+    }
+  }
 
   final AuthController _auth;
   final AppConfig _config;
@@ -226,6 +314,7 @@ final class QuoteController extends ChangeNotifier {
       _synchronizeExecutorVatRates(repairVariants: true);
       _repairActiveSelection();
       if (!needsRecalculation) _recalculateConfiguredRules();
+      _startCalculationUpdates(board.id);
     } on ApiException catch (exception) {
       error = exception.message;
     } on Object {
@@ -1620,12 +1709,106 @@ final class QuoteController extends ChangeNotifier {
     }
   }
 
+  QuoteDraft? _calculationCandidate;
+  CatalogConfiguration? _candidateConfiguration;
+  String? _candidateInput;
+  String? _candidateVersion;
+
+  Iterable<QuotePositionDraft> _documentRows(QuoteDraft document) => document
+      .proposalTypes
+      .expand((type) => type.variants)
+      .expand((variant) => variant.positions);
+
+  Future<QuoteDraft> _prepareCalculation(String boardId) async {
+    _calculationCandidate = null;
+    final document = draft!;
+    final input = jsonEncode(document.toJson());
+    final cardId = persistedCardId!;
+    final version = await _fetchCalculationVersion(boardId, cardId);
+    final configuration = await _authorized(_catalogGateway.getConfiguration);
+    if (version == null ||
+        version != await _fetchCalculationVersion(boardId, cardId)) {
+      throw const FormatException(
+        'Правила снова изменились. Повторите предпросмотр.',
+      );
+    }
+    final candidate = QuoteDraft.fromJson(
+      jsonDecode(input) as Map<String, dynamic>,
+    );
+    _removeBlankEntryRows(candidate);
+    QuoteConfiguredCalculationEngine(
+      configuration,
+    ).calculateDocument(candidate, saving: true, refreshFormulas: true);
+    if (!identical(draft, document) || jsonEncode(document.toJson()) != input) {
+      throw const FormatException(
+        'Документ изменился. Повторите предпросмотр.',
+      );
+    }
+    _candidateInput = input;
+    _candidateVersion = version;
+    _candidateConfiguration = configuration;
+    _calculationCandidate = candidate;
+    return candidate;
+  }
+
+  Future<bool> _applyCalculationCandidate(
+    String boardId,
+    String version,
+  ) async {
+    final candidate = _calculationCandidate;
+    final document = draft;
+    if (candidate == null ||
+        document == null ||
+        version != _candidateVersion ||
+        jsonEncode(document.toJson()) != _candidateInput) {
+      throw const FormatException(
+        'Черновик изменился. Повторите предпросмотр; ваши изменения сохранены в редакторе.',
+      );
+    }
+    if (version != await _fetchCalculationVersion(boardId, persistedCardId!)) {
+      throw const FormatException(
+        'Правила снова изменились. Повторите предпросмотр.',
+      );
+    }
+    if (!identical(draft, document) ||
+        jsonEncode(document.toJson()) != _candidateInput) {
+      throw const FormatException(
+        'Черновик изменился. Повторите предпросмотр.',
+      );
+    }
+    final rows = {for (final row in _documentRows(candidate)) row.id: row};
+    for (final type in document.proposalTypes) {
+      for (final variant in type.variants) {
+        for (final category in variant.categories) {
+          for (final section in category.sections) {
+            for (var index = 0; index < section.positions.length; index++) {
+              final original = section.positions[index];
+              final replacement = rows[original.id];
+              if (replacement != null) {
+                replacement.selected = original.selected;
+                section.positions[index] = replacement;
+              }
+            }
+          }
+        }
+        variant.lastRuleTotal = variant.totalWithVat;
+      }
+    }
+    catalog = _candidateConfiguration;
+    document.calculationVersion = version;
+    _setCurrentCalculationVersion(version);
+    _calculationCandidate = null;
+    _calculationError = null;
+    dirty = true;
+    successMessage =
+        'Новый расчёт применён к черновику. Сохраните документ, когда закончите работу.';
+    return true;
+  }
+
   Future<QuoteCalculationPreview?> previewCalculation(KanbanBoard board) async {
     final cardId = persistedCardId;
-    if (cardId == null || calculationBusy || dirty) {
-      error = dirty
-          ? 'Сначала сохраните локальные изменения.'
-          : 'Предложение не сохранено.';
+    if (cardId == null || calculationBusy || saving) {
+      error = 'Предложение не сохранено или выполняется сохранение.';
       notifyListeners();
       return null;
     }
@@ -1633,9 +1816,35 @@ final class QuoteController extends ChangeNotifier {
     error = null;
     notifyListeners();
     try {
-      return await _authorized(
-        (token) => _quoteGateway.previewCalculation(token, board.id, cardId),
+      final candidate = await _prepareCalculation(board.id);
+      final originals = {
+        for (final type in draft!.proposalTypes)
+          for (final variant in type.variants) variant.id: variant,
+      };
+      return QuoteCalculationPreview(
+        currentCalculationVersion: _candidateVersion!,
+        quoteUpdatedAt: draft!.updatedAt?.toIso8601String() ?? '',
+        changes: [
+          for (final type in candidate.proposalTypes)
+            for (final variant in type.variants)
+              QuoteCalculationChange(
+                proposalTypeName: type.name,
+                variantName: variant.name,
+                savedTotal: originals[variant.id]!.totalWithVat,
+                newTotal: variant.totalWithVat,
+                changedPositions: variant.positions.where((row) {
+                  final old = originals[variant.id]!.positions.firstWhere(
+                    (item) => item.id == row.id,
+                  );
+                  return old.lineTotal != row.lineTotal ||
+                      jsonEncode(old.toJson()) != jsonEncode(row.toJson());
+                }).length,
+              ),
+        ],
       );
+    } on FormatException catch (exception) {
+      error = exception.message;
+      return null;
     } on ApiException catch (exception) {
       error = exception.message;
       return null;
@@ -1679,20 +1888,18 @@ final class QuoteController extends ChangeNotifier {
     QuoteCalculationPreview preview,
   ) async {
     final cardId = persistedCardId;
-    if (cardId == null || calculationBusy || dirty) return false;
+    if (cardId == null || calculationBusy || saving) return false;
     calculationBusy = true;
     error = null;
     notifyListeners();
     try {
-      draft = await _authorized(
-        (token) =>
-            _quoteGateway.applyCalculation(token, board.id, cardId, preview),
+      return await _applyCalculationCandidate(
+        board.id,
+        preview.currentCalculationVersion,
       );
-      dirty = false;
-      _repairActiveSelection();
-      if (!needsRecalculation) _recalculateConfiguredRules();
-      successMessage = 'Расчёт по новым правилам сохранён';
-      return true;
+    } on FormatException catch (exception) {
+      error = exception.message;
+      return false;
     } on ApiException catch (exception) {
       error = exception.message;
       return false;
@@ -1812,6 +2019,10 @@ final class QuoteController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
+    _calculationVersionTimer?.cancel();
+    unawaited(_calculationSubscription?.cancel());
+    if (_ownsCalculationRealtime) unawaited(_calculationRealtime?.close());
     _successMessageTimer?.cancel();
     if (_ownsQuoteGateway) _quoteGateway.close();
     if (_ownsCatalogGateway) _catalogGateway.close();

@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'support/calculation_realtime.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -36,6 +37,51 @@ void main() {
     tokens: _MemoryTokenRepository(),
   )..accessToken = 'access-token';
 
+  testWidgets('realtime calculation warning preserves dirty order', (
+    tester,
+  ) async {
+    var version = 'v1';
+    final source = CalculationRealtime();
+    final auth = authorized();
+    final controller = OrderController(
+      config,
+      auth,
+      orderGateway: _MemoryOrderGateway(
+        json: () => {
+          ..._orderJson(),
+          'calculationVersion': 'v1',
+          'currentCalculationVersion': version,
+        },
+      ),
+      catalogGateway: _CatalogGateway(),
+      companyGateway: _CompanyGateway(),
+      calculationRealtime: source,
+    );
+    await controller.initializeOrder(board: _orderBoard, card: _card());
+    await tester.pump(const Duration(milliseconds: 350));
+    final document = controller.draft!;
+    final originalOrder = controller.order;
+    controller.updateDocument((draft) => draft.title = 'Несохранённый адрес');
+    version = 'v2';
+    source.emit('configuration');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(controller.needsRecalculation, isTrue);
+    expect(controller.draft, same(document));
+    expect(controller.order, same(originalOrder));
+    expect(document.title, 'Несохранённый адрес');
+    expect(controller.dirty, isTrue);
+    expect(controller.order!.calculationVersion, 'v1');
+    version = 'v3';
+    source.emit('resync');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(controller.order!.currentCalculationVersion, 'v3');
+    controller.dispose();
+    await source.close();
+    auth.dispose();
+  });
+
   test('устаревшая комплектация требует подтверждённого пересчёта', () async {
     final auth = authorized();
     final gateway = _MemoryOrderGateway(
@@ -64,6 +110,7 @@ void main() {
       changedPositions: 1,
       changes: [],
     );
+    controller.updateDocument((draft) => draft.title = 'Несохранённая работа');
     final preview = await controller.previewOrderCalculation();
     expect(preview, isNotNull);
     gateway.applyResponse = OrderDocument.fromJson({
@@ -73,6 +120,9 @@ void main() {
     });
     expect(await controller.applyOrderCalculation(preview!), isTrue);
     expect(controller.needsRecalculation, isFalse);
+    expect(controller.draft!.title, 'Несохранённая работа');
+    expect(controller.dirty, isTrue);
+    expect(gateway.saved, isNull);
   });
 
   testWidgets('редактор комплектации показывает сравнение и подтверждение', (
@@ -134,8 +184,8 @@ void main() {
     expect(find.textContaining('Расчётные правила изменились'), findsOneWidget);
     await tester.tap(find.text('Посмотреть новый расчёт'));
     await tester.pumpAndSettle();
-    expect(find.text('Изменится позиций: 1'), findsOneWidget);
-    await tester.tap(find.text('Применить и сохранить'));
+    expect(find.text('Изменится позиций: 0'), findsOneWidget);
+    await tester.tap(find.text('Применить к черновику'));
     await tester.pumpAndSettle();
     expect(controller.needsRecalculation, isFalse);
     await tester.pump(const Duration(seconds: 6));

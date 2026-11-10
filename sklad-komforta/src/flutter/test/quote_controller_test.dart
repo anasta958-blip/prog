@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'support/calculation_realtime.dart';
 import 'package:sklad_komforta_app/features/company/company_api.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
 import 'package:flutter/services.dart';
@@ -44,6 +45,71 @@ void main() {
     environment: 'test',
   );
 
+  for (final kind in QuoteKind.values) {
+    testWidgets('realtime calculation warning preserves dirty $kind', (
+      tester,
+    ) async {
+      final auth = AuthController(
+        config,
+        api: _NoopAuthGateway(),
+        tokens: _MemoryTokenRepository(),
+      )..accessToken = 'token';
+      final source = CalculationRealtime();
+      final gateway = _RecordingQuoteGateway();
+      final controller = QuoteController(
+        config,
+        auth,
+        quoteGateway: gateway,
+        catalogGateway: _CatalogGatewayWithRelations(),
+        companyGateway: _CreateCustomerGateway(),
+        calculationRealtime: source,
+      );
+      await controller.initialize(board: _quoteBoard, createKind: kind);
+      final document = controller.draft!;
+      document.id = 'quote';
+      document.calculationVersion = 'v1';
+      document.currentCalculationVersion = 'v1';
+      controller.persistedCardId = 'card';
+      gateway.getResponse = QuoteDraft(
+        id: 'quote',
+        kind: kind,
+        title: 'Server title',
+        clientId: '',
+        executorCompanyId: '',
+        selectionMode: 'variant',
+        proposalTypes: [],
+        calculationVersion: 'v1',
+        currentCalculationVersion: 'v1',
+      );
+      await tester.pump(const Duration(milliseconds: 350));
+      controller.updateDocument(
+        (draft) => draft.title = 'Несохранённое название',
+      );
+      final types = document.proposalTypes;
+      gateway.getResponse!.currentCalculationVersion = 'v2';
+      source.emit('configuration');
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(controller.needsRecalculation, isTrue);
+      expect(controller.draft, same(document));
+      expect(document.proposalTypes, same(types));
+      expect(document.title, 'Несохранённое название');
+      expect(controller.dirty, isTrue);
+      expect(document.calculationVersion, 'v1');
+      gateway.getResponse!.currentCalculationVersion = 'v3';
+      source.emit('resync');
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(document.currentCalculationVersion, 'v3');
+      controller.dispose();
+      source.emit('configuration');
+      await tester.pump(const Duration(seconds: 1));
+      expect(document.currentCalculationVersion, 'v3');
+      await source.close();
+      auth.dispose();
+    });
+  }
+
   test(
     'устаревший расчёт блокирует сохранение до подтверждённого применения',
     () async {
@@ -53,19 +119,25 @@ void main() {
         tokens: _MemoryTokenRepository(),
       )..accessToken = 'access-token';
       final gateway = _RecordingQuoteGateway();
-      final controller = QuoteController(config, auth, quoteGateway: gateway)
-        ..persistedCardId = 'card-id'
-        ..draft = QuoteDraft(
-          id: 'quote-id',
-          kind: QuoteKind.quote,
-          title: 'КП',
-          clientId: 'client',
-          executorCompanyId: 'executor',
-          selectionMode: 'variant',
-          proposalTypes: [],
-          calculationVersion: 'old',
-          currentCalculationVersion: 'new',
-        );
+      final controller =
+          QuoteController(
+              config,
+              auth,
+              quoteGateway: gateway,
+              catalogGateway: _CatalogGatewayWithRelations(),
+            )
+            ..persistedCardId = 'card-id'
+            ..draft = QuoteDraft(
+              id: 'quote-id',
+              kind: QuoteKind.quote,
+              title: 'КП',
+              clientId: 'client',
+              executorCompanyId: 'executor',
+              selectionMode: 'variant',
+              proposalTypes: [],
+              calculationVersion: 'old',
+              currentCalculationVersion: 'new',
+            );
       gateway
         ..previewResponse = const QuoteCalculationPreview(
           currentCalculationVersion: 'new',
@@ -87,13 +159,159 @@ void main() {
       expect(controller.needsRecalculation, isTrue);
       expect(await controller.save(board: _quoteBoard), isFalse);
       expect(gateway.savedDraft, isNull);
+      gateway.getResponse = gateway.applyResponse;
+      controller.updateDocument(
+        (draft) => draft.title = 'Несохранённая работа',
+      );
       final preview = await controller.previewCalculation(_quoteBoard);
       expect(preview?.currentCalculationVersion, 'new');
       expect(await controller.applyCalculation(_quoteBoard, preview!), isTrue);
       expect(controller.needsRecalculation, isFalse);
+      expect(controller.dirty, isTrue);
+      expect(controller.draft!.title, 'Несохранённая работа');
+      expect(gateway.savedDraft, isNull);
 
       controller.dispose();
       auth.dispose();
+    },
+  );
+
+  test(
+    'fresh formula previews dirty rows and protects subsequent edits',
+    () async {
+      final auth = AuthController(
+        config,
+        api: _NoopAuthGateway(),
+        tokens: _MemoryTokenRepository(),
+      )..accessToken = 'token';
+      final gateway = _RecordingQuoteGateway();
+      final catalog = _CatalogGatewayWithRelations()
+        ..configuration = CatalogConfiguration(
+          categories: _configuration.categories,
+          dictionaries: [],
+          dependencies: [],
+          rules: [
+            CalculationRuleDraft(
+              clientId: 'formula',
+              name: 'Formula',
+              categoryClientId: 'equipment',
+              eventType: 'field_changed',
+              eventFieldCode: 'quantity',
+              isEnabled: true,
+              conditions: [],
+              actions: [
+                RuleActionDraft(
+                  actionType: 'calculate_field',
+                  targetFieldCode: 'base_price',
+                  formula: FormulaDraft(
+                    tokens: [
+                      FormulaTokenDraft(
+                        tokenType: 'constant',
+                        constantValue: 25,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        );
+      final controller = QuoteController(
+        config,
+        auth,
+        quoteGateway: gateway,
+        catalogGateway: catalog,
+      );
+      addTearDown(controller.dispose);
+      addTearDown(auth.dispose);
+      final document = QuoteDraft.fromJson({
+        'id': 'quote',
+        'quoteKind': 'quote',
+        'title': 'Manual title',
+        'clientId': 'client',
+        'executorCompanyId': 'executor',
+        'selectionMode': 'variant',
+        'calculationVersion': 'old',
+        'currentCalculationVersion': 'new',
+        'proposalTypes': [
+          {
+            'id': 'type',
+            'name': 'Type',
+            'variants': [
+              {
+                'id': 'variant',
+                'name': 'Variant',
+                'categories': [
+                  {
+                    'id': 'category',
+                    'catalogCategoryId': _equipmentCategory.id,
+                    'name': 'Category',
+                    'sections': [
+                      {
+                        'id': 'section',
+                        'name': 'Section',
+                        'positions': [
+                          {
+                            'id': 'row',
+                            'name': 'Manual item',
+                            'quantity': 3,
+                            'basePrice': 10,
+                            'lineTotal': 30,
+                            'values': {'note': 'Manual notes'},
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+      controller
+        ..draft = document
+        ..persistedCardId = 'card'
+        ..dirty = true;
+      gateway.getResponse = QuoteDraft.fromJson(document.toJson())
+        ..currentCalculationVersion = 'new';
+      final preview = await controller.previewCalculation(_quoteBoard);
+      expect(preview, isNotNull, reason: controller.error);
+      expect(preview!.changes.single.savedTotal, 30);
+      expect(preview.changes.single.newTotal, 75);
+      expect(preview.changes.single.changedPositions, 1);
+      expect(
+        document
+            .proposalTypes
+            .single
+            .variants
+            .single
+            .positions
+            .single
+            .basePrice,
+        10,
+      );
+      document.title = 'More work after preview';
+      expect(await controller.applyCalculation(_quoteBoard, preview), isFalse);
+      expect(document.title, 'More work after preview');
+      final updated = await controller.previewCalculation(_quoteBoard);
+      gateway.getResponse!.currentCalculationVersion = 'newer';
+      expect(await controller.applyCalculation(_quoteBoard, updated!), isFalse);
+      gateway.getResponse!.currentCalculationVersion = 'new';
+      final confirmed = await controller.previewCalculation(_quoteBoard);
+      expect(
+        await controller.applyCalculation(_quoteBoard, confirmed!),
+        isTrue,
+      );
+      final row =
+          document.proposalTypes.single.variants.single.positions.single;
+      expect(row.manualPrice ?? row.basePrice, 25);
+      expect(row.lineTotal, 75);
+      expect(row.quantity, 3);
+      expect(row.values['note'], 'Manual notes');
+      expect(document.title, 'More work after preview');
+      expect(controller.dirty, isTrue);
+      expect(gateway.savedDraft, isNull);
     },
   );
 
@@ -2427,6 +2645,7 @@ QuoteDraft _twoTypeDraft() => QuoteDraft(
 );
 
 final class _RecordingQuoteGateway implements QuoteGateway {
+  QuoteDraft? getResponse;
   int downloadCalls = 0;
   String? lastBoardId;
   String? lastCardId;
@@ -2465,7 +2684,7 @@ final class _RecordingQuoteGateway implements QuoteGateway {
     String accessToken,
     String boardId,
     String cardId,
-  ) => throw UnimplementedError();
+  ) async => getResponse ?? (throw UnimplementedError());
 
   QuoteDraft? savedDraft;
   QuoteCalculationPreview? previewResponse;
@@ -2670,6 +2889,7 @@ const _workItemId = 'work-item';
 
 final class _CatalogGatewayWithRelations
     implements CatalogGateway, CatalogRelationGateway {
+  CatalogConfiguration configuration = _configuration;
   static String? lastSearch;
   static String? lastGroupId;
   @override
@@ -2692,7 +2912,7 @@ final class _CatalogGatewayWithRelations
 
   @override
   Future<CatalogConfiguration> getConfiguration(String accessToken) async =>
-      _configuration;
+      configuration;
 
   @override
   Future<CatalogItemPage> getItems({

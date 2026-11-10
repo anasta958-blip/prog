@@ -24,6 +24,7 @@ final class QuoteConfiguredCalculationEngine {
     QuotePositionDraft? changedPosition,
     String? changedFieldCode,
     bool saving = false,
+    bool refreshFormulas = false,
     QuoteVariantDraft? consumedVariant,
     void Function(QuoteVariantDraft variant, double total)?
     onVariantTotalChanged,
@@ -45,6 +46,7 @@ final class QuoteConfiguredCalculationEngine {
                       ? changedFieldCode
                       : null,
                   saving: saving,
+                  refreshFormulas: refreshFormulas,
                 );
               } on FormatException catch (error) {
                 var message = error.message;
@@ -65,8 +67,8 @@ final class QuoteConfiguredCalculationEngine {
           }
         }
         final total = variant.totalWithVat;
-        if (previousTotal != null &&
-            total != previousTotal &&
+        if ((refreshFormulas ||
+                (previousTotal != null && total != previousTotal)) &&
             !identical(variant, consumedVariant)) {
           for (final category in variant.categories) {
             final clientId = configuration.categories
@@ -88,6 +90,7 @@ final class QuoteConfiguredCalculationEngine {
                 position,
                 variantTotal: total,
                 variantEvent: true,
+                refreshFormulas: refreshFormulas,
               );
               // Recalculate dependent row formulas after an event changes their inputs.
               // Do not re-run row actions for purely visual variant events.
@@ -165,6 +168,7 @@ final class QuoteConfiguredCalculationEngine {
     bool saving = false,
     double? variantTotal,
     bool variantEvent = false,
+    bool refreshFormulas = false,
   }) {
     position.configuredLineTotal = null;
     position.hiddenFieldCodes.clear();
@@ -196,15 +200,31 @@ final class QuoteConfiguredCalculationEngine {
       }
     }
     final rules = _rulesFor(categoryClientId)
+        .map(
+          (rule) =>
+              refreshFormulas &&
+                  (rule.eventType == 'field_changed' ||
+                      rule.eventType == 'variant_calculation')
+              ? CalculationRuleDraft.fromJson({
+                  ...rule.toJson(),
+                  'actions': rule.actions
+                      .where((action) => action.actionType == 'calculate_field')
+                      .map((action) => action.toJson())
+                      .toList(),
+                })
+              : rule,
+        )
         .where(
           (rule) => (variantEvent
               ? rule.eventType == 'variant_calculation'
               : rule.eventType == 'row_calculation' ||
                     (saving && rule.eventType == 'card_saving') ||
                     (rule.eventType == 'field_changed' &&
-                        changedFieldCode != null &&
-                        (rule.eventFieldCode == null ||
-                            rule.eventFieldCode == changedFieldCode))),
+                        (refreshFormulas ||
+                            (changedFieldCode != null &&
+                                (rule.eventFieldCode == null ||
+                                    rule.eventFieldCode ==
+                                        changedFieldCode))))),
         )
         .toList(growable: false);
     final effectRules = _rulesFor(categoryClientId)

@@ -894,23 +894,17 @@ internal sealed class PostgresQuoteService(
         IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> FieldLabels,
         IReadOnlyDictionary<string, IReadOnlySet<string>>? TotalFields = null);
 
-    private static readonly HashSet<string> CalculationActions =
-        ["set_field", "calculate_field", "aggregate_money", "exclude_row"];
 
     internal static string CalculationVersion(QuoteCalculationConfiguration runtime)
     {
         var signature = JsonSerializer.Serialize(new
         {
             Rules = runtime.Rules
-                .Where(rule => (rule.EventType is "row_calculation" or "card_saving") &&
-                    rule.Actions.Any(action => CalculationActions.Contains(action.ActionType)))
+                .Where(rule => rule.IsEnabled)
                 .Select(rule => new
                 {
                     rule.ClientId, rule.CategoryClientId, rule.EventType,
-                    rule.EventFieldCode, rule.Conditions,
-                    Actions = rule.Actions.Where(action => CalculationActions.Contains(action.ActionType))
-                        .Select(action => action with { Message = null, HighlightColor = null })
-                        .ToArray(),
+                    rule.EventFieldCode, rule.Conditions, rule.Actions,
                 }).ToArray(),
             runtime.Pipelines,
             PercentFields = runtime.PercentFields.OrderBy(entry => entry.Key)

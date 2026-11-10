@@ -9,6 +9,58 @@ import 'package:sklad_komforta_app/features/quotes/quote_configured_calculation.
 import 'package:sklad_komforta_app/features/quotes/quote_models.dart';
 
 void main() {
+  for (final event in ['field_changed', 'variant_calculation']) {
+    test(
+      'explicit formula refresh evaluates $event without replaying other actions',
+      () {
+        final row = _position(basePrice: 10);
+        final document = _document(row);
+        final engine = QuoteConfiguredCalculationEngine(
+          _configuration(
+            rules: [
+              CalculationRuleDraft(
+                clientId: 'refresh',
+                name: 'Formula',
+                categoryClientId: 'equipment',
+                eventType: event,
+                eventFieldCode: 'quantity',
+                isEnabled: true,
+                conditions: [],
+                actions: [
+                  RuleActionDraft(
+                    actionType: 'calculate_field',
+                    targetFieldCode: 'custom_result',
+                    formula: FormulaDraft(
+                      tokens: [
+                        FormulaTokenDraft(
+                          tokenType: 'constant',
+                          constantValue: 25,
+                        ),
+                      ],
+                    ),
+                  ),
+                  RuleActionDraft(
+                    actionType: 'set_field',
+                    targetFieldCode: 'note',
+                    constantValue: 'Replaced',
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+        engine.calculateDocument(document);
+        expect(row.values['custom_result'], isNull);
+        row.values['note'] = 'Manual notes';
+        engine.calculateDocument(document, refreshFormulas: true, saving: true);
+        expect(row.values['custom_result'], 25);
+        expect(row.values['note'], 'Manual notes');
+        engine.calculateDocument(document);
+        expect(row.values['custom_result'], 25);
+      },
+    );
+  }
+
   for (final kind in QuoteKind.values) {
     test('missing formula input is shown only on save for $kind', () async {
       const config = AppConfig(
