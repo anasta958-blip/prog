@@ -104,6 +104,7 @@ void main() {
     expect(controller.needsRecalculation, isTrue);
     expect(await controller.saveOrder(), isFalse);
     expect(gateway.saved, isNull);
+    controller.order!.updatedAt = DateTime.utc(2026, 11, 9, 10);
     gateway.previewResponse = const OrderCalculationPreview(
       currentCalculationVersion: 'new',
       orderUpdatedAt: '2026-11-09T00:00:00Z',
@@ -113,13 +114,19 @@ void main() {
     controller.updateDocument((draft) => draft.title = 'Несохранённая работа');
     final preview = await controller.previewOrderCalculation();
     expect(preview, isNotNull);
+    expect(preview!.orderUpdatedAt, '2026-11-09T10:00:00.000Z');
+    expect(await controller.applyOrderCalculation(preview), isFalse);
+    expect(controller.needsRecalculation, isTrue);
     gateway.applyResponse = OrderDocument.fromJson({
       ..._orderJson(),
       'calculationVersion': 'new',
       'currentCalculationVersion': 'new',
+      'updatedAt': '2026-11-09T11:00:00Z',
     });
-    expect(await controller.applyOrderCalculation(preview!), isTrue);
+    expect(await controller.applyOrderCalculation(preview), isTrue);
+    expect(gateway.applyCalls, 2);
     expect(controller.needsRecalculation, isFalse);
+    expect(controller.order!.updatedAt, DateTime.utc(2026, 11, 9, 11));
     expect(controller.draft!.title, 'Несохранённая работа');
     expect(controller.dirty, isTrue);
     expect(gateway.saved, isNull);
@@ -1039,6 +1046,7 @@ final class _MemoryOrderGateway implements OrderGateway {
   OrderDocument? saved;
   OrderCalculationPreview? previewResponse;
   OrderDocument? applyResponse;
+  int applyCalls = 0;
 
   @override
   Future<OrderCalculationPreview> previewCalculation(
@@ -1053,7 +1061,10 @@ final class _MemoryOrderGateway implements OrderGateway {
     String boardId,
     String cardId,
     OrderCalculationPreview preview,
-  ) async => applyResponse ?? (throw UnimplementedError());
+  ) async {
+    applyCalls++;
+    return applyResponse ?? (throw UnimplementedError());
+  }
 
   @override
   Future<OrderDocument> getOrder(

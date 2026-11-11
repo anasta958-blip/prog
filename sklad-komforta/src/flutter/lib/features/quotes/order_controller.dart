@@ -458,7 +458,7 @@ final class OrderController extends QuoteController {
       }
       return OrderCalculationPreview(
         currentCalculationVersion: _candidateVersion!,
-        orderUpdatedAt: '',
+        orderUpdatedAt: order?.updatedAt?.toIso8601String() ?? '',
         changedPositions: changed,
         changes: changes,
       );
@@ -487,11 +487,33 @@ final class OrderController extends QuoteController {
     error = null;
     notifyListeners();
     try {
+      OrderDocument? applied;
       await _applyCalculationCandidate(
         board.id,
         preview.currentCalculationVersion,
+        persist: () async {
+          applied = await _authorized(
+            (token) => _orderGateway.applyCalculation(
+              token,
+              board.id,
+              cardId,
+              preview,
+            ),
+          );
+          if (applied!.calculationVersion !=
+                  preview.currentCalculationVersion ||
+              applied!.currentCalculationVersion !=
+                  preview.currentCalculationVersion) {
+            throw const FormatException(
+              'Сервер не подтвердил новый расчёт. Повторите предпросмотр.',
+            );
+          }
+          return applied!.updatedAt;
+        },
       );
-      order?.calculationVersion = preview.currentCalculationVersion;
+      order?.calculationVersion = applied!.calculationVersion;
+      order?.currentCalculationVersion = applied!.currentCalculationVersion;
+      order?.updatedAt = applied!.updatedAt ?? order?.updatedAt;
       return true;
     } on FormatException catch (exception) {
       error = exception.message;

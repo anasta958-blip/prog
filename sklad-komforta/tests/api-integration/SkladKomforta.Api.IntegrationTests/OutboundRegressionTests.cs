@@ -47,6 +47,8 @@ public sealed partial class DatabaseRegressionTests
         var boards = (await Send(staff, HttpMethod.Get, "/kanbans/")).AsArray();
         var sales = Text(boards.Single(item => Text(item!, "code") == "sales")!, "id");
         var orders = Text(boards.Single(item => Text(item!, "code") == "orders")!, "id");
+        await ConfigureDocumentLayoutAsync(staff, sales);
+        await ConfigureDocumentLayoutAsync(staff, orders);
         string Column(JsonNode board, string name) =>
             Text(board["columns"]!.AsArray().Single(item => Text(item!, "name") == name)!, "id");
         var compose = Column(await Send(staff, HttpMethod.Get, $"/kanbans/{orders}"), "Составление");

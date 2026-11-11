@@ -137,6 +137,7 @@ void main() {
               proposalTypes: [],
               calculationVersion: 'old',
               currentCalculationVersion: 'new',
+              updatedAt: DateTime.utc(2026, 11, 9, 10),
             );
       gateway
         ..previewResponse = const QuoteCalculationPreview(
@@ -159,13 +160,18 @@ void main() {
       expect(controller.needsRecalculation, isTrue);
       expect(await controller.save(board: _quoteBoard), isFalse);
       expect(gateway.savedDraft, isNull);
-      gateway.getResponse = gateway.applyResponse;
+      gateway.getResponse = QuoteDraft.fromJson(controller.draft!.toJson())
+        ..calculationVersion = 'old'
+        ..currentCalculationVersion = 'new';
       controller.updateDocument(
         (draft) => draft.title = 'Несохранённая работа',
       );
       final preview = await controller.previewCalculation(_quoteBoard);
       expect(preview?.currentCalculationVersion, 'new');
+      expect(preview?.quoteUpdatedAt, '2026-11-09T10:00:00.000Z');
       expect(await controller.applyCalculation(_quoteBoard, preview!), isTrue);
+      expect(gateway.applyCalls, 1);
+      expect(gateway.appliedPreview?.currentCalculationVersion, 'new');
       expect(controller.needsRecalculation, isFalse);
       expect(controller.dirty, isTrue);
       expect(controller.draft!.title, 'Несохранённая работа');
@@ -275,6 +281,9 @@ void main() {
         ..dirty = true;
       gateway.getResponse = QuoteDraft.fromJson(document.toJson())
         ..currentCalculationVersion = 'new';
+      gateway.applyResponse = QuoteDraft.fromJson(document.toJson())
+        ..calculationVersion = 'new'
+        ..currentCalculationVersion = 'new';
       final preview = await controller.previewCalculation(_quoteBoard);
       expect(preview, isNotNull, reason: controller.error);
       expect(preview!.changes.single.savedTotal, 30);
@@ -299,10 +308,28 @@ void main() {
       expect(await controller.applyCalculation(_quoteBoard, updated!), isFalse);
       gateway.getResponse!.currentCalculationVersion = 'new';
       final confirmed = await controller.previewCalculation(_quoteBoard);
+      gateway.applyResponse = null;
       expect(
         await controller.applyCalculation(_quoteBoard, confirmed!),
-        isTrue,
+        isFalse,
       );
+      expect(document.calculationVersion, 'old');
+      expect(
+        document
+            .proposalTypes
+            .single
+            .variants
+            .single
+            .positions
+            .single
+            .basePrice,
+        10,
+      );
+      gateway.applyResponse = QuoteDraft.fromJson(document.toJson())
+        ..calculationVersion = 'new'
+        ..currentCalculationVersion = 'new';
+      expect(await controller.applyCalculation(_quoteBoard, confirmed), isTrue);
+      expect(gateway.applyCalls, 2);
       final row =
           document.proposalTypes.single.variants.single.positions.single;
       expect(row.manualPrice ?? row.basePrice, 25);
@@ -2984,6 +3011,8 @@ final class _RecordingQuoteGateway implements QuoteGateway {
   QuoteDraft? savedDraft;
   QuoteCalculationPreview? previewResponse;
   QuoteDraft? applyResponse;
+  QuoteCalculationPreview? appliedPreview;
+  int applyCalls = 0;
 
   @override
   Future<QuoteCalculationPreview> previewCalculation(
@@ -2998,7 +3027,13 @@ final class _RecordingQuoteGateway implements QuoteGateway {
     String boardId,
     String cardId,
     QuoteCalculationPreview preview,
-  ) async => applyResponse ?? (throw UnimplementedError());
+  ) async {
+    applyCalls++;
+    appliedPreview = preview;
+    final result = applyResponse ?? (throw UnimplementedError());
+    getResponse = result;
+    return result;
+  }
 
   @override
   Future<QuoteDraft> saveQuote(

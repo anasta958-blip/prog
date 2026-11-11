@@ -63,6 +63,7 @@ public sealed partial class DatabaseRegressionTests
         var buy = Column(salesBoard, "Закупить материал");
         var done = Column(salesBoard, "Завершено");
         var compose = Column(orderBoard, "Составление");
+        await ConfigureDocumentLayoutAsync(staff, orders);
         var montageColumn = Column(orderBoard, "Монтаж");
         var back = Column(orderBoard, "Вернуть в КП");
         Assert.Equal(orders, Text(salesBoard["columns"]![1]!["transferTo"]!, "boardId"));
@@ -302,6 +303,7 @@ public sealed partial class DatabaseRegressionTests
                     TransferTo: new WorkflowTransferDraft("sales", "done")),
             ],
             [new WorkflowTransitionDraft("pre-start", "pre-back")],
+            Categories: draft.Workflows[0].Categories,
             Specialization: "prequote");
         await SignInDirectorAsync(staff, draft with { Workflows = [sales, prequotes] });
 

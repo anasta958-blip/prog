@@ -1814,8 +1814,9 @@ final class QuoteController extends ChangeNotifier {
 
   Future<bool> _applyCalculationCandidate(
     String boardId,
-    String version,
-  ) async {
+    String version, {
+    required Future<DateTime?> Function() persist,
+  }) async {
     final candidate = _calculationCandidate;
     final document = draft;
     if (candidate == null ||
@@ -1831,6 +1832,13 @@ final class QuoteController extends ChangeNotifier {
         'Правила снова изменились. Повторите предпросмотр.',
       );
     }
+    if (!identical(draft, document) ||
+        jsonEncode(document.toJson()) != _candidateInput) {
+      throw const FormatException(
+        'Черновик изменился. Повторите предпросмотр.',
+      );
+    }
+    final persistedAt = await persist();
     if (!identical(draft, document) ||
         jsonEncode(document.toJson()) != _candidateInput) {
       throw const FormatException(
@@ -1858,6 +1866,7 @@ final class QuoteController extends ChangeNotifier {
     catalog = _candidateConfiguration;
     _positionLocations = null;
     document.calculationVersion = version;
+    document.updatedAt = persistedAt ?? document.updatedAt;
     _setCurrentCalculationVersion(version);
     _calculationCandidate = null;
     _calculationError = null;
@@ -1958,6 +1967,24 @@ final class QuoteController extends ChangeNotifier {
       return await _applyCalculationCandidate(
         board.id,
         preview.currentCalculationVersion,
+        persist: () async {
+          final applied = await _authorized(
+            (token) => _quoteGateway.applyCalculation(
+              token,
+              board.id,
+              cardId,
+              preview,
+            ),
+          );
+          if (applied.calculationVersion != preview.currentCalculationVersion ||
+              applied.currentCalculationVersion !=
+                  preview.currentCalculationVersion) {
+            throw const FormatException(
+              'Сервер не подтвердил новый расчёт. Повторите предпросмотр.',
+            );
+          }
+          return applied.updatedAt;
+        },
       );
     } on FormatException catch (exception) {
       error = exception.message;

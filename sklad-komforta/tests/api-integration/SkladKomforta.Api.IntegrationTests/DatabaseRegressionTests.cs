@@ -267,6 +267,7 @@ public sealed partial class DatabaseRegressionTests
 
         var boards = await Send(staff, HttpMethod.Get, "/kanbans/");
         var boardId = Text(boards[0]!, "id");
+        await ConfigureDocumentLayoutAsync(staff, boardId);
         var board = await Send(staff, HttpMethod.Get, $"/kanbans/{boardId}");
         var columnId = Text(board["columns"]![0]!, "id");
         var targetColumnId = Text(board["columns"]![1]!, "id");
@@ -292,7 +293,11 @@ public sealed partial class DatabaseRegressionTests
         foreach (var kind in new[] { "quote", "prequote" })
         {
             var proposal = QuoteRequest(kind, Text(customer, "id"), Text(company, "id"), categoryId, sectionId, productId);
-            var older = await Send(staff, HttpMethod.Post, $"/kanbans/{boardId}/quotes", new { columnId, quote = proposal });
+            var older = await Send(staff, HttpMethod.Post, $"/kanbans/{boardId}/quotes", new
+            {
+                columnId,
+                quote = QuoteRequest(kind, Text(customer, "id"), Text(company, "id"), categoryId, sectionId, productId),
+            });
             var created = await Send(staff, HttpMethod.Post, $"/kanbans/{boardId}/quotes", new { columnId, quote = proposal });
             var cardId = Text(created, "cardId");
             var orderedCards = (await Send(staff, HttpMethod.Get, $"/kanbans/{boardId}/cards?columnId={columnId}"))["items"]!.AsArray();
@@ -393,8 +398,13 @@ public sealed partial class DatabaseRegressionTests
             await kanbanEvents.WaitAsync(message => KanbanChange(message, cardId));
             guest.DefaultRequestHeaders.Add("X-Quote-Client-Session", Text(clientLogin, "sessionToken"));
             var clientQuote = await Send(guest, HttpMethod.Get, "/client/quotes/current");
-            Assert.Equal("ООО Исполнитель", Text(clientQuote, "executorName"));
-            Assert.Equal("Иванов Иван", Text(clientQuote, "clientName"));
+            Assert.Equal(string.Empty, Text(clientQuote, "executorName"));
+            Assert.Null(clientQuote["clientName"]);
+            var headerLines = clientQuote["headerDocument"]!["blocks"]!.AsArray()
+                .SelectMany(block => block!["lines"]!.AsArray())
+                .Select(line => line!.GetValue<string>()).ToArray();
+            Assert.Contains(headerLines, line => line.Contains("ООО Исполнитель", StringComparison.Ordinal));
+            Assert.Contains(headerLines, line => line.Contains("Иванов Иван", StringComparison.Ordinal));
             Assert.Equal(2, clientQuote["proposalTypes"]!.AsArray().Count);
             Assert.DoesNotContain("purchasePrice", clientQuote.ToJsonString(), StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("markupPercent", clientQuote.ToJsonString(), StringComparison.OrdinalIgnoreCase);
@@ -615,6 +625,31 @@ public sealed partial class DatabaseRegressionTests
     }
 
     private static string Text(JsonNode node, string key) => node[key]!.GetValue<string>();
+
+    private static async Task ConfigureDocumentLayoutAsync(HttpClient client, string boardId)
+    {
+        await Send(client, HttpMethod.Put, $"/company/document-layouts/{boardId}", new
+        {
+            categories = Array.Empty<object>(),
+            template = new
+            {
+                landscape = false, margin = 24d, fontSize = 12d, lineHeight = 1.2d,
+                fontFamily = "sans",
+                blocks = new[]
+                {
+                    new { id = "client", kind = "client", x = 30d, y = 30d, width = 340d,
+                        height = 100d, fontSize = 12d, padding = 8d, align = "left",
+                        fields = new List<string> { "name" }, columnWidths = new Dictionary<string, double>() },
+                    new { id = "executor", kind = "executor", x = 400d, y = 30d, width = 340d,
+                        height = 100d, fontSize = 12d, padding = 8d, align = "left",
+                        fields = new List<string> { "legal_name" }, columnWidths = new Dictionary<string, double>() },
+                    new { id = "table", kind = "table", x = 30d, y = 150d, width = 734d,
+                        height = 500d, fontSize = 12d, padding = 8d, align = "left",
+                        fields = new List<string>(), columnWidths = new Dictionary<string, double>() },
+                },
+            },
+        });
+    }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "CA5350", Justification = "RFC 6238 TOTP uses HMAC-SHA1 for authenticator compatibility.")]
     private static string Totp(string base32)
