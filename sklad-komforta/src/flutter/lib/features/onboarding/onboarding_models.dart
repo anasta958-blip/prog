@@ -738,7 +738,53 @@ final class MoneyPipelineDraft {
   };
 }
 
-/// Полный изменяемый черновик всех девяти шагов onboarding.
+/// Источник выручки или затрат для справочного расчёта маржи.
+final class MarginFieldDraft {
+  MarginFieldDraft({required this.fieldCode, this.multiplyByQuantity = false});
+  String fieldCode;
+  bool multiplyByQuantity;
+  factory MarginFieldDraft.fromJson(Map<String, dynamic> json) =>
+      MarginFieldDraft(
+        fieldCode: json['fieldCode'] as String,
+        multiplyByQuantity: json['multiplyByQuantity'] as bool? ?? false,
+      );
+  Map<String, dynamic> toJson() => {
+    'fieldCode': fieldCode,
+    'multiplyByQuantity': multiplyByQuantity,
+  };
+}
+
+final class MarginSettingsDraft {
+  MarginSettingsDraft({
+    required this.categoryClientId,
+    List<MarginFieldDraft>? revenueFields,
+    List<MarginFieldDraft>? costFields,
+  }) : revenueFields = revenueFields ?? [],
+       costFields = costFields ?? [];
+  String categoryClientId;
+  List<MarginFieldDraft> revenueFields;
+  List<MarginFieldDraft> costFields;
+  bool get hasRequiredSources =>
+      revenueFields.isNotEmpty && costFields.isNotEmpty;
+  factory MarginSettingsDraft.fromJson(
+    Map<String, dynamic> json,
+  ) => MarginSettingsDraft(
+    categoryClientId: json['categoryClientId'] as String,
+    revenueFields: (json['revenueFields'] as List<dynamic>? ?? [])
+        .map((item) => MarginFieldDraft.fromJson(item as Map<String, dynamic>))
+        .toList(),
+    costFields: (json['costFields'] as List<dynamic>? ?? [])
+        .map((item) => MarginFieldDraft.fromJson(item as Map<String, dynamic>))
+        .toList(),
+  );
+  Map<String, dynamic> toJson() => {
+    'categoryClientId': categoryClientId,
+    'revenueFields': revenueFields.map((item) => item.toJson()).toList(),
+    'costFields': costFields.map((item) => item.toJson()).toList(),
+  };
+}
+
+/// Полный изменяемый черновик настройки организации.
 final class OrganizationOnboardingDraft {
   OrganizationOnboardingDraft({
     required this.currentStep,
@@ -751,7 +797,9 @@ final class OrganizationOnboardingDraft {
     required this.dependencies,
     List<CalculationRuleDraft>? rules,
     List<MoneyPipelineDraft>? moneyPipelines,
+    List<MarginSettingsDraft>? marginSettings,
   }) : rules = rules ?? <CalculationRuleDraft>[],
+       marginSettings = marginSettings ?? [],
        moneyPipelines = moneyPipelines ?? <MoneyPipelineDraft>[];
   int currentStep;
   CompanyProfileDraft company;
@@ -763,6 +811,7 @@ final class OrganizationOnboardingDraft {
   List<CategoryDependencyDraft> dependencies;
   List<CalculationRuleDraft> rules;
   List<MoneyPipelineDraft> moneyPipelines;
+  List<MarginSettingsDraft> marginSettings;
 
   /// Group is a structural field, available only for categories with groups.
   void syncGroupFields() {
@@ -871,6 +920,11 @@ final class OrganizationOnboardingDraft {
           (item) => MoneyPipelineDraft.fromJson(item as Map<String, dynamic>),
         )
         .toList(),
+    marginSettings: (json['marginSettings'] as List<dynamic>? ?? [])
+        .map(
+          (item) => MarginSettingsDraft.fromJson(item as Map<String, dynamic>),
+        )
+        .toList(),
   );
 
   Map<String, dynamic> toJson() {
@@ -886,6 +940,7 @@ final class OrganizationOnboardingDraft {
       'dependencies': dependencies.map((item) => item.toJson()).toList(),
       'rules': rules.map((item) => item.toJson()).toList(),
       'moneyPipelines': moneyPipelines.map((item) => item.toJson()).toList(),
+      'marginSettings': marginSettings.map((item) => item.toJson()).toList(),
     };
   }
 }

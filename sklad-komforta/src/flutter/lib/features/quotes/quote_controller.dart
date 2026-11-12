@@ -298,6 +298,59 @@ final class QuoteController extends ChangeNotifier {
     ];
   }
 
+  ({double margin, double? percent})? marginSummary(
+    Iterable<QuoteCategoryDraft> categories,
+  ) {
+    var revenue = 0.0;
+    var cost = 0.0;
+    var configured = false;
+    for (final category in categories) {
+      final clientId = catalog?.categories
+          .where((item) => item.id == category.catalogCategoryId)
+          .firstOrNull
+          ?.clientId;
+      final settings = catalog?.marginSettings
+          .where((item) => item.categoryClientId == clientId)
+          .firstOrNull;
+      if (settings == null ||
+          (settings.revenueFields.isEmpty && settings.costFields.isEmpty)) {
+        continue;
+      }
+      configured = true;
+      for (final row in category.sections.expand(
+        (section) => section.positions,
+      )) {
+        if (row.excludeFromTotals) continue;
+        double sum(List<MarginFieldDraft> fields) => fields.fold(0.0, (
+          sum,
+          source,
+        ) {
+          final raw = switch (source.fieldCode) {
+            'base_price' => row.manualPrice ?? row.basePrice,
+            'purchase_price' =>
+              row.purchasePrice ?? row.values[source.fieldCode],
+            _ => row.values[source.fieldCode],
+          };
+          final number = raw is num
+              ? raw.toDouble()
+              : double.tryParse((raw?.toString() ?? '').replaceAll(',', '.')) ??
+                    0.0;
+          return sum +
+              (number.isFinite ? number : 0) *
+                  (source.multiplyByQuantity ? row.quantity : 1);
+        });
+        revenue += sum(settings.revenueFields);
+        cost += sum(settings.costFields);
+      }
+    }
+    if (!configured) return null;
+    final margin = revenue - cost;
+    return (
+      margin: (margin * 100).round() / 100,
+      percent: revenue == 0 ? null : (margin / revenue * 10000).round() / 100,
+    );
+  }
+
   /// Загружает справочники параллельно с документом. Отсутствие документа для
   /// новой карточки является штатным состоянием, а не ошибкой редактора.
   Future<void> initialize({

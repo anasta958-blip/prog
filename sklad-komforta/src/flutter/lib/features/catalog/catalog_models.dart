@@ -190,12 +190,14 @@ final class CatalogConfiguration {
     this.dependencies = const [],
     this.rules = const [],
     this.moneyPipelines = const [],
+    this.marginSettings = const [],
   });
   final List<CatalogCategory> categories;
   final List<CatalogDictionary> dictionaries;
   final List<CatalogDependency> dependencies;
   final List<CalculationRuleDraft> rules;
   final List<MoneyPipelineDraft> moneyPipelines;
+  final List<MarginSettingsDraft> marginSettings;
   factory CatalogConfiguration.fromJson(
     Map<String, dynamic> json,
   ) => CatalogConfiguration(
@@ -216,6 +218,11 @@ final class CatalogConfiguration {
     moneyPipelines: ((json['moneyPipelines'] as List<dynamic>?) ?? const [])
         .map(
           (item) => MoneyPipelineDraft.fromJson(item as Map<String, dynamic>),
+        )
+        .toList(growable: false),
+    marginSettings: (json['marginSettings'] as List<dynamic>? ?? [])
+        .map(
+          (item) => MarginSettingsDraft.fromJson(item as Map<String, dynamic>),
         )
         .toList(growable: false),
   );

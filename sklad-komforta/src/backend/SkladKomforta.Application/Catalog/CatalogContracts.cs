@@ -59,7 +59,8 @@ public sealed record CatalogConfiguration(
     IReadOnlyList<CatalogDictionarySummary> Dictionaries,
     IReadOnlyList<CatalogDependencySummary> Dependencies,
     IReadOnlyList<CalculationRuleDraft> Rules,
-    IReadOnlyList<MoneyPipelineDraft> MoneyPipelines);
+    IReadOnlyList<MoneyPipelineDraft> MoneyPipelines,
+    IReadOnlyList<MarginSettingsDraft>? MarginSettings = null);
 
 /// <summary>Карточка каталога с системными и настроенными значениями.</summary>
 public sealed record CatalogItemSummary(

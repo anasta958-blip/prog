@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'margin_sources_editor.dart';
 
 import 'package:flutter/material.dart';
 import 'package:sklad_komforta_app/core/platform/workspace_address.dart';
@@ -176,6 +177,7 @@ final class _OrganizationOnboardingPageState
   final Set<DictionaryDraft> _collapsedDictionaries = <DictionaryDraft>{};
   final Set<String> _collapsedRules = <String>{};
   final Set<String> _collapsedPipelines = <String>{};
+  final Set<String> _expandedMarginCategories = <String>{};
   final Set<CatalogSectionDraft> _expandedCatalogSections =
       <CatalogSectionDraft>{};
   final Set<String> _approvedCategoryDataDeletions = <String>{};
@@ -396,6 +398,7 @@ final class _OrganizationOnboardingPageState
 
   /// Сохраняет агрегат целиком, чтобы сервер мог проверить межшаговые связи.
   Future<void> _saveAndContinue() async {
+    if (!_validateMarginSources()) return;
     if (step == 0 && !(_companyFormKey.currentState?.validate() ?? false)) {
       _showMessage('Проверьте заполнение реквизитов организации.');
       return;
@@ -435,6 +438,7 @@ final class _OrganizationOnboardingPageState
       await _outboundSettings.save();
       return;
     }
+    if (!_validateMarginSources()) return;
     _sanitizeWorkflowLinks();
     draft.currentStep = 10;
     // Сохраняем именно отправленный снимок. Уведомление родительского
@@ -454,6 +458,24 @@ final class _OrganizationOnboardingPageState
       _collapseConfiguredBlocks();
     });
     _showMessage('Настройки организации сохранены.');
+  }
+
+  bool _validateMarginSources() {
+    final invalid = draft.marginSettings
+        .where((item) => !item.hasRequiredSources)
+        .firstOrNull;
+    if (invalid == null) return true;
+    final category = draft.categories
+        .where((item) => item.clientId == invalid.categoryClientId)
+        .firstOrNull;
+    setState(() {
+      step = 5;
+      _expandedMarginCategories.add(invalid.categoryClientId);
+    });
+    _showMessage(
+      'Категория «${category?.name ?? invalid.categoryClientId}»: выберите хотя бы одно поле выручки и одно поле затрат.',
+    );
+    return false;
   }
 
   Future<void> _deleteCategory(String categoryClientId) async {
@@ -526,6 +548,9 @@ final class _OrganizationOnboardingPageState
       );
       draft.moneyPipelines.removeWhere(
         (pipeline) => pipeline.categoryClientId == removed.clientId,
+      );
+      draft.marginSettings.removeWhere(
+        (item) => item.categoryClientId == removed.clientId,
       );
       for (final workflow in draft.workflows) {
         workflow.categories.removeWhere(
@@ -1713,6 +1738,12 @@ final class _OrganizationOnboardingPageState
   /// Благодаря этому сохранение не блокируется старой ссылкой из правила,
   /// формулы или денежного конвейера.
   void _removeFieldReferences(CatalogCategoryDraft category, String fieldCode) {
+    for (final settings in draft.marginSettings.where(
+      (item) => item.categoryClientId == category.clientId,
+    )) {
+      settings.revenueFields.removeWhere((item) => item.fieldCode == fieldCode);
+      settings.costFields.removeWhere((item) => item.fieldCode == fieldCode);
+    }
     draft.dependencies.removeWhere(
       (dependency) =>
           dependency.targetCategoryClientId == category.clientId &&
@@ -2263,6 +2294,18 @@ final class _OrganizationOnboardingPageState
         const _EmptyHint('Сначала создайте категории и поля.'),
       const SizedBox(height: 22),
       const _SectionTitle(
+        title: 'Маржа и маржинальность',
+        subtitle:
+            'Маржа = выручка − затраты. Маржинальность = маржа / выручка × 100%. Выберите поля каждой категории; их значения суммируются. Показатели справочные и не меняют итог для клиента. При нулевой выручке процент не определён.',
+      ),
+      const SizedBox(height: 12),
+      for (final category in draft.categories)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: _marginCategoryPanel(category),
+        ),
+      const SizedBox(height: 22),
+      const _SectionTitle(
         title: 'Событийные правила',
         subtitle: 'Настройте условия и действия без программного кода.',
       ),
@@ -2286,6 +2329,31 @@ final class _OrganizationOnboardingPageState
       ),
     ],
   );
+
+  Widget _marginCategoryPanel(CatalogCategoryDraft category) {
+    final settings = draft.marginSettings
+        .where((item) => item.categoryClientId == category.clientId)
+        .firstOrNull;
+    return _SubPanel(
+      title: category.name,
+      expanded: _expandedMarginCategories.contains(category.clientId),
+      onToggle: () => setState(
+        () => _toggleCollapsed(_expandedMarginCategories, category.clientId),
+      ),
+      expandTooltip: 'Настроить маржу: ${category.name}',
+      collapseTooltip: 'Свернуть маржу: ${category.name}',
+      child: MarginSourcesEditor(
+        category: category,
+        settings: settings,
+        onChanged: (value) => setState(() {
+          draft.marginSettings.removeWhere(
+            (item) => item.categoryClientId == category.clientId,
+          );
+          if (value != null) draft.marginSettings.add(value);
+        }),
+      ),
+    );
+  }
 
   Widget _moneyPipelineCategoryPanel(CatalogCategoryDraft category) {
     final pipelines = draft.moneyPipelines

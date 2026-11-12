@@ -103,6 +103,7 @@ public static class OnboardingValidator
             draft.Rules ?? [],
             draft.MoneyPipelines ?? []);
         ValidateDictionaryBindings(draft);
+        ValidateMargins(draft.Categories, draft.MarginSettings ?? []);
 
         ValidateUnique(draft.Fields.Select(item => $"{item.ContextCode}:{item.FieldCode}"), "Коды полей");
         foreach (var field in draft.Fields)
@@ -626,6 +627,29 @@ public static class OnboardingValidator
         string label)
     {
         if (!string.IsNullOrWhiteSpace(fieldCode)) RequireRuleField(fields, fieldCode, allowedTypes, label);
+    }
+
+    private static void ValidateMargins(
+        IReadOnlyList<CatalogCategoryDraft> categories,
+        IReadOnlyList<MarginSettingsDraft> settings)
+    {
+        ValidateUnique(settings.Select(item => item.CategoryClientId), "Категории расчёта маржи");
+        var categoriesById = categories.ToDictionary(item => item.ClientId, StringComparer.Ordinal);
+        foreach (var item in settings)
+        {
+            var category = RequireRuleCategory(categoriesById, item.CategoryClientId);
+            if (item.RevenueFields is not { Count: > 0 } || item.CostFields is not { Count: > 0 })
+                Fail("onboarding_margin_sources_required",
+                    $"Категория «{category.Name}»: выберите хотя бы одно поле выручки и одно поле затрат.");
+            var fields = category.Fields.ToDictionary(field => field.FieldCode, StringComparer.Ordinal);
+            foreach (var sources in new[] { item.RevenueFields, item.CostFields })
+            {
+                if (sources is null) Fail("onboarding_rule_invalid", "Не заданы поля расчёта маржи.");
+                ValidateUnique(sources.Select(source => source.FieldCode), "Поля расчёта маржи");
+                foreach (var source in sources)
+                    RequireRuleField(fields, source.FieldCode, ["money", "calculated_money"], "Поле расчёта маржи");
+            }
+        }
     }
 
     private static bool IsNumericField(string fieldType) =>

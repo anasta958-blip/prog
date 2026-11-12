@@ -42,6 +42,7 @@ internal sealed class PostgresCatalogService(
         var dependencies = await ReadDependenciesAsync(connection, cancellationToken);
         var rules = Array.Empty<CalculationRuleDraft>();
         var pipelines = Array.Empty<MoneyPipelineDraft>();
+        var margins = Array.Empty<MarginSettingsDraft>();
         await using (var command = connection.CreateCommand())
         {
             command.CommandText = "SELECT payload FROM onboarding_draft WHERE singleton";
@@ -51,9 +52,10 @@ internal sealed class PostgresCatalogService(
                 var draft = JsonSerializer.Deserialize<OrganizationOnboardingDraft>(payload, JsonOptions);
                 rules = draft?.Rules?.Where(item => item.IsEnabled).ToArray() ?? [];
                 pipelines = draft?.MoneyPipelines?.ToArray() ?? [];
+                margins = draft?.MarginSettings?.ToArray() ?? [];
             }
         }
-        return new CatalogConfiguration(categories, dictionaries, dependencies, rules, pipelines);
+        return new CatalogConfiguration(categories, dictionaries, dependencies, rules, pipelines, margins);
     }
 
     /// <inheritdoc />

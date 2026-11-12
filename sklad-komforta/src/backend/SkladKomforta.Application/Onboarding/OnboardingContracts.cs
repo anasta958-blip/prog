@@ -168,9 +168,16 @@ public sealed record MoneyPipelineDraft(
     string? ClientId = null);
 
 /// <summary>
-/// Полный серверный черновик десятишаговой настройки. Клиент всегда отправляет
-/// агрегат целиком, поэтому сервер может валидировать согласованность связей.
+/// Источник выручки или затрат для справочного расчёта маржи.
 /// </summary>
+public sealed record MarginFieldDraft(string FieldCode, bool MultiplyByQuantity = false);
+
+public sealed record MarginSettingsDraft(
+    string CategoryClientId,
+    IReadOnlyList<MarginFieldDraft> RevenueFields,
+    IReadOnlyList<MarginFieldDraft> CostFields);
+
+/// <summary>Полный серверный черновик настройки организации.</summary>
 public sealed record OrganizationOnboardingDraft(
     int CurrentStep,
     CompanyProfileDraft Company,
@@ -181,7 +188,8 @@ public sealed record OrganizationOnboardingDraft(
     IReadOnlyList<DictionaryDraft> Dictionaries,
     IReadOnlyList<CategoryDependencyDraft>? Dependencies = null,
     IReadOnlyList<CalculationRuleDraft>? Rules = null,
-    IReadOnlyList<MoneyPipelineDraft>? MoneyPipelines = null);
+    IReadOnlyList<MoneyPipelineDraft>? MoneyPipelines = null,
+    IReadOnlyList<MarginSettingsDraft>? MarginSettings = null);
 
 /// <summary>Состояние onboarding и признак окончательной активации организации.</summary>
 public sealed record OrganizationOnboardingState(

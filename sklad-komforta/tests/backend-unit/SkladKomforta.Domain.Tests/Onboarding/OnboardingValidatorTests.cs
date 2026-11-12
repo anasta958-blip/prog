@@ -8,6 +8,49 @@ namespace SkladKomforta.Domain.Tests.Onboarding;
 public sealed class OnboardingValidatorTests
 {
     [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void MarginRequiresBothRevenueAndCost(bool revenue, bool cost)
+    {
+        var draft = ValidDraft() with {
+            Categories = [CategoryWithCalculationFields()],
+            MarginSettings = [new MarginSettingsDraft("equipment",
+                revenue ? [new("base_price")] : [],
+                cost ? [new("custom_total")] : [])]
+        };
+        if (revenue && cost) OnboardingValidator.Validate(draft, false);
+        else Assert.Equal("onboarding_margin_sources_required",
+            Assert.Throws<IdentityException>(() => OnboardingValidator.Validate(draft, false)).Code);
+    }
+
+    [Theory]
+    [InlineData("base_price", true)]
+    [InlineData("custom_total", true)]
+    [InlineData("name", false)]
+    [InlineData("missing", false)]
+    public void MarginSourcesMustBeExistingMoneyFields(string field, bool valid)
+    {
+        var draft = ValidDraft() with {
+            Categories = [CategoryWithCalculationFields()],
+            MarginSettings = [new MarginSettingsDraft("equipment", [new MarginFieldDraft(field, true)], [new("base_price")])]
+        };
+        if (valid) OnboardingValidator.Validate(draft, false);
+        else Assert.Throws<IdentityException>(() => OnboardingValidator.Validate(draft, false));
+    }
+
+    [Fact]
+    public void MarginSourcesCannotRepeatWithinOneSide()
+    {
+        var draft = ValidDraft() with {
+            Categories = [CategoryWithCalculationFields()],
+            MarginSettings = [new MarginSettingsDraft("equipment", [new("base_price"), new("base_price")], [new("base_price")])]
+        };
+        Assert.Throws<IdentityException>(() => OnboardingValidator.Validate(draft, false));
+    }
+
+    [Theory]
     [InlineData("money", true)]
     [InlineData("calculated_money", true)]
     [InlineData("text", false)]

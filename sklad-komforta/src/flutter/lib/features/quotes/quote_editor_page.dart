@@ -2538,6 +2538,17 @@ final class _CategoryBlock extends StatelessWidget {
                             const SizedBox(width: 20),
                           ],
                           _MoneyLabel('Сумма', category.clientTotal),
+                          if (controller.marginSummary([category])
+                              case final margin?) ...[
+                            const SizedBox(width: 20),
+                            _MoneyLabel('Маржа', margin.margin),
+                            const SizedBox(width: 20),
+                            _MoneyLabel(
+                              'Маржинальность',
+                              margin.percent ?? 0,
+                              formattedValue: _marginPercent(margin.percent),
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -4042,6 +4053,7 @@ final class _SummaryColumn extends StatelessWidget {
     final cards = <Widget>[
       _SummaryCard(
         title: 'Сводка варианта',
+        margin: controller.marginSummary(variant.categories),
         rows: [
           ...controller.separateTotalRows(variant.categories),
           ('НДС', variant.systemSummary.vat),
@@ -4052,6 +4064,9 @@ final class _SummaryColumn extends StatelessWidget {
       if (controller.activeType case final type?)
         _SummaryCard(
           title: 'Сводка типа',
+          margin: controller.marginSummary(
+            type.variants.expand((variant) => variant.categories),
+          ),
           rows: [
             ...controller.separateTotalRows(
               type.variants.expand((variant) => variant.categories),
@@ -4084,10 +4099,14 @@ final class _SummaryColumn extends StatelessWidget {
   }
 }
 
+String _marginPercent(double? value) =>
+    value == null ? '—' : '${value.toStringAsFixed(2).replaceAll('.', ',')} %';
+
 final class _SummaryCard extends StatelessWidget {
-  const _SummaryCard({required this.title, required this.rows});
+  const _SummaryCard({required this.title, required this.rows, this.margin});
   final String title;
   final List<(String, double)> rows;
+  final ({double margin, double? percent})? margin;
 
   @override
   Widget build(BuildContext context) => _Panel(
@@ -4097,6 +4116,38 @@ final class _SummaryCard extends StatelessWidget {
       children: [
         Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
         const SizedBox(height: 12),
+        if (margin case final value?) ...[
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Маржа',
+                  style: TextStyle(color: _muted, fontSize: 12),
+                ),
+              ),
+              Text(
+                _money(value.margin),
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Маржинальность',
+                  style: TextStyle(color: _muted, fontSize: 12),
+                ),
+              ),
+              Text(
+                _marginPercent(value.percent),
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+        ],
         for (final row in rows)
           Padding(
             padding: const EdgeInsets.only(bottom: 4),
@@ -4877,9 +4928,10 @@ final class _CatalogEntryFieldState extends State<_CatalogEntryField> {
 }
 
 final class _MoneyLabel extends StatelessWidget {
-  const _MoneyLabel(this.label, this.value);
+  const _MoneyLabel(this.label, this.value, {this.formattedValue});
   final String label;
   final double value;
+  final String? formattedValue;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -4887,7 +4939,7 @@ final class _MoneyLabel extends StatelessWidget {
     children: [
       Text(label, style: const TextStyle(color: _muted, fontSize: 9)),
       Text(
-        _money(value),
+        formattedValue ?? _money(value),
         style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
       ),
     ],
