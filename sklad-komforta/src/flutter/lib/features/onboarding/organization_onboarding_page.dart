@@ -26,6 +26,7 @@ final class OrganizationOnboardingPage extends StatefulWidget {
     this.settingsDraft,
     this.settingsBusy = false,
     this.settingsError,
+    this.settingsErrorTarget,
     this.onSettingsSave,
     this.onCategoryDeletionImpact,
     this.onCategoryDeletionApproved,
@@ -58,6 +59,7 @@ final class OrganizationOnboardingPage extends StatefulWidget {
 
   /// Ошибка сохранения или загрузки полной конфигурации.
   final String? settingsError;
+  final String? settingsErrorTarget;
 
   /// Сохраняет изменённую конфигурацию без повторной активации организации.
   final Future<bool> Function(
@@ -178,6 +180,68 @@ final class _OrganizationOnboardingPageState
   final Set<String> _collapsedRules = <String>{};
   final Set<String> _collapsedPipelines = <String>{};
   final Set<String> _expandedMarginCategories = <String>{};
+  final Map<String, GlobalKey> _validationKeys = {};
+  String? _validationError;
+  String? _validationTarget;
+
+  GlobalKey _validationKey(String target) =>
+      _validationKeys.putIfAbsent(target, () => GlobalKey());
+  String? _blockError(String target) =>
+      _validationTarget == target ? _validationError : null;
+
+  void _presentValidationError(String message, String? target) {
+    if (!mounted) return;
+    final separator = target?.indexOf(':') ?? -1;
+    final kind = separator < 0 ? '' : target!.substring(0, separator);
+    final id = separator < 0 ? '' : target!.substring(separator + 1);
+    setState(() {
+      _validationError = message;
+      _validationTarget = target;
+      switch (kind) {
+        case 'rule':
+          step = 5;
+          _collapsedRules.remove(id);
+        case 'pipeline':
+          step = 5;
+          _collapsedPipelines.remove(id);
+        case 'margin':
+          step = 5;
+          _expandedMarginCategories.add(id);
+        case 'category':
+          step = 2;
+          _collapsedCategoryIds.remove(id);
+        case 'workflow':
+          step = 1;
+          _collapsedWorkflowCodes.remove(id);
+        case 'section':
+          final index = int.tryParse(id);
+          if (index != null && index >= 0 && index < _steps.length) {
+            step = index;
+          }
+      }
+    });
+    _scrollToValidationError();
+  }
+
+  void _scrollToValidationError() {
+    final target = _validationTarget;
+    if (target == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await Future<void>.delayed(const Duration(milliseconds: 220));
+      if (!mounted || target != _validationTarget) return;
+      final block =
+          _validationKeys[target]?.currentContext ??
+          _validationKeys['section:$step']?.currentContext;
+      if (block != null && block.mounted) {
+        await Scrollable.ensureVisible(
+          block,
+          alignment: 0.12,
+          duration: const Duration(milliseconds: 250),
+        );
+      }
+    });
+  }
+
   final Set<CatalogSectionDraft> _expandedCatalogSections =
       <CatalogSectionDraft>{};
   final Set<String> _approvedCategoryDataDeletions = <String>{};
@@ -203,6 +267,7 @@ final class _OrganizationOnboardingPageState
     draft = _settingsMode ? _copyDraft(source) : source;
     _ensureFixedCatalogFields();
     _savedDraftJson = jsonEncode(draft.toJson());
+    _validationError = _error;
     _collapseConfiguredBlocks();
     step = _settingsMode
         ? _settingsStepIndexes.first
@@ -220,6 +285,18 @@ final class _OrganizationOnboardingPageState
   @override
   void didUpdateWidget(covariant OrganizationOnboardingPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.settingsError != null &&
+        (widget.settingsError != oldWidget.settingsError ||
+            (oldWidget.settingsBusy && !widget.settingsBusy))) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && widget.settingsError != null) {
+          _presentValidationError(
+            widget.settingsError!,
+            widget.settingsErrorTarget,
+          );
+        }
+      });
+    }
     if (!identical(
       oldWidget.configurationEditGuard,
       widget.configurationEditGuard,
@@ -398,6 +475,10 @@ final class _OrganizationOnboardingPageState
 
   /// Сохраняет агрегат целиком, чтобы сервер мог проверить межшаговые связи.
   Future<void> _saveAndContinue() async {
+    setState(() {
+      _validationError = null;
+      _validationTarget = null;
+    });
     if (!_validateMarginSources()) return;
     if (step == 0 && !(_companyFormKey.currentState?.validate() ?? false)) {
       _showMessage('Проверьте заполнение реквизитов организации.');
@@ -426,7 +507,14 @@ final class _OrganizationOnboardingPageState
     }
     draft.currentStep = (step + 2).clamp(1, 10);
     await widget.controller.saveOnboardingStep(draft);
-    if (!mounted || widget.controller.error != null) return;
+    if (!mounted) return;
+    if (widget.controller.error != null) {
+      _presentValidationError(
+        widget.controller.error!,
+        widget.controller.errorTarget,
+      );
+      return;
+    }
     setState(() {
       draft = widget.controller.onboardingDraft ?? draft;
       step = (step + 1).clamp(0, _reviewStep);
@@ -434,6 +522,10 @@ final class _OrganizationOnboardingPageState
   }
 
   Future<void> _saveSettings() async {
+    setState(() {
+      _validationError = null;
+      _validationTarget = null;
+    });
     if (step == _outboundStep) {
       await _outboundSettings.save();
       return;
@@ -468,12 +560,9 @@ final class _OrganizationOnboardingPageState
     final category = draft.categories
         .where((item) => item.clientId == invalid.categoryClientId)
         .firstOrNull;
-    setState(() {
-      step = 5;
-      _expandedMarginCategories.add(invalid.categoryClientId);
-    });
-    _showMessage(
+    _presentValidationError(
       'Категория «${category?.name ?? invalid.categoryClientId}»: выберите хотя бы одно поле выручки и одно поле затрат.',
+      'margin:${invalid.categoryClientId}',
     );
     return false;
   }
@@ -627,6 +716,48 @@ final class _OrganizationOnboardingPageState
                     ),
                   ),
                 ),
+                if (_validationError case final message?)
+                  Container(
+                    key: const ValueKey('settings-validation-notice'),
+                    width: double.infinity,
+                    padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF421F2D),
+                      border: Border(top: BorderSide(color: Color(0xFFFF7A9E))),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.error_outline,
+                          color: Color(0xFFFF7A9E),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxHeight: 120),
+                            child: SingleChildScrollView(child: Text(message)),
+                          ),
+                        ),
+                        if (_validationTarget != null)
+                          IconButton(
+                            tooltip: 'Перейти к ошибке',
+                            onPressed: () => _presentValidationError(
+                              message,
+                              _validationTarget,
+                            ),
+                            icon: const Icon(Icons.my_location),
+                          ),
+                        IconButton(
+                          tooltip: 'Закрыть сообщение',
+                          onPressed: () => setState(() {
+                            _validationError = null;
+                            _validationTarget = null;
+                          }),
+                          icon: const Icon(Icons.close),
+                        ),
+                      ],
+                    ),
+                  ),
               ],
             );
           },
@@ -670,11 +801,16 @@ final class _OrganizationOnboardingPageState
           ],
         ),
         const SizedBox(height: 22),
-        if (_error != null) ...[
-          _ErrorBanner(_error!),
-          const SizedBox(height: 16),
-        ],
-        _stepBody(),
+        Container(
+          key: _validationKey('section:$step'),
+          decoration: _validationTarget == 'section:$step'
+              ? BoxDecoration(
+                  border: Border.all(color: const Color(0xFFFF7A9E)),
+                  borderRadius: BorderRadius.circular(12),
+                )
+              : null,
+          child: _stepBody(),
+        ),
         const SizedBox(height: 24),
         Row(
           children: [
@@ -693,7 +829,7 @@ final class _OrganizationOnboardingPageState
                     : _settingsMode
                     ? _saveSettings
                     : step == _reviewStep
-                    ? widget.controller.activateOrganization
+                    ? _activateOrganization
                     : _saveAndContinue,
                 icon: _busy || _outboundBusy
                     ? const SizedBox.square(
@@ -732,6 +868,17 @@ final class _OrganizationOnboardingPageState
     _outboundStep => OutboundSettingsEditor(controller: _outboundSettings),
     _ => _review(),
   };
+
+  Future<void> _activateOrganization() async {
+    if (!_validateMarginSources()) return;
+    await widget.controller.activateOrganization();
+    if (mounted && widget.controller.error != null) {
+      _presentValidationError(
+        widget.controller.error!,
+        widget.controller.errorTarget,
+      );
+    }
+  }
 
   Widget _companyEditor() {
     return Form(
@@ -789,6 +936,8 @@ final class _OrganizationOnboardingPageState
   Widget _workflowPanel(WorkflowDraft workflow) {
     final isExpanded = !_collapsedWorkflowCodes.contains(workflow.code);
     return _SubPanel(
+      key: _validationKey('workflow:${workflow.code}'),
+      errorMessage: _blockError('workflow:${workflow.code}'),
       title: workflow.name.trim().isEmpty
           ? 'Канбан без названия'
           : workflow.name,
@@ -1286,6 +1435,12 @@ final class _OrganizationOnboardingPageState
           padding: const EdgeInsets.only(bottom: 14),
           child: _SubPanel(
             title: draft.categories[categoryIndex].name,
+            key: _validationKey(
+              'category:${draft.categories[categoryIndex].clientId}',
+            ),
+            errorMessage: _blockError(
+              'category:${draft.categories[categoryIndex].clientId}',
+            ),
             expanded: !_collapsedCategoryIds.contains(
               draft.categories[categoryIndex].clientId,
             ),
@@ -2335,6 +2490,8 @@ final class _OrganizationOnboardingPageState
         .where((item) => item.categoryClientId == category.clientId)
         .firstOrNull;
     return _SubPanel(
+      key: _validationKey('margin:${category.clientId}'),
+      errorMessage: _blockError('margin:${category.clientId}'),
       title: category.name,
       expanded: _expandedMarginCategories.contains(category.clientId),
       onToggle: () => setState(
@@ -2395,6 +2552,8 @@ final class _OrganizationOnboardingPageState
     final expanded = !_collapsedPipelines.contains(pipeline.clientId);
     final resultLabel = _categoryFieldLabel(category, pipeline.resultFieldCode);
     return _SubPanel(
+      key: _validationKey('pipeline:${pipeline.clientId}'),
+      errorMessage: _blockError('pipeline:${pipeline.clientId}'),
       title: resultLabel,
       expanded: expanded,
       onToggle: () => setState(
@@ -2540,6 +2699,8 @@ final class _OrganizationOnboardingPageState
     final category = _categoryByClientId(rule.categoryClientId);
     final expanded = !_collapsedRules.contains(rule.clientId);
     return _SubPanel(
+      key: _validationKey('rule:${rule.clientId}'),
+      errorMessage: _blockError('rule:${rule.clientId}'),
       title: rule.name,
       headerControl: Tooltip(
         message: rule.isEnabled ? 'Отключить правило' : 'Включить правило',
@@ -3976,7 +4137,10 @@ final class _SubPanel extends StatelessWidget {
     this.expanded = true,
     this.collapseTooltip = 'Свернуть блок',
     this.expandTooltip = 'Развернуть блок',
+    this.errorMessage,
+    super.key,
   });
+  final String? errorMessage;
   final String title;
   final Widget child;
   final VoidCallback? onDelete;
@@ -3991,7 +4155,12 @@ final class _SubPanel extends StatelessWidget {
     decoration: BoxDecoration(
       color: const Color(0xFF0D151F),
       borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: const Color(0xFF28384E)),
+      border: Border.all(
+        color: errorMessage == null
+            ? const Color(0xFF28384E)
+            : const Color(0xFFFF7A9E),
+        width: errorMessage == null ? 1 : 2,
+      ),
     ),
     child: Padding(
       padding: const EdgeInsets.all(16),
@@ -4040,6 +4209,17 @@ final class _SubPanel extends StatelessWidget {
                 ? Padding(padding: const EdgeInsets.only(top: 12), child: child)
                 : const SizedBox.shrink(),
           ),
+          if (errorMessage != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  errorMessage!,
+                  style: const TextStyle(color: Color(0xFFFF7A9E)),
+                ),
+              ),
+            ),
         ],
       ),
     ),
@@ -4342,32 +4522,6 @@ final class _FieldTypeBadge extends StatelessWidget {
       label,
       textAlign: TextAlign.center,
       style: const TextStyle(color: Color(0xFF9DB2CE), fontSize: 12),
-    ),
-  );
-}
-
-final class _ErrorBanner extends StatelessWidget {
-  const _ErrorBanner(this.message);
-  final String message;
-  @override
-  Widget build(BuildContext context) =>
-      AutoDismissNotice(message: message, child: _content(context));
-
-  Widget _content(BuildContext context) => DecoratedBox(
-    decoration: BoxDecoration(
-      color: const Color(0x553A1420),
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: const Color(0xFF8F3652)),
-    ),
-    child: Padding(
-      padding: const EdgeInsets.all(14),
-      child: Row(
-        children: [
-          const Icon(Icons.error_outline, color: Color(0xFFFF7A9E)),
-          const SizedBox(width: 10),
-          Expanded(child: Text(message)),
-        ],
-      ),
     ),
   );
 }

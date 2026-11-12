@@ -180,6 +180,7 @@ final class _OrganizationSettingsSectionState
                 settingsDraft: widget.controller.configuration,
                 settingsBusy: widget.controller.saving,
                 settingsError: widget.controller.error,
+                settingsErrorTarget: widget.controller.configurationErrorTarget,
                 onSettingsSave: widget.controller.saveConfiguration,
                 onCategoryDeletionImpact:
                     widget.controller.getCategoryDeletionImpact,

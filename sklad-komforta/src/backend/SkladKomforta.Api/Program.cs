@@ -105,7 +105,7 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
                     StatusCodes.Status413PayloadTooLarge => "Размер запроса превышает допустимый предел.",
                     StatusCodes.Status415UnsupportedMediaType => "Неподдерживаемый формат запроса.",
                     _ => "Запрос содержит некорректные данные. Проверьте заполненные поля.",
-                })));
+                }), identityError?.Target));
 }));
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseCors("FlutterClients");

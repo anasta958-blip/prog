@@ -7,6 +7,40 @@ namespace SkladKomforta.Domain.Tests.Onboarding;
 /// <summary>Фиксирует серверные инварианты первичной настройки организации.</summary>
 public sealed class OnboardingValidatorTests
 {
+    [Fact]
+    public void RuleValidationIdentifiesExactRuleEvenWithDuplicateNames()
+    {
+        var draft = ValidDraft() with {
+            Categories = [CategoryWithCalculationFields()],
+            Rules = [
+                new CalculationRuleDraft("good", "Same", "equipment", "card_saving", true, null, [], [new("block_save")]),
+                new CalculationRuleDraft("broken", "Same", "equipment", "field_changed", true, null, [], [new("block_save")])
+            ]
+        };
+        var error = Assert.Throws<IdentityException>(() => OnboardingValidator.Validate(draft, false));
+        Assert.Equal("rule:broken", error.Target);
+    }
+
+    [Fact]
+    public void CategoryValidationIdentifiesItsEditorBlock()
+    {
+        var draft = ValidDraft() with { Categories = [CategoryWithCalculationFields() with { Name = "" }] };
+        var error = Assert.Throws<IdentityException>(() => OnboardingValidator.Validate(draft, false));
+        Assert.Equal("category:equipment", error.Target);
+    }
+
+    [Fact]
+    public void InvalidFormulaIdentifiesRuleInsteadOfGenericSection()
+    {
+        var draft = ValidDraft() with {
+            Categories = [CategoryWithCalculationFields()],
+            Rules = [new CalculationRuleDraft("formula", "Formula", "equipment", "card_saving", true, null, [],
+                [new("calculate_field", TargetFieldCode: "custom_total", Formula: new FormulaDraft([]))])]
+        };
+        var error = Assert.Throws<IdentityException>(() => OnboardingValidator.Validate(draft, false));
+        Assert.Equal("rule:formula", error.Target);
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]

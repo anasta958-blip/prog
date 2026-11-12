@@ -25,84 +25,90 @@ public static class OnboardingValidator
         if (draft.CurrentStep is < 1 or > 10)
             Fail("onboarding_step_invalid", "Номер шага должен быть от 1 до 10.");
 
-        ValidateCompany(draft.Company);
-        ValidateUnique(draft.Workflows.Select(item => item.Code), "Коды канбанов");
-        ValidateUnique(draft.Categories.Select(item => item.ClientId), "Идентификаторы категорий");
-        ValidateUnique(draft.Categories.Select(item => item.Name), "Названия категорий");
-        ValidateUnique(draft.Roles.Select(item => item.Name), "Названия ролей");
-        ValidateUnique(draft.Dictionaries.Select(item => item.Code), "Коды справочников");
+        AtTarget("section:0", () => ValidateCompany(draft.Company));
+        AtTarget("section:1", () => ValidateUnique(draft.Workflows.Select(item => item.Code), "Коды канбанов"));
+        AtTarget("section:2", () => ValidateUnique(draft.Categories.Select(item => item.ClientId), "Идентификаторы категорий"));
+        AtTarget("section:2", () => ValidateUnique(draft.Categories.Select(item => item.Name), "Названия категорий"));
+        AtTarget("section:7", () => ValidateUnique(draft.Roles.Select(item => item.Name), "Названия ролей"));
+        AtTarget("section:3", () => ValidateUnique(draft.Dictionaries.Select(item => item.Code), "Коды справочников"));
 
         foreach (var workflow in draft.Workflows)
         {
-            RequireText(workflow.Code, 2, 80, "Код канбана");
-            RequireText(workflow.Name, 2, 120, "Название канбана");
-            if (workflow.Specialization is not null &&
-                !WorkflowSpecializations.Contains(workflow.Specialization))
+            AtTarget($"workflow:{workflow.Code}", () =>
             {
-                Fail(
-                    "onboarding_workflow_specialization_invalid",
-                    $"Для канбана «{workflow.Name}» выбран неизвестный тип.");
-            }
-            ValidateUnique(workflow.Columns.Select(item => item.ClientId), "Идентификаторы столбцов");
-            foreach (var column in workflow.Columns)
-            {
-                RequireText(column.ClientId, 1, 80, "Идентификатор столбца");
-                RequireText(column.Name, 1, 120, "Название столбца");
-                if (column.Color.Length != 7 || column.Color[0] != '#' || !column.Color[1..].All(Uri.IsHexDigit))
-                    Fail("onboarding_color_invalid", "Цвет столбца должен иметь формат #RRGGBB.");
-                foreach (var action in column.CreationActions ?? [])
+                RequireText(workflow.Code, 2, 80, "Код канбана");
+                RequireText(workflow.Name, 2, 120, "Название канбана");
+                if (workflow.Specialization is not null &&
+                    !WorkflowSpecializations.Contains(workflow.Specialization))
                 {
-                    if (action is not WorkflowCreationActionCodes.Quote and
-                        not WorkflowCreationActionCodes.Prequote and
-                        not WorkflowCreationActionCodes.Order)
-                        Fail("onboarding_creation_action_invalid", "Столбец содержит неизвестное действие создания.");
+                    Fail(
+                        "onboarding_workflow_specialization_invalid",
+                        $"Для канбана «{workflow.Name}» выбран неизвестный тип.");
                 }
-            }
+                ValidateUnique(workflow.Columns.Select(item => item.ClientId), "Идентификаторы столбцов");
+                foreach (var column in workflow.Columns)
+                {
+                    RequireText(column.ClientId, 1, 80, "Идентификатор столбца");
+                    RequireText(column.Name, 1, 120, "Название столбца");
+                    if (column.Color.Length != 7 || column.Color[0] != '#' || !column.Color[1..].All(Uri.IsHexDigit))
+                        Fail("onboarding_color_invalid", "Цвет столбца должен иметь формат #RRGGBB.");
+                    foreach (var action in column.CreationActions ?? [])
+                    {
+                        if (action is not WorkflowCreationActionCodes.Quote and
+                            not WorkflowCreationActionCodes.Prequote and
+                            not WorkflowCreationActionCodes.Order)
+                            Fail("onboarding_creation_action_invalid", "Столбец содержит неизвестное действие создания.");
+                    }
+                }
 
-            ValidateCreationActions(workflow);
+                ValidateCreationActions(workflow);
 
-            var columnIds = workflow.Columns.Select(item => item.ClientId).ToHashSet(StringComparer.Ordinal);
-            if (workflow.Transitions.Any(item => item.FromClientId == item.ToClientId ||
-                                                 !columnIds.Contains(item.FromClientId) ||
-                                                 !columnIds.Contains(item.ToClientId)))
-                Fail("onboarding_transition_invalid", "Переход канбана ссылается на неизвестный столбец.");
+                var columnIds = workflow.Columns.Select(item => item.ClientId).ToHashSet(StringComparer.Ordinal);
+                if (workflow.Transitions.Any(item => item.FromClientId == item.ToClientId ||
+                                                     !columnIds.Contains(item.FromClientId) ||
+                                                     !columnIds.Contains(item.ToClientId)))
+                    Fail("onboarding_transition_invalid", "Переход канбана ссылается на неизвестный столбец.");
+            });
         }
 
         foreach (var category in draft.Categories)
         {
-            RequireText(category.ClientId, 1, 80, "Идентификатор категории");
-            RequireText(category.Name, 1, 120, "Название категории");
-            ValidateUnique(category.Fields.Select(item => item.FieldCode), $"Поля категории «{category.Name}»");
-            ValidateUnique(
-                category.Fields.Select(OnboardingFieldRegistry.LabelOf),
-                $"Названия полей категории «{category.Name}»");
-            ValidateFieldSelection(category.Fields, $"категории «{category.Name}»");
-            foreach (var field in category.Fields)
+            AtTarget($"category:{category.ClientId}", () =>
             {
-                if (field.TotalMode is not null && field.TotalMode is not ("none" or "total" or "separate" or "separate_only"))
-                    Fail("onboarding_total_mode_invalid", "Неизвестный режим участия поля в итогах.");
-                if (field.TotalMode is "total" or "separate" or "separate_only" &&
-                    OnboardingFieldRegistry.FieldTypeOf(field) is not ("money" or "calculated_money"))
-                    Fail("onboarding_total_mode_invalid", "В итоги можно включать только денежные значения и расчётные суммы.");
-            }
-            ValidateUnique(category.Sections.Select(item => item.Name), "Названия разделов");
-            foreach (var section in category.Sections)
-            {
-                RequireText(section.Name, 1, 120, "Название раздела");
-                ValidateUnique(section.Groups.Select(item => item.Name), "Названия групп");
-                foreach (var group in section.Groups) RequireText(group.Name, 1, 120, "Название группы");
-            }
+                RequireText(category.ClientId, 1, 80, "Идентификатор категории");
+                RequireText(category.Name, 1, 120, "Название категории");
+                ValidateUnique(category.Fields.Select(item => item.FieldCode), $"Поля категории «{category.Name}»");
+                ValidateUnique(
+                    category.Fields.Select(OnboardingFieldRegistry.LabelOf),
+                    $"Названия полей категории «{category.Name}»");
+                ValidateFieldSelection(category.Fields, $"категории «{category.Name}»");
+                foreach (var field in category.Fields)
+                {
+                    if (field.TotalMode is not null && field.TotalMode is not ("none" or "total" or "separate" or "separate_only"))
+                        Fail("onboarding_total_mode_invalid", "Неизвестный режим участия поля в итогах.");
+                    if (field.TotalMode is "total" or "separate" or "separate_only" &&
+                        OnboardingFieldRegistry.FieldTypeOf(field) is not ("money" or "calculated_money"))
+                        Fail("onboarding_total_mode_invalid", "В итоги можно включать только денежные значения и расчётные суммы.");
+                }
+                ValidateUnique(category.Sections.Select(item => item.Name), "Названия разделов");
+                foreach (var section in category.Sections)
+                {
+                    RequireText(section.Name, 1, 120, "Название раздела");
+                    ValidateUnique(section.Groups.Select(item => item.Name), "Названия групп");
+                    foreach (var group in section.Groups) RequireText(group.Name, 1, 120, "Название группы");
+                }
+            });
         }
 
-        ValidateTransfers(draft.Workflows);
-        ValidateWorkflowCategories(draft.Workflows, draft.Categories);
-        ValidateDependencies(draft.Categories, draft.Dependencies ?? []);
-        ValidateRules(
+        AtTarget("section:1", () => ValidateTransfers(draft.Workflows));
+        AtTarget("section:4", () => ValidateWorkflowCategories(draft.Workflows, draft.Categories));
+        AtTarget("section:6", () => ValidateDependencies(draft.Categories, draft.Dependencies ?? []));
+        AtTarget("section:5", () => ValidateRules(
             draft.Categories,
             draft.Dependencies ?? [],
             draft.Rules ?? [],
-            draft.MoneyPipelines ?? []);
-        ValidateDictionaryBindings(draft);
+            draft.MoneyPipelines ?? []));
+        AtTarget("section:4", () => ValidateDictionaryBindings(draft));
         ValidateMargins(draft.Categories, draft.MarginSettings ?? []);
 
         ValidateUnique(draft.Fields.Select(item => $"{item.ContextCode}:{item.FieldCode}"), "Коды полей");
@@ -119,13 +125,16 @@ public static class OnboardingValidator
                 Fail("onboarding_field_invalid", $"Поле «{definition.Label}» нельзя сделать обязательным.");
         }
 
-        foreach (var role in draft.Roles) RequireText(role.Name, 2, 100, "Название роли");
+        foreach (var role in draft.Roles) AtTarget("section:7", () => RequireText(role.Name, 2, 100, "Название роли"));
         foreach (var dictionary in draft.Dictionaries)
         {
-            RequireText(dictionary.Code, 2, 80, "Код справочника");
-            RequireText(dictionary.Name, 2, 120, "Название справочника");
-            ValidateUnique(dictionary.Items.Select(item => item.Value), "Значения справочника");
-            foreach (var item in dictionary.Items) RequireText(item.Value, 1, 160, "Значение справочника");
+            AtTarget("section:3", () =>
+            {
+                RequireText(dictionary.Code, 2, 80, "Код справочника");
+                RequireText(dictionary.Name, 2, 120, "Название справочника");
+                ValidateUnique(dictionary.Items.Select(item => item.Value), "Значения справочника");
+                foreach (var item in dictionary.Items) RequireText(item.Value, 1, 160, "Значение справочника");
+            });
         }
 
         if (forActivation &&
@@ -378,9 +387,13 @@ public static class OnboardingValidator
         IReadOnlyList<MoneyPipelineDraft> pipelines)
     {
         ValidateUnique(rules.Select(item => item.ClientId), "Идентификаторы правил");
-        ValidateUnique(
-            rules.Select(item => $"{item.CategoryClientId}:{item.Name}"),
-            "Названия правил внутри категории");
+        var ruleNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var rule in rules)
+            AtTarget($"rule:{rule.ClientId}", () =>
+            {
+                if (!ruleNames.Add($"{rule.CategoryClientId}:{rule.Name}".Trim()))
+                    Fail("onboarding_duplicate", "Названия правил внутри категории не должны повторяться.");
+            });
         ValidateUnique(
             pipelines.Select(item => string.IsNullOrWhiteSpace(item.ClientId)
                 ? $"{item.CategoryClientId}:{item.ResultFieldCode}"
@@ -395,47 +408,53 @@ public static class OnboardingValidator
 
         foreach (var pipeline in pipelines)
         {
-            var category = RequireRuleCategory(categoriesById, pipeline.CategoryClientId);
-            var fields = category.Fields.ToDictionary(item => item.FieldCode, StringComparer.Ordinal);
-            RequireRuleField(fields, pipeline.BasePriceFieldCode, ["money", "calculated_money"], "Базовая цена");
-            RequireOptionalRuleField(fields, pipeline.ManualPriceFieldCode, ["money"], "Ручная цена");
-            RequireOptionalRuleField(fields, pipeline.MarkupFieldCode, ["percent"], "Наценка");
-            RequireOptionalRuleField(fields, pipeline.DiscountFieldCode, ["percent"], "Скидка");
-            RequireOptionalRuleField(fields, pipeline.QuantityFieldCode, ["number"], "Количество");
-            RequireRuleField(fields, pipeline.ResultFieldCode, ["money", "calculated_money"], "Поле результата");
-            if (pipeline.DecimalPlaces is < 0 or > 6)
-                Fail("onboarding_rule_invalid", "Округление денежного конвейера должно быть от 0 до 6 знаков.");
+            AtTarget($"pipeline:{pipeline.ClientId ?? pipeline.ResultFieldCode}", () =>
+            {
+                var category = RequireRuleCategory(categoriesById, pipeline.CategoryClientId);
+                var fields = category.Fields.ToDictionary(item => item.FieldCode, StringComparer.Ordinal);
+                RequireRuleField(fields, pipeline.BasePriceFieldCode, ["money", "calculated_money"], "Базовая цена");
+                RequireOptionalRuleField(fields, pipeline.ManualPriceFieldCode, ["money"], "Ручная цена");
+                RequireOptionalRuleField(fields, pipeline.MarkupFieldCode, ["percent"], "Наценка");
+                RequireOptionalRuleField(fields, pipeline.DiscountFieldCode, ["percent"], "Скидка");
+                RequireOptionalRuleField(fields, pipeline.QuantityFieldCode, ["number"], "Количество");
+                RequireRuleField(fields, pipeline.ResultFieldCode, ["money", "calculated_money"], "Поле результата");
+                if (pipeline.DecimalPlaces is < 0 or > 6)
+                    Fail("onboarding_rule_invalid", "Округление денежного конвейера должно быть от 0 до 6 знаков.");
+            });
         }
 
         foreach (var rule in rules)
         {
-            RequireText(rule.ClientId, 1, 100, "Идентификатор правила");
-            RequireText(rule.Name, 1, 120, "Название правила");
-            var category = RequireRuleCategory(categoriesById, rule.CategoryClientId);
-            var fields = category.Fields.ToDictionary(item => item.FieldCode, StringComparer.Ordinal);
-            RequireAllowed(
-                rule.EventType,
-                ["field_changed", "card_saving", "row_calculation", "variant_calculation"],
-                "Событие правила");
-            if (rule.EventType == "field_changed")
-                RequireRuleField(fields, rule.EventFieldCode, null, "Поле события");
-            else if (!string.IsNullOrWhiteSpace(rule.EventFieldCode))
-                Fail("onboarding_rule_invalid", "Поле события задаётся только для изменения поля.");
-
-            if (rule.EventType == "variant_calculation")
-                fields.Add("variant_total", new CatalogFieldDraft("variant_total", true, false,
-                    Label: "Итоговая сумма варианта (с НДС)", FieldType: "money"));
-
-            foreach (var condition in rule.Conditions)
-                ValidateCondition(fields, condition);
-            if (rule.Actions.Count == 0)
-                Fail("onboarding_rule_invalid", $"В правиле «{rule.Name}» отсутствуют действия.");
-            foreach (var action in rule.Actions)
+            AtTarget($"rule:{rule.ClientId}", () =>
             {
-                if (action.TargetFieldCode == "variant_total")
-                    Fail("onboarding_rule_field_invalid", "Итоговая сумма варианта доступна только для чтения.");
-                ValidateAction(fields, dependenciesById, category.ClientId, action);
-            }
+                RequireText(rule.ClientId, 1, 100, "Идентификатор правила");
+                RequireText(rule.Name, 1, 120, "Название правила");
+                var category = RequireRuleCategory(categoriesById, rule.CategoryClientId);
+                var fields = category.Fields.ToDictionary(item => item.FieldCode, StringComparer.Ordinal);
+                RequireAllowed(
+                    rule.EventType,
+                    ["field_changed", "card_saving", "row_calculation", "variant_calculation"],
+                    "Событие правила");
+                if (rule.EventType == "field_changed")
+                    RequireRuleField(fields, rule.EventFieldCode, null, "Поле события");
+                else if (!string.IsNullOrWhiteSpace(rule.EventFieldCode))
+                    Fail("onboarding_rule_invalid", "Поле события задаётся только для изменения поля.");
+
+                if (rule.EventType == "variant_calculation")
+                    fields.Add("variant_total", new CatalogFieldDraft("variant_total", true, false,
+                        Label: "Итоговая сумма варианта (с НДС)", FieldType: "money"));
+
+                foreach (var condition in rule.Conditions)
+                    ValidateCondition(fields, condition);
+                if (rule.Actions.Count == 0)
+                    Fail("onboarding_rule_invalid", $"В правиле «{rule.Name}» отсутствуют действия.");
+                foreach (var action in rule.Actions)
+                {
+                    if (action.TargetFieldCode == "variant_total")
+                        Fail("onboarding_rule_field_invalid", "Итоговая сумма варианта доступна только для чтения.");
+                    ValidateAction(fields, dependenciesById, category.ClientId, action);
+                }
+            });
         }
 
         var writers = new HashSet<(string Category, string Field)>();
@@ -448,11 +467,13 @@ public static class OnboardingValidator
                 $"Категория «{category.Name}»: в поле «{field.Label ?? fieldCode}» записывает несколько правил или конвейеров. Оставьте один источник записи.");
         }
         foreach (var pipeline in pipelines)
-            RegisterWriter(pipeline.CategoryClientId, pipeline.ResultFieldCode);
+            AtTarget($"pipeline:{pipeline.ClientId ?? pipeline.ResultFieldCode}",
+                () => RegisterWriter(pipeline.CategoryClientId, pipeline.ResultFieldCode));
         foreach (var rule in rules)
             foreach (var action in rule.Actions)
                 if (action.ActionType is "set_field" or "calculate_field")
-                    RegisterWriter(rule.CategoryClientId, action.TargetFieldCode!);
+                    AtTarget($"rule:{rule.ClientId}",
+                        () => RegisterWriter(rule.CategoryClientId, action.TargetFieldCode!));
     }
 
     private static CatalogCategoryDraft RequireRuleCategory(
@@ -637,18 +658,31 @@ public static class OnboardingValidator
         var categoriesById = categories.ToDictionary(item => item.ClientId, StringComparer.Ordinal);
         foreach (var item in settings)
         {
-            var category = RequireRuleCategory(categoriesById, item.CategoryClientId);
-            if (item.RevenueFields is not { Count: > 0 } || item.CostFields is not { Count: > 0 })
-                Fail("onboarding_margin_sources_required",
-                    $"Категория «{category.Name}»: выберите хотя бы одно поле выручки и одно поле затрат.");
-            var fields = category.Fields.ToDictionary(field => field.FieldCode, StringComparer.Ordinal);
-            foreach (var sources in new[] { item.RevenueFields, item.CostFields })
+            AtTarget($"margin:{item.CategoryClientId}", () =>
             {
-                if (sources is null) Fail("onboarding_rule_invalid", "Не заданы поля расчёта маржи.");
-                ValidateUnique(sources.Select(source => source.FieldCode), "Поля расчёта маржи");
-                foreach (var source in sources)
-                    RequireRuleField(fields, source.FieldCode, ["money", "calculated_money"], "Поле расчёта маржи");
-            }
+                var category = RequireRuleCategory(categoriesById, item.CategoryClientId);
+                if (item.RevenueFields is not { Count: > 0 } || item.CostFields is not { Count: > 0 })
+                    Fail("onboarding_margin_sources_required",
+                        $"Категория «{category.Name}»: выберите хотя бы одно поле выручки и одно поле затрат.");
+                var fields = category.Fields.ToDictionary(field => field.FieldCode, StringComparer.Ordinal);
+                foreach (var sources in new[] { item.RevenueFields, item.CostFields })
+                {
+                    if (sources is null) Fail("onboarding_rule_invalid", "Не заданы поля расчёта маржи.");
+                    ValidateUnique(sources.Select(source => source.FieldCode), "Поля расчёта маржи");
+                    foreach (var source in sources)
+                        RequireRuleField(fields, source.FieldCode, ["money", "calculated_money"], "Поле расчёта маржи");
+                }
+            });
+        }
+    }
+
+    private static void AtTarget(string target, Action validate)
+    {
+        try { validate(); }
+        catch (IdentityException exception)
+        {
+            exception.Target ??= target;
+            throw;
         }
     }
 

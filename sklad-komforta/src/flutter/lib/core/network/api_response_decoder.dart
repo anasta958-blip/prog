@@ -21,6 +21,7 @@ dynamic decodeApiResponse(http.Response response) {
       error?['code'] as String? ?? 'request_failed',
       error?['message'] as String? ?? 'Не удалось выполнить запрос.',
       response.statusCode,
+      error?['target'] as String?,
     );
   } on ApiException {
     rethrow;

@@ -102,4 +102,6 @@ public sealed class IdentityException : Exception
 
     /// <summary>Стабильный машинный код для Flutter-клиента.</summary>
     public string Code { get; }
+    /// <summary>Stable editor block identifier for configuration validation errors.</summary>
+    public string? Target { get; set; }
 }

@@ -28,6 +28,7 @@ final class AuthController extends ChangeNotifier {
   final TokenRepository _tokens;
   AuthStage stage = AuthStage.loading;
   String? error;
+  String? errorTarget;
   String? challengeToken;
   String? totpSecret;
   String? otpAuthUri;
@@ -381,10 +382,12 @@ final class AuthController extends ChangeNotifier {
     if (busy) return;
     busy = true;
     error = null;
+    errorTarget = null;
     notifyListeners();
     try {
       await action();
     } on AuthApiException catch (exception) {
+      errorTarget = exception.target;
       if (exception.statusCode == 401) {
         await _tokens.clear();
         accessToken = null;

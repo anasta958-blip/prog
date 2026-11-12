@@ -92,6 +92,7 @@ final class CompanyController extends ChangeNotifier {
   /// Растёт при изменении настроек внешней отправки другим пользователем.
   int outboundRevision = 0;
   String? error;
+  String? configurationErrorTarget;
   bool saved = false;
   final Set<String> _approvedCategoryDataDeletions = <String>{};
 
@@ -422,6 +423,7 @@ final class CompanyController extends ChangeNotifier {
     List<String> deleteCategoryData = const [],
   }) async {
     if (saving) return false;
+    configurationErrorTarget = null;
     saving = true;
     saved = false;
     error = null;
@@ -448,6 +450,7 @@ final class CompanyController extends ChangeNotifier {
       return true;
     } on ApiException catch (exception) {
       error = exception.message;
+      configurationErrorTarget = exception.target;
       return false;
     } on Object {
       error =
