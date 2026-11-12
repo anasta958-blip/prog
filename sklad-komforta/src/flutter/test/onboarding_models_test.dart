@@ -4,6 +4,96 @@ import 'package:sklad_komforta_app/features/onboarding/onboarding_field_registry
 import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
 
 void main() {
+  for (final copied in [false, true]) {
+    test('category change preserves rule structure (copied: $copied)', () {
+      final source = CalculationRuleDraft(
+        clientId: 'rule',
+        name: 'Правило',
+        categoryClientId: 'old',
+        eventType: 'field_changed',
+        eventFieldCode: 'price',
+        isEnabled: false,
+        conditions: [
+          RuleConditionDraft(
+            fieldCode: 'price',
+            operator: 'less_than',
+            comparisonFieldCode: 'cost',
+          ),
+          RuleConditionDraft(
+            fieldCode: 'quantity',
+            operator: 'equals',
+            comparisonValue: '10',
+          ),
+        ],
+        actions: [
+          RuleActionDraft(
+            actionType: 'highlight_field',
+            targetFieldCode: 'price',
+            highlightColor: '#EF4444',
+            message: 'Проверка',
+          ),
+          RuleActionDraft(
+            actionType: 'calculate_field',
+            targetFieldCode: 'result',
+            sourceFieldCode: 'cost',
+            quantityFieldCode: 'quantity',
+            dependencyClientId: 'relation',
+            multiplyByQuantity: true,
+            formula: FormulaDraft(
+              decimalPlaces: 3,
+              tokens: [
+                FormulaTokenDraft(tokenType: 'field', fieldCode: 'cost'),
+                FormulaTokenDraft(tokenType: 'operator', operator: '*'),
+                FormulaTokenDraft(tokenType: 'constant', constantValue: 10),
+              ],
+            ),
+          ),
+        ],
+      );
+      final before = source.toJson();
+      final rule = copied
+          ? source.copy(clientId: 'copy', name: 'Копия')
+          : source;
+      rule.changeCategory('old');
+      expect(rule.eventFieldCode, 'price');
+      rule.changeCategory('new');
+      expect(rule.categoryClientId, 'new');
+      expect(rule.eventType, 'field_changed');
+      expect(rule.eventFieldCode, isNull);
+      expect(rule.isEnabled, isFalse);
+      expect(rule.conditions.map((item) => item.operator), [
+        'less_than',
+        'equals',
+      ]);
+      expect(rule.conditions.map((item) => item.fieldCode), ['', '']);
+      expect(rule.conditions.first.comparisonFieldCode, '');
+      expect(rule.conditions.last.comparisonFieldCode, isNull);
+      expect(rule.conditions.last.comparisonValue, '10');
+      expect(rule.actions.map((item) => item.actionType), [
+        'highlight_field',
+        'calculate_field',
+      ]);
+      expect(rule.actions.first.message, 'Проверка');
+      expect(rule.actions.first.highlightColor, '#EF4444');
+      expect(rule.actions.first.targetFieldCode, isNull);
+      final action = rule.actions.last;
+      expect(action.targetFieldCode, isNull);
+      expect(action.sourceFieldCode, isNull);
+      expect(action.quantityFieldCode, isNull);
+      expect(action.dependencyClientId, isNull);
+      expect(action.multiplyByQuantity, isTrue);
+      expect(action.formula!.decimalPlaces, 3);
+      expect(action.formula!.tokens.first.fieldCode, isNull);
+      expect(action.formula!.tokens[1].operator, '*');
+      expect(action.formula!.tokens.last.constantValue, 10);
+      expect(
+        CalculationRuleDraft.fromJson(rule.toJson()).toJson(),
+        rule.toJson(),
+      );
+      if (copied) expect(source.toJson(), before);
+    });
+  }
+
   test('rule copy preserves settings and owns all nested mutable data', () {
     final source = CalculationRuleDraft(
       clientId: 'original',

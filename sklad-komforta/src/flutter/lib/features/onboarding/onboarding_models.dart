@@ -619,6 +619,30 @@ final class CalculationRuleDraft {
   List<RuleConditionDraft> conditions;
   List<RuleActionDraft> actions;
 
+  void changeCategory(String value) {
+    if (categoryClientId == value) return;
+    categoryClientId = value;
+    eventFieldCode = null;
+    for (final condition in conditions) {
+      condition.fieldCode = '';
+      // An empty reference keeps the "compare with a field" mode selected.
+      if (condition.comparisonFieldCode != null) {
+        condition.comparisonFieldCode = '';
+      }
+    }
+    for (final action in actions) {
+      action.targetFieldCode = null;
+      action.sourceFieldCode = null;
+      action.quantityFieldCode = null;
+      action.dependencyClientId = null;
+      for (final token in action.formula?.tokens ?? <FormulaTokenDraft>[]) {
+        if (token.tokenType == 'field' && token.fieldCode != 'variant_total') {
+          token.fieldCode = null;
+        }
+      }
+    }
+  }
+
   CalculationRuleDraft copy({required String clientId, required String name}) =>
       CalculationRuleDraft.fromJson(toJson())
         ..clientId = clientId

@@ -2524,17 +2524,7 @@ final class _OrganizationOnboardingPageState
               ],
               onChanged: (value) {
                 if (value == null) return;
-                setState(() {
-                  rule.categoryClientId = value;
-                  rule.eventFieldCode = null;
-                  rule.conditions.clear();
-                  rule.actions = [
-                    RuleActionDraft(
-                      actionType: 'block_save',
-                      message: 'Заполните обязательные данные.',
-                    ),
-                  ];
-                });
+                setState(() => rule.changeCategory(value));
               },
             ),
           ]),
