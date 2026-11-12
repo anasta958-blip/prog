@@ -1,0 +1,116 @@
+{
+  "started_utc": "2026-11-12T16:57:59.619264+00:00",
+  "site": "https://app.eventlab.dpdns.org",
+  "identity_model": "100 distinct accounts in 10 organizations",
+  "phases": [
+    {
+      "users": 100,
+      "duration_s": 181.4,
+      "requests": 16617,
+      "rps": 91.6,
+      "failure_rate": 0.0001,
+      "operations": {
+        "cards": {
+          "count": 3205,
+          "p50_ms": 60.7,
+          "p95_ms": 184.3,
+          "p99_ms": 1134.3,
+          "max_ms": 3131.9,
+          "failures": 0,
+          "status": {
+            "200": 3205
+          }
+        },
+        "catalog_page": {
+          "count": 1597,
+          "p50_ms": 50.0,
+          "p95_ms": 102.3,
+          "p99_ms": 702.8,
+          "max_ms": 2191.7,
+          "failures": 0,
+          "status": {
+            "200": 1597
+          }
+        },
+        "catalog_search": {
+          "count": 2641,
+          "p50_ms": 49.1,
+          "p95_ms": 105.8,
+          "p99_ms": 567.6,
+          "max_ms": 3098.8,
+          "failures": 0,
+          "status": {
+            "200": 2641
+          }
+        },
+        "board": {
+          "count": 2396,
+          "p50_ms": 66.0,
+          "p95_ms": 195.0,
+          "p99_ms": 802.3,
+          "max_ms": 2851.8,
+          "failures": 0,
+          "status": {
+            "200": 2396
+          }
+        },
+        "card_search": {
+          "count": 2208,
+          "p50_ms": 61.1,
+          "p95_ms": 204.6,
+          "p99_ms": 1216.6,
+          "max_ms": 3768.7,
+          "failures": 0,
+          "status": {
+            "200": 2208
+          }
+        },
+        "card_open": {
+          "count": 1281,
+          "p50_ms": 70.9,
+          "p95_ms": 216.2,
+          "p99_ms": 689.6,
+          "max_ms": 2523.7,
+          "failures": 0,
+          "status": {
+            "200": 1281
+          }
+        },
+        "boards": {
+          "count": 1655,
+          "p50_ms": 47.9,
+          "p95_ms": 107.8,
+          "p99_ms": 954.3,
+          "max_ms": 3350.0,
+          "failures": 0,
+          "status": {
+            "200": 1655
+          }
+        },
+        "card_edit": {
+          "count": 952,
+          "p50_ms": 77.8,
+          "p95_ms": 261.9,
+          "p99_ms": 1695.2,
+          "max_ms": 20003.7,
+          "failures": 1,
+          "status": {
+            "200": 951,
+            "ReadTimeout": 1
+          }
+        },
+        "card_move": {
+          "count": 682,
+          "p50_ms": 78.8,
+          "p95_ms": 248.5,
+          "p99_ms": 532.7,
+          "max_ms": 3615.9,
+          "failures": 0,
+          "status": {
+            "200": 682
+          }
+        }
+      }
+    }
+  ]
+}

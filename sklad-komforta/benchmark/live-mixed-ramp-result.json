@@ -1,0 +1,656 @@
+{
+  "started_utc": "2026-11-12T18:40:32.387373+00:00",
+  "site": "https://app.eventlab.dpdns.org",
+  "identity_model": "100 accounts across 10 organizations",
+  "roles": {
+    "rules": 10,
+    "quote": 20,
+    "prequote": 10,
+    "order": 20,
+    "catalog": 20,
+    "kanban": 20
+  },
+  "phases": [
+    {
+      "users": 10,
+      "duration_s": 62.1,
+      "requests": 305,
+      "rps": 4.9,
+      "unexpected_failures": 0,
+      "failure_rate": 0.0,
+      "unresolved_conflicts": 0,
+      "expected_recalculations": {},
+      "operations": {
+        "configuration_read": {
+          "count": 10,
+          "p50_ms": 193.5,
+          "p95_ms": 240.3,
+          "p99_ms": 256.8,
+          "max_ms": 260.9,
+          "failures": 0,
+          "status": {
+            "200": 10
+          }
+        },
+        "rule_create": {
+          "count": 10,
+          "p50_ms": 663.4,
+          "p95_ms": 695.4,
+          "p99_ms": 701.6,
+          "max_ms": 703.2,
+          "failures": 0,
+          "status": {
+            "200": 10
+          }
+        },
+        "catalog_page": {
+          "count": 71,
+          "p50_ms": 51.6,
+          "p95_ms": 67.7,
+          "p99_ms": 83.5,
+          "max_ms": 84.4,
+          "failures": 0,
+          "status": {
+            "200": 71
+          }
+        },
+        "catalog_search": {
+          "count": 70,
+          "p50_ms": 49.8,
+          "p95_ms": 73.3,
+          "p99_ms": 91.5,
+          "max_ms": 96.0,
+          "failures": 0,
+          "status": {
+            "200": 70
+          }
+        },
+        "kanban_search": {
+          "count": 62,
+          "p50_ms": 59.0,
+          "p95_ms": 75.9,
+          "p99_ms": 98.2,
+          "max_ms": 116.5,
+          "failures": 0,
+          "status": {
+            "200": 62
+          }
+        },
+        "boards": {
+          "count": 82,
+          "p50_ms": 47.3,
+          "p95_ms": 65.5,
+          "p99_ms": 73.7,
+          "max_ms": 77.6,
+          "failures": 0,
+          "status": {
+            "200": 82
+          }
+        }
+      }
+    },
+    {
+      "users": 25,
+      "duration_s": 62.8,
+      "requests": 949,
+      "rps": 15.1,
+      "unexpected_failures": 0,
+      "failure_rate": 0.0,
+      "unresolved_conflicts": 0,
+      "expected_recalculations": {},
+      "operations": {
+        "catalog_page": {
+          "count": 88,
+          "p50_ms": 47.2,
+          "p95_ms": 72.5,
+          "p99_ms": 247.3,
+          "max_ms": 534.6,
+          "failures": 0,
+          "status": {
+            "200": 88
+          }
+        },
+        "catalog_search": {
+          "count": 106,
+          "p50_ms": 46.6,
+          "p95_ms": 75.9,
+          "p99_ms": 193.9,
+          "max_ms": 287.2,
+          "failures": 0,
+          "status": {
+            "200": 106
+          }
+        },
+        "boards": {
+          "count": 96,
+          "p50_ms": 44.2,
+          "p95_ms": 82.9,
+          "p99_ms": 205.6,
+          "max_ms": 246.5,
+          "failures": 0,
+          "status": {
+            "200": 96
+          }
+        },
+        "kanban_search": {
+          "count": 99,
+          "p50_ms": 53.0,
+          "p95_ms": 74.7,
+          "p99_ms": 93.6,
+          "max_ms": 205.6,
+          "failures": 0,
+          "status": {
+            "200": 99
+          }
+        },
+        "quote_create": {
+          "count": 15,
+          "p50_ms": 707.6,
+          "p95_ms": 801.8,
+          "p99_ms": 803.6,
+          "max_ms": 804.0,
+          "failures": 0,
+          "status": {
+            "200": 15
+          }
+        },
+        "quote_open": {
+          "count": 311,
+          "p50_ms": 81.4,
+          "p95_ms": 126.7,
+          "p99_ms": 149.4,
+          "max_ms": 175.0,
+          "failures": 0,
+          "status": {
+            "200": 311
+          }
+        },
+        "quote_save": {
+          "count": 234,
+          "p50_ms": 99.4,
+          "p95_ms": 141.4,
+          "p99_ms": 177.9,
+          "max_ms": 195.4,
+          "failures": 0,
+          "status": {
+            "200": 234
+          }
+        }
+      }
+    },
+    {
+      "users": 50,
+      "duration_s": 62.9,
+      "requests": 1996,
+      "rps": 31.7,
+      "unexpected_failures": 0,
+      "failure_rate": 0.0,
+      "unresolved_conflicts": 0,
+      "expected_recalculations": {},
+      "operations": {
+        "boards": {
+          "count": 147,
+          "p50_ms": 47.3,
+          "p95_ms": 89.7,
+          "p99_ms": 164.5,
+          "max_ms": 399.7,
+          "failures": 0,
+          "status": {
+            "200": 147
+          }
+        },
+        "catalog_page": {
+          "count": 148,
+          "p50_ms": 50.4,
+          "p95_ms": 170.2,
+          "p99_ms": 462.4,
+          "max_ms": 981.2,
+          "failures": 0,
+          "status": {
+            "200": 148
+          }
+        },
+        "catalog_search": {
+          "count": 125,
+          "p50_ms": 51.5,
+          "p95_ms": 103.6,
+          "p99_ms": 422.0,
+          "max_ms": 457.1,
+          "failures": 0,
+          "status": {
+            "200": 125
+          }
+        },
+        "kanban_search": {
+          "count": 139,
+          "p50_ms": 56.1,
+          "p95_ms": 100.4,
+          "p99_ms": 189.9,
+          "max_ms": 261.3,
+          "failures": 0,
+          "status": {
+            "200": 139
+          }
+        },
+        "quote_open": {
+          "count": 405,
+          "p50_ms": 94.3,
+          "p95_ms": 295.7,
+          "p99_ms": 1136.3,
+          "max_ms": 2182.3,
+          "failures": 0,
+          "status": {
+            "200": 405
+          }
+        },
+        "order_create": {
+          "count": 10,
+          "p50_ms": 1273.8,
+          "p95_ms": 1579.0,
+          "p99_ms": 1594.6,
+          "max_ms": 1598.5,
+          "failures": 0,
+          "status": {
+            "200": 10
+          }
+        },
+        "prequote_create": {
+          "count": 10,
+          "p50_ms": 1406.1,
+          "p95_ms": 1616.5,
+          "p99_ms": 1623.6,
+          "max_ms": 1625.4,
+          "failures": 0,
+          "status": {
+            "200": 10
+          }
+        },
+        "quote_create": {
+          "count": 5,
+          "p50_ms": 1317.5,
+          "p95_ms": 1549.5,
+          "p99_ms": 1584.2,
+          "max_ms": 1592.9,
+          "failures": 0,
+          "status": {
+            "200": 5
+          }
+        },
+        "quote_save": {
+          "count": 296,
+          "p50_ms": 134.9,
+          "p95_ms": 371.3,
+          "p99_ms": 518.7,
+          "max_ms": 677.5,
+          "failures": 0,
+          "status": {
+            "200": 296
+          }
+        },
+        "order_open": {
+          "count": 203,
+          "p50_ms": 87.9,
+          "p95_ms": 219.1,
+          "p99_ms": 258.5,
+          "max_ms": 297.5,
+          "failures": 0,
+          "status": {
+            "200": 203
+          }
+        },
+        "order_save": {
+          "count": 154,
+          "p50_ms": 122.0,
+          "p95_ms": 298.0,
+          "p99_ms": 377.6,
+          "max_ms": 472.1,
+          "failures": 0,
+          "status": {
+            "200": 154
+          }
+        },
+        "prequote_open": {
+          "count": 199,
+          "p50_ms": 95.0,
+          "p95_ms": 261.7,
+          "p99_ms": 312.1,
+          "max_ms": 370.9,
+          "failures": 0,
+          "status": {
+            "200": 199
+          }
+        },
+        "prequote_save": {
+          "count": 155,
+          "p50_ms": 132.5,
+          "p95_ms": 409.9,
+          "p99_ms": 462.4,
+          "max_ms": 510.8,
+          "failures": 0,
+          "status": {
+            "200": 155
+          }
+        }
+      }
+    },
+    {
+      "users": 100,
+      "duration_s": 63.0,
+      "requests": 3435,
+      "rps": 54.5,
+      "unexpected_failures": 6,
+      "failure_rate": 0.00175,
+      "unresolved_conflicts": 0,
+      "expected_recalculations": {
+        "quote_save": 14,
+        "order_save": 13,
+        "prequote_save": 7
+      },
+      "operations": {
+        "catalog_search": {
+          "count": 245,
+          "p50_ms": 92.6,
+          "p95_ms": 229.4,
+          "p99_ms": 1662.2,
+          "max_ms": 2138.7,
+          "failures": 0,
+          "status": {
+            "200": 245
+          }
+        },
+        "catalog_page": {
+          "count": 256,
+          "p50_ms": 87.0,
+          "p95_ms": 188.9,
+          "p99_ms": 1140.9,
+          "max_ms": 2240.8,
+          "failures": 0,
+          "status": {
+            "200": 256
+          }
+        },
+        "boards": {
+          "count": 266,
+          "p50_ms": 72.9,
+          "p95_ms": 201.1,
+          "p99_ms": 1479.2,
+          "max_ms": 1899.1,
+          "failures": 0,
+          "status": {
+            "200": 266
+          }
+        },
+        "kanban_search": {
+          "count": 248,
+          "p50_ms": 141.7,
+          "p95_ms": 392.6,
+          "p99_ms": 1291.0,
+          "max_ms": 1681.3,
+          "failures": 0,
+          "status": {
+            "200": 248
+          }
+        },
+        "quote_open": {
+          "count": 322,
+          "p50_ms": 343.2,
+          "p95_ms": 903.2,
+          "p99_ms": 1687.3,
+          "max_ms": 1987.4,
+          "failures": 0,
+          "status": {
+            "200": 322
+          }
+        },
+        "catalog_create": {
+          "count": 100,
+          "p50_ms": 127.6,
+          "p95_ms": 1927.5,
+          "p99_ms": 2358.5,
+          "max_ms": 2430.7,
+          "failures": 0,
+          "status": {
+            "200": 100
+          }
+        },
+        "card_open": {
+          "count": 180,
+          "p50_ms": 180.8,
+          "p95_ms": 436.0,
+          "p99_ms": 1704.2,
+          "max_ms": 3018.8,
+          "failures": 0,
+          "status": {
+            "200": 180
+          }
+        },
+        "quote_create": {
+          "count": 15,
+          "p50_ms": 298.9,
+          "p95_ms": 1636.3,
+          "p99_ms": 1958.1,
+          "max_ms": 2038.6,
+          "failures": 0,
+          "status": {
+            "200": 15
+          }
+        },
+        "order_open": {
+          "count": 327,
+          "p50_ms": 261.7,
+          "p95_ms": 729.9,
+          "p99_ms": 1840.9,
+          "max_ms": 2465.1,
+          "failures": 0,
+          "status": {
+            "200": 327
+          }
+        },
+        "prequote_open": {
+          "count": 165,
+          "p50_ms": 311.4,
+          "p95_ms": 975.3,
+          "p99_ms": 2093.8,
+          "max_ms": 3146.3,
+          "failures": 0,
+          "status": {
+            "200": 165
+          }
+        },
+        "board": {
+          "count": 94,
+          "p50_ms": 205.4,
+          "p95_ms": 542.3,
+          "p99_ms": 1856.4,
+          "max_ms": 2511.5,
+          "failures": 0,
+          "status": {
+            "200": 94
+          }
+        },
+        "card_edit": {
+          "count": 97,
+          "p50_ms": 209.0,
+          "p95_ms": 586.2,
+          "p99_ms": 2529.9,
+          "max_ms": 2810.6,
+          "failures": 0,
+          "status": {
+            "200": 97
+          }
+        },
+        "order_create": {
+          "count": 29,
+          "p50_ms": 523.0,
+          "p95_ms": 3182.5,
+          "p99_ms": 3289.1,
+          "max_ms": 3327.5,
+          "failures": 0,
+          "status": {
+            "200": 29
+          }
+        },
+        "quote_save": {
+          "count": 225,
+          "p50_ms": 511.2,
+          "p95_ms": 1839.7,
+          "p99_ms": 3132.4,
+          "max_ms": 3443.5,
+          "failures": 2,
+          "status": {
+            "200": 209,
+            "500:internal_error": 2,
+            "expected_409": 14
+          }
+        },
+        "order_save": {
+          "count": 221,
+          "p50_ms": 374.0,
+          "p95_ms": 1106.1,
+          "p99_ms": 2065.4,
+          "max_ms": 2586.8,
+          "failures": 0,
+          "status": {
+            "200": 208,
+            "expected_409": 13
+          }
+        },
+        "card_move": {
+          "count": 94,
+          "p50_ms": 211.4,
+          "p95_ms": 835.2,
+          "p99_ms": 1607.3,
+          "max_ms": 2502.6,
+          "failures": 0,
+          "status": {
+            "200": 94
+          }
+        },
+        "prequote_save": {
+          "count": 118,
+          "p50_ms": 481.4,
+          "p95_ms": 1309.1,
+          "p99_ms": 1951.6,
+          "max_ms": 2251.3,
+          "failures": 1,
+          "status": {
+            "200": 110,
+            "500:internal_error": 1,
+            "expected_409": 7
+          }
+        },
+        "prequote_create": {
+          "count": 7,
+          "p50_ms": 398.0,
+          "p95_ms": 506.6,
+          "p99_ms": 507.7,
+          "max_ms": 508.0,
+          "failures": 0,
+          "status": {
+            "200": 7
+          }
+        },
+        "catalog_open": {
+          "count": 152,
+          "p50_ms": 74.8,
+          "p95_ms": 159.2,
+          "p99_ms": 191.6,
+          "max_ms": 209.5,
+          "failures": 0,
+          "status": {
+            "200": 152
+          }
+        },
+        "catalog_edit": {
+          "count": 152,
+          "p50_ms": 103.6,
+          "p95_ms": 255.4,
+          "p99_ms": 284.7,
+          "max_ms": 310.4,
+          "failures": 0,
+          "status": {
+            "200": 152
+          }
+        },
+        "configuration_read": {
+          "count": 10,
+          "p50_ms": 125.1,
+          "p95_ms": 158.5,
+          "p99_ms": 166.8,
+          "max_ms": 168.9,
+          "failures": 0,
+          "status": {
+            "200": 10
+          }
+        },
+        "rule_create": {
+          "count": 10,
+          "p50_ms": 1860.1,
+          "p95_ms": 2783.9,
+          "p99_ms": 2905.1,
+          "max_ms": 2935.4,
+          "failures": 3,
+          "status": {
+            "200": 7,
+            "500:internal_error": 3
+          }
+        },
+        "calculation_preview": {
+          "count": 34,
+          "p50_ms": 474.2,
+          "p95_ms": 830.8,
+          "p99_ms": 903.1,
+          "max_ms": 916.8,
+          "failures": 0,
+          "status": {
+            "200": 34
+          }
+        },
+        "calculation_apply": {
+          "count": 34,
+          "p50_ms": 835.5,
+          "p95_ms": 1245.9,
+          "p99_ms": 1384.1,
+          "max_ms": 1384.6,
+          "failures": 0,
+          "status": {
+            "200": 34
+          }
+        },
+        "order_save_retry": {
+          "count": 13,
+          "p50_ms": 735.5,
+          "p95_ms": 1083.5,
+          "p99_ms": 1102.7,
+          "max_ms": 1107.5,
+          "failures": 0,
+          "status": {
+            "200": 13
+          }
+        },
+        "quote_save_retry": {
+          "count": 14,
+          "p50_ms": 1288.3,
+          "p95_ms": 1700.7,
+          "p99_ms": 2045.0,
+          "max_ms": 2131.1,
+          "failures": 0,
+          "status": {
+            "200": 14
+          }
+        },
+        "prequote_save_retry": {
+          "count": 7,
+          "p50_ms": 1030.3,
+          "p95_ms": 1260.4,
+          "p99_ms": 1317.7,
+          "max_ms": 1332.1,
+          "failures": 0,
+          "status": {
+            "200": 7
+          }
+        }
+      }
+    }
+  ]
+}

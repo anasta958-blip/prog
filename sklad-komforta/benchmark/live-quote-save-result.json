@@ -1,0 +1,10 @@
+{
+  "at_utc": "2026-11-12T16:52:17.418757+00:00",
+  "path": "/api/v1/kanbans/a6e39036-60c7-4329-b1d9-637df5f5119d/cards/264ce6d8-3bed-4195-aa4c-f9d1c929181d/quote/",
+  "get_ms": 411.0,
+  "get_status": 200,
+  "positions": 1200,
+  "request_bytes": 853026,
+  "put_ms": 867.6,
+  "put_status": 200
+}

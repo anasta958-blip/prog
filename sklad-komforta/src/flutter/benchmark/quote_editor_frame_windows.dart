@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/core/models/workflow_specialization.dart';
+import 'package:sklad_komforta_app/core/widgets/app_number_field.dart';
 import 'package:sklad_komforta_app/features/auth/auth_controller.dart';
 import 'package:sklad_komforta_app/features/catalog/catalog_models.dart';
 import 'package:sklad_komforta_app/features/kanban/kanban_models.dart';
@@ -14,16 +15,21 @@ import 'package:sklad_komforta_app/features/onboarding/onboarding_models.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_controller.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_editor_page.dart';
 import 'package:sklad_komforta_app/features/quotes/quote_models.dart';
+import 'package:sklad_komforta_app/features/orders/order_models.dart';
 
 const _config = AppConfig(
   apiBaseUrl: 'http://127.0.0.1:1/api/v1',
   environment: 'benchmark',
 );
-const _board = KanbanBoard(
+KanbanBoard _board(String kind) => KanbanBoard(
   id: 'benchmark',
   code: 'benchmark',
   name: 'Benchmark',
-  specialization: WorkflowSpecialization.quote,
+  specialization: kind == 'order'
+      ? WorkflowSpecialization.order
+      : kind == 'prequote'
+      ? WorkflowSpecialization.prequote
+      : WorkflowSpecialization.quote,
   columns: [],
   transitions: [],
   categories: [
@@ -75,6 +81,8 @@ void main() {
   final rowCount =
       int.tryParse(Platform.environment['BENCH_ROWS'] ?? '') ?? 1000;
   final complex = Platform.environment['BENCH_COMPLEX'] != '0';
+  final kind = Platform.environment['BENCH_KIND'] ?? 'quote';
+  final action = Platform.environment['BENCH_ACTION'] ?? 'step';
   void writeResult(String value) {
     final path = Platform.environment['BENCH_OUTPUT'];
     if (path == null || path.isEmpty) {
@@ -86,7 +94,9 @@ void main() {
   }
 
   final auth = AuthController(_config)..accessToken = 'benchmark';
-  final controller = QuoteController(_config, auth);
+  final controller = kind == 'order'
+      ? OrderController(_config, auth)
+      : QuoteController(_config, auth);
   final editorKey = GlobalKey();
   final rows = [
     for (var index = 0; index < rowCount; index++)
@@ -119,70 +129,90 @@ void main() {
     name: 'Type',
     variants: [variant],
   );
-  controller
-    ..catalog = CatalogConfiguration(
-      categories: const [
-        CatalogCategory(
-          id: 'equipment',
-          clientId: 'equipment',
-          name: 'Equipment',
-          sortOrder: 0,
-          fields: [],
-          sections: [],
-        ),
-      ],
-      dictionaries: const [],
-      moneyPipelines: complex
-          ? [
-              MoneyPipelineDraft(
-                categoryClientId: 'equipment',
-                basePriceFieldCode: 'base_price',
-                quantityFieldCode: 'quantity',
-                resultFieldCode: 'line_total',
-              ),
-            ]
-          : const [],
-      rules: complex
-          ? [
-              CalculationRuleDraft(
-                clientId: 'variant-rule',
-                name: 'Variant total',
-                categoryClientId: 'equipment',
-                eventType: 'variant_calculation',
-                isEnabled: true,
-                conditions: [],
-                actions: [
-                  RuleActionDraft(
-                    actionType: 'set_field',
-                    targetFieldCode: 'note',
-                    sourceFieldCode: 'variant_total',
-                  ),
-                ],
-              ),
-            ]
-          : const [],
-    )
-    ..draft = QuoteDraft(
-      kind: QuoteKind.quote,
-      title: 'Editor frame benchmark',
-      clientId: 'client',
-      executorCompanyId: 'executor',
-      selectionMode: 'variant',
-      proposalTypes: [type],
-    )
-    ..activeTypeId = type.id
-    ..activeVariantId = variant.id;
+  controller.catalog = CatalogConfiguration(
+    categories: const [
+      CatalogCategory(
+        id: 'equipment',
+        clientId: 'equipment',
+        name: 'Equipment',
+        sortOrder: 0,
+        fields: [],
+        sections: [],
+      ),
+    ],
+    dictionaries: const [],
+    moneyPipelines: complex
+        ? [
+            MoneyPipelineDraft(
+              categoryClientId: 'equipment',
+              basePriceFieldCode: 'base_price',
+              quantityFieldCode: 'quantity',
+              resultFieldCode: 'line_total',
+            ),
+          ]
+        : const [],
+    rules: complex
+        ? [
+            CalculationRuleDraft(
+              clientId: 'variant-rule',
+              name: 'Variant total',
+              categoryClientId: 'equipment',
+              eventType: 'variant_calculation',
+              isEnabled: true,
+              conditions: [],
+              actions: [
+                RuleActionDraft(
+                  actionType: 'set_field',
+                  targetFieldCode: 'note',
+                  sourceFieldCode: 'variant_total',
+                ),
+              ],
+            ),
+          ]
+        : const [],
+  );
+  if (controller is OrderController) {
+    controller.restoreDraft(
+      OrderDocument(
+        title: 'Editor frame benchmark',
+        clientId: 'client',
+        executorCompanyId: 'executor',
+        categories: variant.categories,
+      ),
+    );
+  } else {
+    controller
+      ..draft = QuoteDraft(
+        kind: kind == 'prequote' ? QuoteKind.prequote : QuoteKind.quote,
+        title: 'Editor frame benchmark',
+        clientId: 'client',
+        executorCompanyId: 'executor',
+        selectionMode: 'variant',
+        proposalTypes: [type],
+      )
+      ..activeTypeId = type.id
+      ..activeVariantId = variant.id;
+  }
   runApp(
     MaterialApp(
       home: Scaffold(
-        body: QuoteEditorPage(
-          key: editorKey,
-          config: _config,
-          authController: auth,
-          board: _board,
-          controller: controller,
-          onBack: () {},
-        ),
+        body: kind == 'order'
+            ? OrderEditorPage(
+                key: editorKey,
+                config: _config,
+                authController: auth,
+                board: _board(kind),
+                controller: controller as OrderController,
+                onBack: () {},
+              )
+            : QuoteEditorPage(
+                key: editorKey,
+                config: _config,
+                authController: auth,
+                board: _board(kind),
+                controller: controller,
+                onBack: () {},
+              ),
       ),
     ),
   );
@@ -216,21 +246,45 @@ void main() {
               widget is IconButton && widget.tooltip == 'Увеличить на 1',
         );
         final button = increase?.widget as IconButton?;
-        if (button?.onPressed == null) {
+        if (action == 'step' && button?.onPressed == null) {
           throw StateError('Quantity button was not built');
+        }
+        final numberField = action == 'input'
+            ? _findElement(rowElement, (widget) => widget is AppNumberField)
+            : null;
+        final field = numberField == null
+            ? null
+            : _findElement(numberField, (widget) => widget is EditableText);
+        final editable = field is StatefulElement
+            ? field.state as EditableTextState
+            : null;
+        if (action == 'input' && editable == null) {
+          throw StateError('Editable field was not built');
         }
         final frame = Completer<void>();
         SchedulerBinding.instance.addPostFrameCallback((_) => frame.complete());
         final watch = Stopwatch()..start();
-        button!.onPressed!();
+        if (action == 'input') {
+          editable!.updateEditingValue(
+            TextEditingValue(
+              text: '${index + 2}',
+              selection: TextSelection.collapsed(offset: '${index + 2}'.length),
+            ),
+          );
+        } else {
+          button!.onPressed!();
+        }
         await frame.future.timeout(const Duration(seconds: 5));
         watch.stop();
+        if (action == 'input' && rows.first.quantity != index + 2) {
+          throw StateError('Quantity input did not update the document');
+        }
         if (index >= 5) samples.add(watch.elapsedMicroseconds);
         await Future<void>.delayed(const Duration(milliseconds: 20));
       }
       samples.sort();
       writeResult(
-        'BENCH rows=$rowCount complex=$complex samples=${samples.length} '
+        'BENCH kind=$kind action=$action rows=$rowCount complex=$complex samples=${samples.length} '
         'action_to_frame_p50_us=${samples[samples.length ~/ 2]} '
         'action_to_frame_p95_us=${samples[(samples.length * 0.95).floor()]}',
       );

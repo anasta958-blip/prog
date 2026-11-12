@@ -4,6 +4,7 @@ import 'package:sklad_komforta_app/features/company/company_api.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/intl.dart';
 import 'package:sklad_komforta_app/core/config/app_config.dart';
 import 'package:sklad_komforta_app/core/models/workflow_specialization.dart';
 import 'package:sklad_komforta_app/core/security/token_store.dart';
@@ -2270,6 +2271,38 @@ void main() {
       first.quantity = 7;
       await controller.positionChanged(position: first, fieldCode: 'quantity');
       await tester.pump();
+      final categoryHeading = find.byKey(
+        const Key('quote-category-heading-long-category'),
+      );
+      final money = NumberFormat.currency(
+        locale: 'ru_RU',
+        symbol: '₽',
+        decimalDigits: 2,
+      );
+      expect(
+        find.descendant(
+          of: categoryHeading,
+          matching: find.text(
+            money.format(variant.categories.first.clientTotal),
+          ),
+        ),
+        findsOneWidget,
+      );
+      section.positions[1].quantity = 8;
+      await controller.positionChanged(
+        position: section.positions[1],
+        fieldCode: 'quantity',
+      );
+      await tester.pump();
+      expect(
+        find.descendant(
+          of: categoryHeading,
+          matching: find.text(
+            money.format(variant.categories.first.clientTotal),
+          ),
+        ),
+        findsOneWidget,
+      );
       final lastRow = find.byKey(const ValueKey('long-99'));
       expect(lastRow, findsNothing);
       await tester.scrollUntilVisible(

@@ -1,0 +1,346 @@
+{
+  "started_utc": "2026-11-12T18:27:12.638003+00:00",
+  "site": "https://app.eventlab.dpdns.org",
+  "identity_model": "100 accounts across 10 organizations",
+  "roles": {
+    "rules": 10,
+    "quote": 20,
+    "prequote": 10,
+    "order": 20,
+    "catalog": 20,
+    "kanban": 20
+  },
+  "phases": [
+    {
+      "users": 100,
+      "duration_s": 24.9,
+      "requests": 887,
+      "rps": 35.6,
+      "unexpected_failures": 29,
+      "failure_rate": 0.03269,
+      "expected_recalculations": {
+        "prequote_save": 10,
+        "quote_save": 23,
+        "order_save": 21,
+        "quote_save_retry": 12,
+        "prequote_save_retry": 6,
+        "order_save_retry": 7
+      },
+      "operations": {
+        "configuration_read": {
+          "count": 29,
+          "p50_ms": 225.0,
+          "p95_ms": 1420.2,
+          "p99_ms": 1648.0,
+          "max_ms": 1718.3,
+          "failures": 0,
+          "status": {
+            "200": 29
+          }
+        },
+        "catalog_search": {
+          "count": 42,
+          "p50_ms": 254.1,
+          "p95_ms": 3160.0,
+          "p99_ms": 3688.6,
+          "max_ms": 3745.1,
+          "failures": 0,
+          "status": {
+            "200": 42
+          }
+        },
+        "catalog_page": {
+          "count": 38,
+          "p50_ms": 246.6,
+          "p95_ms": 3391.6,
+          "p99_ms": 3596.6,
+          "max_ms": 3653.6,
+          "failures": 0,
+          "status": {
+            "200": 38
+          }
+        },
+        "boards": {
+          "count": 34,
+          "p50_ms": 178.4,
+          "p95_ms": 2823.4,
+          "p99_ms": 3393.1,
+          "max_ms": 3507.7,
+          "failures": 0,
+          "status": {
+            "200": 34
+          }
+        },
+        "quote_create": {
+          "count": 24,
+          "p50_ms": 4846.4,
+          "p95_ms": 6731.6,
+          "p99_ms": 6869.1,
+          "max_ms": 6897.6,
+          "failures": 1,
+          "status": {
+            "200": 23,
+            "500:internal_error": 1
+          }
+        },
+        "card_open": {
+          "count": 42,
+          "p50_ms": 589.1,
+          "p95_ms": 3575.4,
+          "p99_ms": 3979.7,
+          "max_ms": 4145.0,
+          "failures": 1,
+          "status": {
+            "500:internal_error": 1,
+            "200": 41
+          }
+        },
+        "catalog_create": {
+          "count": 71,
+          "p50_ms": 472.1,
+          "p95_ms": 3288.6,
+          "p99_ms": 3878.1,
+          "max_ms": 4769.5,
+          "failures": 1,
+          "status": {
+            "500:internal_error": 1,
+            "200": 70
+          }
+        },
+        "kanban_search": {
+          "count": 46,
+          "p50_ms": 326.2,
+          "p95_ms": 2974.1,
+          "p99_ms": 3681.9,
+          "max_ms": 3978.8,
+          "failures": 0,
+          "status": {
+            "200": 46
+          }
+        },
+        "board": {
+          "count": 24,
+          "p50_ms": 757.8,
+          "p95_ms": 2542.1,
+          "p99_ms": 3600.7,
+          "max_ms": 3910.4,
+          "failures": 0,
+          "status": {
+            "200": 24
+          }
+        },
+        "prequote_create": {
+          "count": 17,
+          "p50_ms": 3284.9,
+          "p95_ms": 4915.2,
+          "p99_ms": 4984.2,
+          "max_ms": 5001.5,
+          "failures": 3,
+          "status": {
+            "200": 14,
+            "500:internal_error": 3
+          }
+        },
+        "card_edit": {
+          "count": 26,
+          "p50_ms": 567.8,
+          "p95_ms": 3687.5,
+          "p99_ms": 4021.5,
+          "max_ms": 4052.7,
+          "failures": 0,
+          "status": {
+            "200": 26
+          }
+        },
+        "order_create": {
+          "count": 31,
+          "p50_ms": 4390.0,
+          "p95_ms": 6079.9,
+          "p99_ms": 6220.0,
+          "max_ms": 6231.8,
+          "failures": 7,
+          "status": {
+            "200": 24,
+            "500:order_save_failed": 7
+          }
+        },
+        "prequote_open": {
+          "count": 24,
+          "p50_ms": 901.5,
+          "p95_ms": 1784.1,
+          "p99_ms": 1914.4,
+          "max_ms": 1943.5,
+          "failures": 0,
+          "status": {
+            "200": 24
+          }
+        },
+        "order_open": {
+          "count": 60,
+          "p50_ms": 833.0,
+          "p95_ms": 1407.6,
+          "p99_ms": 1764.9,
+          "max_ms": 1781.6,
+          "failures": 0,
+          "status": {
+            "200": 60
+          }
+        },
+        "rule_create": {
+          "count": 29,
+          "p50_ms": 3973.7,
+          "p95_ms": 5334.9,
+          "p99_ms": 5459.2,
+          "max_ms": 5504.5,
+          "failures": 9,
+          "status": {
+            "500:internal_error": 9,
+            "200": 20
+          }
+        },
+        "card_move": {
+          "count": 24,
+          "p50_ms": 817.1,
+          "p95_ms": 3025.6,
+          "p99_ms": 3140.2,
+          "max_ms": 3153.1,
+          "failures": 0,
+          "status": {
+            "200": 24
+          }
+        },
+        "quote_open": {
+          "count": 62,
+          "p50_ms": 969.2,
+          "p95_ms": 2320.4,
+          "p99_ms": 2649.9,
+          "max_ms": 3021.6,
+          "failures": 0,
+          "status": {
+            "200": 62
+          }
+        },
+        "prequote_save": {
+          "count": 14,
+          "p50_ms": 1328.9,
+          "p95_ms": 2185.2,
+          "p99_ms": 2253.2,
+          "max_ms": 2270.1,
+          "failures": 0,
+          "status": {
+            "expected_409": 10,
+            "200": 4
+          }
+        },
+        "quote_save": {
+          "count": 32,
+          "p50_ms": 1559.5,
+          "p95_ms": 2888.3,
+          "p99_ms": 3134.0,
+          "max_ms": 3243.8,
+          "failures": 4,
+          "status": {
+            "expected_409": 23,
+            "200": 5,
+            "500:internal_error": 4
+          }
+        },
+        "calculation_preview": {
+          "count": 54,
+          "p50_ms": 977.9,
+          "p95_ms": 1747.8,
+          "p99_ms": 1839.4,
+          "max_ms": 1896.5,
+          "failures": 0,
+          "status": {
+            "200": 54
+          }
+        },
+        "order_save": {
+          "count": 28,
+          "p50_ms": 1338.1,
+          "p95_ms": 2313.8,
+          "p99_ms": 2651.0,
+          "max_ms": 2766.9,
+          "failures": 0,
+          "status": {
+            "expected_409": 21,
+            "200": 7
+          }
+        },
+        "calculation_apply": {
+          "count": 54,
+          "p50_ms": 1227.3,
+          "p95_ms": 2313.4,
+          "p99_ms": 2765.2,
+          "max_ms": 2925.2,
+          "failures": 2,
+          "status": {
+            "200": 52,
+            "409:order_calculation_preview_outdated": 1,
+            "409:quote_calculation_preview_outdated": 1
+          }
+        },
+        "prequote_save_retry": {
+          "count": 10,
+          "p50_ms": 1485.8,
+          "p95_ms": 2092.6,
+          "p99_ms": 2214.2,
+          "max_ms": 2244.6,
+          "failures": 0,
+          "status": {
+            "200": 4,
+            "expected_409": 6
+          }
+        },
+        "catalog_open": {
+          "count": 15,
+          "p50_ms": 157.0,
+          "p95_ms": 375.9,
+          "p99_ms": 542.0,
+          "max_ms": 583.6,
+          "failures": 0,
+          "status": {
+            "200": 15
+          }
+        },
+        "catalog_edit": {
+          "count": 15,
+          "p50_ms": 313.8,
+          "p95_ms": 405.7,
+          "p99_ms": 432.8,
+          "max_ms": 439.6,
+          "failures": 0,
+          "status": {
+            "200": 15
+          }
+        },
+        "quote_save_retry": {
+          "count": 22,
+          "p50_ms": 1252.1,
+          "p95_ms": 2172.0,
+          "p99_ms": 2481.9,
+          "max_ms": 2562.4,
+          "failures": 1,
+          "status": {
+            "500:internal_error": 1,
+            "expected_409": 12,
+            "200": 9
+          }
+        },
+        "order_save_retry": {
+          "count": 20,
+          "p50_ms": 1056.1,
+          "p95_ms": 2786.0,
+          "p99_ms": 3068.5,
+          "max_ms": 3139.1,
+          "failures": 0,
+          "status": {
+            "200": 13,
+            "expected_409": 7
+          }
+        }
+      }
+    }
+  ]
+}

@@ -9,7 +9,9 @@ x-service: &service
       max-file: "3"
 
 x-storage: &storage
-  Database__ConnectionString: Host=postgres;Database=sklad_komforta;Username=sklad;Password=${APP_DATABASE_PASSWORD:?Run server.py init}
+  # PostgreSQL has 100 client slots; leave headroom for administration and spikes.
+  # Npgsql normally allows 100 connections per process and keeps idle ones for 300 s.
+  Database__ConnectionString: Host=postgres;Database=sklad_komforta;Username=sklad;Password=${APP_DATABASE_PASSWORD:?Run server.py init};Maximum Pool Size=60;Connection Idle Lifetime=60;Connection Pruning Interval=10
   Redis__ConnectionString: redis:6379,password=${REDIS_PASSWORD:?Run server.py init},abortConnect=false
   ObjectStorage__ServiceUrl: http://minio:9000
   ObjectStorage__PublicUrl: https://${FILES_DOMAIN:?Set FILES_DOMAIN}
@@ -112,6 +114,7 @@ services:
       dockerfile: src/backend/SkladKomforta.Worker/Dockerfile
     environment:
       <<: *storage
+      Database__ConnectionString: Host=postgres;Database=sklad_komforta;Username=sklad;Password=${APP_DATABASE_PASSWORD:?Run server.py init};Maximum Pool Size=8;Connection Idle Lifetime=60;Connection Pruning Interval=10
       DOTNET_ENVIRONMENT: Production
     networks: [data, outbound]
     depends_on:

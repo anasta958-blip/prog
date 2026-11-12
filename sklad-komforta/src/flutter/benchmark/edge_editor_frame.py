@@ -34,7 +34,16 @@ def main():
     index = PAGE.read_text(encoding="utf-8")
     if '<base href="/">' in index:
         PAGE.write_text(index.replace('<base href="/">', '<base href="./">'), encoding="utf-8")
-    cases = [(rows, complex) for rows in (100, 500, 1000) for complex in (False, True)]
+    kinds = os.environ.get("BENCH_KINDS", "quote").split(",")
+    actions = os.environ.get("BENCH_ACTIONS", "step").split(",")
+    row_counts = [int(value) for value in os.environ.get("BENCH_ROW_COUNTS", "100,500,1000").split(",")]
+    cases = [
+        (kind, action, rows, complex)
+        for kind in kinds
+        for action in actions
+        for rows in row_counts
+        for complex in (False, True)
+    ]
     page_url = PAGE.resolve().as_uri()
     with tempfile.TemporaryDirectory(dir=ROOT / "build") as profile:
         port = free_port()
@@ -99,16 +108,15 @@ def main():
                         if reply.get("id") == request_id:
                             return reply
 
-                for case_index, (rows, complex) in enumerate(cases):
-                    if case_index:
-                        call(
-                            "Page.navigate",
-                            {
-                                "url": f"{page_url}?rows={rows}&complex={int(complex)}"
-                            },
-                        )
+                for kind, action, rows, complex in cases:
+                    call(
+                        "Page.navigate",
+                        {
+                            "url": f"{page_url}?kind={kind}&action={action}&rows={rows}&complex={int(complex)}"
+                        },
+                    )
                     deadline = time.monotonic() + 90
-                    expected = f"rows={rows} complex={str(complex).lower()}"
+                    expected = f"kind={kind} action={action} rows={rows} complex={str(complex).lower()}"
                     while time.monotonic() < deadline:
                         reply = call(
                             "Runtime.evaluate",

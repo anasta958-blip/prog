@@ -22,3 +22,5 @@ src/flutter/windows/flutter/ephemeral/
 .idea/
 .vscode/
 TestResults/
+.codex-edge-load-profile/
+.codex-load-test-credentials.json

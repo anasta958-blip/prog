@@ -1,0 +1,339 @@
+{
+  "started_utc": "2026-11-12T18:35:12.978541+00:00",
+  "site": "https://app.eventlab.dpdns.org",
+  "identity_model": "100 accounts across 10 organizations",
+  "roles": {
+    "rules": 10,
+    "quote": 20,
+    "prequote": 10,
+    "order": 20,
+    "catalog": 20,
+    "kanban": 20
+  },
+  "phases": [
+    {
+      "users": 100,
+      "duration_s": 23.0,
+      "requests": 861,
+      "rps": 37.4,
+      "unexpected_failures": 22,
+      "failure_rate": 0.02555,
+      "unresolved_conflicts": 0,
+      "expected_recalculations": {
+        "quote_save": 7,
+        "order_save": 7,
+        "prequote_save": 1
+      },
+      "operations": {
+        "configuration_read": {
+          "count": 10,
+          "p50_ms": 784.6,
+          "p95_ms": 2342.6,
+          "p99_ms": 3250.9,
+          "max_ms": 3477.9,
+          "failures": 0,
+          "status": {
+            "200": 10
+          }
+        },
+        "catalog_page": {
+          "count": 58,
+          "p50_ms": 163.2,
+          "p95_ms": 1487.5,
+          "p99_ms": 3170.7,
+          "max_ms": 3409.4,
+          "failures": 1,
+          "status": {
+            "200": 57,
+            "500:internal_error": 1
+          }
+        },
+        "card_edit": {
+          "count": 28,
+          "p50_ms": 385.6,
+          "p95_ms": 3928.9,
+          "p99_ms": 3986.9,
+          "max_ms": 3997.5,
+          "failures": 1,
+          "status": {
+            "500:internal_error": 1,
+            "200": 27
+          }
+        },
+        "order_create": {
+          "count": 32,
+          "p50_ms": 2797.3,
+          "p95_ms": 6207.7,
+          "p99_ms": 6428.2,
+          "max_ms": 6502.6,
+          "failures": 5,
+          "status": {
+            "500:internal_error": 1,
+            "200": 27,
+            "500:order_save_failed": 4
+          }
+        },
+        "catalog_create": {
+          "count": 74,
+          "p50_ms": 245.6,
+          "p95_ms": 3279.6,
+          "p99_ms": 5694.5,
+          "max_ms": 5802.5,
+          "failures": 2,
+          "status": {
+            "500:internal_error": 2,
+            "200": 72
+          }
+        },
+        "catalog_search": {
+          "count": 61,
+          "p50_ms": 189.3,
+          "p95_ms": 2656.2,
+          "p99_ms": 3133.4,
+          "max_ms": 3141.5,
+          "failures": 0,
+          "status": {
+            "200": 61
+          }
+        },
+        "quote_create": {
+          "count": 27,
+          "p50_ms": 4129.2,
+          "p95_ms": 6407.7,
+          "p99_ms": 6557.4,
+          "max_ms": 6607.1,
+          "failures": 2,
+          "status": {
+            "200": 25,
+            "500:internal_error": 2
+          }
+        },
+        "kanban_search": {
+          "count": 70,
+          "p50_ms": 223.0,
+          "p95_ms": 3043.7,
+          "p99_ms": 3534.2,
+          "max_ms": 3680.1,
+          "failures": 0,
+          "status": {
+            "200": 70
+          }
+        },
+        "boards": {
+          "count": 48,
+          "p50_ms": 148.9,
+          "p95_ms": 3088.1,
+          "p99_ms": 3429.4,
+          "max_ms": 3654.0,
+          "failures": 0,
+          "status": {
+            "200": 48
+          }
+        },
+        "prequote_create": {
+          "count": 21,
+          "p50_ms": 1424.9,
+          "p95_ms": 5270.5,
+          "p99_ms": 5774.7,
+          "max_ms": 5900.7,
+          "failures": 5,
+          "status": {
+            "200": 16,
+            "500:internal_error": 5
+          }
+        },
+        "board": {
+          "count": 25,
+          "p50_ms": 411.2,
+          "p95_ms": 3949.4,
+          "p99_ms": 4004.6,
+          "max_ms": 4009.5,
+          "failures": 0,
+          "status": {
+            "200": 25
+          }
+        },
+        "card_open": {
+          "count": 46,
+          "p50_ms": 320.2,
+          "p95_ms": 3947.8,
+          "p99_ms": 4129.2,
+          "max_ms": 4154.4,
+          "failures": 0,
+          "status": {
+            "200": 46
+          }
+        },
+        "card_move": {
+          "count": 25,
+          "p50_ms": 405.3,
+          "p95_ms": 2442.5,
+          "p99_ms": 2682.3,
+          "max_ms": 2708.4,
+          "failures": 0,
+          "status": {
+            "200": 25
+          }
+        },
+        "order_open": {
+          "count": 62,
+          "p50_ms": 612.1,
+          "p95_ms": 1233.1,
+          "p99_ms": 1334.7,
+          "max_ms": 1358.0,
+          "failures": 0,
+          "status": {
+            "200": 62
+          }
+        },
+        "quote_open": {
+          "count": 62,
+          "p50_ms": 660.5,
+          "p95_ms": 1486.4,
+          "p99_ms": 1664.2,
+          "max_ms": 1715.6,
+          "failures": 0,
+          "status": {
+            "200": 62
+          }
+        },
+        "rule_create": {
+          "count": 10,
+          "p50_ms": 4836.9,
+          "p95_ms": 5487.3,
+          "p99_ms": 5651.7,
+          "max_ms": 5692.8,
+          "failures": 6,
+          "status": {
+            "200": 4,
+            "500:internal_error": 6
+          }
+        },
+        "quote_save": {
+          "count": 41,
+          "p50_ms": 956.6,
+          "p95_ms": 2321.4,
+          "p99_ms": 3035.8,
+          "max_ms": 3381.3,
+          "failures": 0,
+          "status": {
+            "expected_409": 7,
+            "200": 34
+          }
+        },
+        "calculation_preview": {
+          "count": 15,
+          "p50_ms": 751.2,
+          "p95_ms": 1168.8,
+          "p99_ms": 1213.3,
+          "max_ms": 1224.5,
+          "failures": 0,
+          "status": {
+            "200": 15
+          }
+        },
+        "calculation_apply": {
+          "count": 15,
+          "p50_ms": 1008.8,
+          "p95_ms": 1652.4,
+          "p99_ms": 1746.4,
+          "max_ms": 1769.9,
+          "failures": 0,
+          "status": {
+            "200": 15
+          }
+        },
+        "order_save": {
+          "count": 35,
+          "p50_ms": 852.2,
+          "p95_ms": 1756.3,
+          "p99_ms": 1948.1,
+          "max_ms": 1981.0,
+          "failures": 0,
+          "status": {
+            "200": 28,
+            "expected_409": 7
+          }
+        },
+        "quote_save_retry": {
+          "count": 7,
+          "p50_ms": 1669.0,
+          "p95_ms": 2000.8,
+          "p99_ms": 2066.7,
+          "max_ms": 2083.2,
+          "failures": 0,
+          "status": {
+            "200": 7
+          }
+        },
+        "prequote_open": {
+          "count": 23,
+          "p50_ms": 619.0,
+          "p95_ms": 1435.3,
+          "p99_ms": 1650.5,
+          "max_ms": 1698.5,
+          "failures": 0,
+          "status": {
+            "200": 23
+          }
+        },
+        "prequote_save": {
+          "count": 20,
+          "p50_ms": 909.0,
+          "p95_ms": 1881.1,
+          "p99_ms": 2087.5,
+          "max_ms": 2139.1,
+          "failures": 0,
+          "status": {
+            "200": 19,
+            "expected_409": 1
+          }
+        },
+        "catalog_open": {
+          "count": 19,
+          "p50_ms": 118.4,
+          "p95_ms": 227.7,
+          "p99_ms": 259.9,
+          "max_ms": 268.0,
+          "failures": 0,
+          "status": {
+            "200": 19
+          }
+        },
+        "catalog_edit": {
+          "count": 19,
+          "p50_ms": 198.1,
+          "p95_ms": 311.9,
+          "p99_ms": 340.1,
+          "max_ms": 347.2,
+          "failures": 0,
+          "status": {
+            "200": 19
+          }
+        },
+        "order_save_retry": {
+          "count": 7,
+          "p50_ms": 795.4,
+          "p95_ms": 1151.2,
+          "p99_ms": 1177.0,
+          "max_ms": 1183.5,
+          "failures": 0,
+          "status": {
+            "200": 7
+          }
+        },
+        "prequote_save_retry": {
+          "count": 1,
+          "p50_ms": 1011.3,
+          "p95_ms": 1011.3,
+          "p99_ms": 1011.3,
+          "max_ms": 1011.3,
+          "failures": 0,
+          "status": {
+            "200": 1
+          }
+        }
+      }
+    }
+  ]
+}

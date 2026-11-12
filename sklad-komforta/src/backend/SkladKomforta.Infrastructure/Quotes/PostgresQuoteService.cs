@@ -38,13 +38,14 @@ internal sealed class PostgresQuoteService(
         CancellationToken cancellationToken)
     {
         await kanbanService.GetCardAsync(actorUserId, boardId, cardId, cancellationToken);
+        var canChangeManager = await CanChangeManagerAsync(actorUserId, cancellationToken);
         await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
         var quote = await ReadQuoteAsync(connection, null, boardId, cardId, cancellationToken)
             ?? throw new IdentityException(404, "quote_not_found", "КП или ПКП для этой карточки ещё не создано.");
         var runtime = await ReadCalculationConfigurationAsync(connection, null, cancellationToken);
         return quote with
         {
-            CanChangeManager = await CanChangeManagerAsync(actorUserId, cancellationToken),
+            CanChangeManager = canChangeManager,
             CurrentCalculationVersion = CalculationVersion(runtime),
         };
     }

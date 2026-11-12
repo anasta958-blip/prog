@@ -36,8 +36,8 @@ internal sealed class PostgresOrderService(
     public async Task<OrderDetails> GetAsync(Guid actorUserId, Guid boardId, Guid cardId, CancellationToken cancellationToken)
     {
         await kanbanService.GetCardAsync(actorUserId, boardId, cardId, cancellationToken);
-        await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
         var (canChange, canInvoices) = await CapabilitiesAsync(actorUserId, cancellationToken);
+        await using var connection = await connectionFactory.OpenTenantConnectionAsync(cancellationToken);
         var result = await ReadAsync(connection, null, boardId, cardId, canChange, canInvoices, cancellationToken)
                ?? throw new IdentityException(404, "order_not_found", "Комплектация для этой карточки ещё не создана.");
         var runtime = await PostgresQuoteService.ReadCalculationConfigurationAsync(connection, null, cancellationToken);

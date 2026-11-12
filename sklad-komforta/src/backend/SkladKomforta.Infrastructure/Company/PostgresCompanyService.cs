@@ -48,6 +48,7 @@ internal sealed class PostgresCompanyService(
         // удаление категории может временно оставить канбан без категорий.
         OnboardingValidator.Validate(normalized, false);
         var previous = await ReadDraftAsync(connection, cancellationToken);
+        var materializedConfigurationChanged = MaterializedConfigurationChanged(previous, normalized);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         var objectKeysToDelete = new List<string>();
         try
@@ -75,30 +76,35 @@ internal sealed class PostgresCompanyService(
                         relationCount = deletion.Impact.RelationCount
                     }, JsonOptions)));
             }
-            await SyncDictionariesAsync(connection, transaction, normalized.Dictionaries, cancellationToken);
-            // Keep unchanged dependency identities: deleting them cascades to product links.
-            await ExecuteAsync(connection, transaction, """
-                DELETE FROM catalog_category_dependencies AS dependency
-                WHERE NOT EXISTS (
-                    SELECT 1
-                    FROM jsonb_array_elements(CAST(@dependencies AS jsonb)) AS desired
-                    JOIN catalog_categories AS source
-                      ON source.client_id = desired->>'sourceCategoryClientId'
-                    JOIN catalog_categories AS target
-                      ON target.client_id = desired->>'targetCategoryClientId'
-                    WHERE dependency.client_id = desired->>'clientId'
-                      AND dependency.source_category_id = source.id
-                      AND dependency.target_category_id = target.id
-                      AND dependency.target_field_code = desired->>'targetFieldCode')
-                """, cancellationToken,
-                ("dependencies", JsonSerializer.Serialize(normalized.Dependencies ?? [], JsonOptions)));
-            var categoryIds = await SyncCatalogAsync(
-                connection, transaction, previous.Categories, normalized.Categories, cancellationToken);
-            await SyncWorkflowsAsync(
-                connection, transaction, previous.Workflows, normalized.Workflows, categoryIds, cancellationToken);
-            await SyncDependenciesAsync(
-                connection, transaction, normalized.Dependencies ?? [], categoryIds, cancellationToken);
-            await SyncEntityFieldsAsync(connection, transaction, normalized.Fields, cancellationToken);
+            // Rules live only in onboarding_draft. Rewriting unchanged catalog and
+            // workflow rows takes locks that conflict with concurrent document saves.
+            if (materializedConfigurationChanged)
+            {
+                await SyncDictionariesAsync(connection, transaction, normalized.Dictionaries, cancellationToken);
+                // Keep unchanged dependency identities: deleting them cascades to product links.
+                await ExecuteAsync(connection, transaction, """
+                    DELETE FROM catalog_category_dependencies AS dependency
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM jsonb_array_elements(CAST(@dependencies AS jsonb)) AS desired
+                        JOIN catalog_categories AS source
+                          ON source.client_id = desired->>'sourceCategoryClientId'
+                        JOIN catalog_categories AS target
+                          ON target.client_id = desired->>'targetCategoryClientId'
+                        WHERE dependency.client_id = desired->>'clientId'
+                          AND dependency.source_category_id = source.id
+                          AND dependency.target_category_id = target.id
+                          AND dependency.target_field_code = desired->>'targetFieldCode')
+                    """, cancellationToken,
+                    ("dependencies", JsonSerializer.Serialize(normalized.Dependencies ?? [], JsonOptions)));
+                var categoryIds = await SyncCatalogAsync(
+                    connection, transaction, previous.Categories, normalized.Categories, cancellationToken);
+                await SyncWorkflowsAsync(
+                    connection, transaction, previous.Workflows, normalized.Workflows, categoryIds, cancellationToken);
+                await SyncDependenciesAsync(
+                    connection, transaction, normalized.Dependencies ?? [], categoryIds, cancellationToken);
+                await SyncEntityFieldsAsync(connection, transaction, normalized.Fields, cancellationToken);
+            }
             // Роли после активации управляются отдельным разделом прав доступа.
             // Повторное сохранение каталогов или канбанов не должно перетирать их.
 
@@ -210,6 +216,23 @@ internal sealed class PostgresCompanyService(
             ? JsonSerializer.Deserialize<OrganizationOnboardingDraft>(payload, JsonOptions)
               ?? throw new IdentityException(500, "organization_configuration_invalid", "Настройки организации повреждены.")
             : throw new IdentityException(404, "organization_configuration_not_found", "Настройки организации не найдены.");
+    }
+
+    private static bool MaterializedConfigurationChanged(
+        OrganizationOnboardingDraft previous,
+        OrganizationOnboardingDraft next)
+    {
+        static string MaterializedJson(OrganizationOnboardingDraft draft) =>
+            JsonSerializer.Serialize(new
+            {
+                draft.Dictionaries,
+                draft.Categories,
+                draft.Dependencies,
+                draft.Workflows,
+                draft.Fields,
+            }, JsonOptions);
+
+        return !StringComparer.Ordinal.Equals(MaterializedJson(previous), MaterializedJson(next));
     }
 
     private static async Task<IReadOnlyList<CategoryDeletionPlan>> PrepareCategoryDeletionsAsync(
