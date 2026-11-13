@@ -96,8 +96,11 @@ Map<String, dynamic> documentCanvasPreview({
               : block.kind == 'table'
               ? <String>[]
               : [
-                  for (final code in block.fields)
-                    '${documentPartyFields.firstWhere((f) => f.code == code).label}: ${partyValue(block.kind == 'client' ? client : executor, code) ?? '—'}',
+                  for (final code in block.fieldsForParty(
+                    (block.kind == 'client' ? client : executor)?['companyType']
+                        as String?,
+                  ))
+                    '${documentPartyFieldLabel(block.kind, (block.kind == 'client' ? client : executor)?['companyType'] as String?, code)}: ${partyValue(block.kind == 'client' ? client : executor, code) ?? '—'}',
                 ],
           'tables': block.kind == 'table' ? tables : <Map<String, dynamic>>[],
         },

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:sklad_komforta_app/core/platform/workspace_address.dart';
 import 'package:sklad_komforta_app/core/network/api_exception.dart';
 import 'package:sklad_komforta_app/core/widgets/app_select_field.dart';
+import 'package:sklad_komforta_app/core/widgets/app_notice.dart';
 import 'company_controller.dart';
 import 'configuration_edit_guard.dart';
 import 'document_layout_models.dart';
@@ -34,7 +35,6 @@ final class _DocumentLayoutPageState extends State<DocumentLayoutPage> {
   bool order = false;
   bool dirty = false;
   bool saving = false;
-  bool saved = false;
 
   DocumentLayoutBoard? get board =>
       boards?.where((item) => item.id == boardId).firstOrNull;
@@ -127,7 +127,6 @@ final class _DocumentLayoutPageState extends State<DocumentLayoutPage> {
       order = nextOrder ?? order;
       boardId = nextOrder != null ? null : nextBoard;
       if (board case final current?) _prepare(current);
-      saved = false;
     });
     _saveAddress();
   }
@@ -139,7 +138,6 @@ final class _DocumentLayoutPageState extends State<DocumentLayoutPage> {
   void _change(VoidCallback action) => setState(() {
     action();
     dirty = true;
-    saved = false;
   });
 
   Future<void> _save() async {
@@ -155,8 +153,14 @@ final class _DocumentLayoutPageState extends State<DocumentLayoutPage> {
       if (mounted) {
         setState(() {
           dirty = false;
-          saved = true;
         });
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const AppSnackBar(
+              content: Text('Настройки конструктора сохранены.'),
+            ),
+          );
       }
     } catch (exception) {
       if (mounted) {
@@ -248,7 +252,6 @@ final class _DocumentLayoutPageState extends State<DocumentLayoutPage> {
                               saving ? 'Сохранение…' : 'Сохранить настройки',
                             ),
                           ),
-                          if (saved) const Text('Настройки сохранены'),
                           if (dirty) const Text('Есть несохранённые изменения'),
                         ],
                       ],

@@ -46,8 +46,29 @@ public static class DocumentCanvasBuilder
         ["bank_name"] = "Банк", ["bank_bik"] = "БИК", ["bank_account"] = "Расчётный счёт", ["corr_account"] = "Корреспондентский счёт",
         ["company_type"] = "Тип компании", ["company_name"] = "Компания заказчика", ["contact_name"] = "Контактное лицо",
         ["object_type"] = "Тип объекта", ["object_address"] = "Адрес объекта", ["recipient_name"] = "Получатель",
-        ["website"] = "Сайт", ["director_name"] = "Руководитель", ["signatory_name"] = "Подписант", ["signatory_title"] = "Должность подписанта"
+        ["website"] = "Сайт", ["director_name"] = "Руководитель", ["signatory_name"] = "Подписант", ["signatory_title"] = "Должность подписанта",
+        ["passport_series"] = "Серия паспорта", ["passport_number"] = "Номер паспорта", ["passport_issued_by"] = "Кем выдан"
     };
+
+    private static string PartyLabel(string kind, string? type, string code) => (kind, type, code) switch
+    {
+        ("client", "person", "name") => "ФИО",
+        ("client", "person", "address") => "Адрес регистрации",
+        ("client", "ip", "name") => "Название ИП",
+        ("client", "ooo", "name") => "Название компании",
+        ("client", "ip" or "ooo", "address") => "Юридический адрес",
+        ("executor", "ip" or "ooo", "name") => "Короткое название",
+        ("executor", "ip", "legal_name") => "ФИО индивидуального предпринимателя",
+        (_, "ip", "ogrn") => "ОГРНИП",
+        _ => Labels[code]
+    };
+
+    private static string[] PartyLines(DocumentBlock block, IReadOnlyDictionary<string, string?> party)
+    {
+        var type = party.GetValueOrDefault("company_type");
+        return block.FieldsForParty(type).Where(Labels.ContainsKey)
+            .Select(code => $"{PartyLabel(block.Kind, type, code)}: {party.GetValueOrDefault(code) ?? "—"}").ToArray();
+    }
 
     public static DocumentCanvasContent Build(DocumentTemplate template,
         IReadOnlyDictionary<string, string?> client, IReadOnlyDictionary<string, string?> executor,
@@ -55,7 +76,7 @@ public static class DocumentCanvasBuilder
         template.Blocks.Select(block => new DocumentCanvasBlock(block.Id, block.Kind switch
         { "client" => "Заказчик", "executor" => "Исполнитель", "totals" => "Итоги", _ => "" },
             block.Kind is "client" or "executor"
-                ? block.Fields.Where(Labels.ContainsKey).Select(code => $"{Labels[code]}: {(block.Kind == "client" ? client : executor).GetValueOrDefault(code) ?? "—"}").ToArray()
+                ? PartyLines(block, block.Kind == "client" ? client : executor)
                 : block.Kind == "totals" ? totals : [],
             block.Kind == "table" ? tables.OrderBy(t => block.CategoryRank(t.CategoryId)).ToArray() : [])).ToArray(), caption);
 

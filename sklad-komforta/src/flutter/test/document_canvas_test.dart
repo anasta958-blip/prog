@@ -15,6 +15,35 @@ import 'package:sklad_komforta_app/features/company/document_paper_surface.dart'
 import 'package:sklad_komforta_app/features/company/document_party_rows.dart';
 
 void main() {
+  test(
+    'party profiles preserve independent selections and legacy fallback',
+    () {
+      final block = DocumentBlock(id: 'client', kind: 'client', x: 30, y: 30);
+      expect(block.fieldsForParty('person'), ['name', 'inn', 'address']);
+      block.setPartyFields('person', ['phone', 'name']);
+      block.setPartyFields('ip', ['ogrn']);
+      final restored = DocumentBlock.fromJson(block.toJson());
+      expect(restored.fieldsForParty('person'), ['phone', 'name']);
+      expect(restored.fieldsForParty('ip'), ['ogrn']);
+      expect(restored.fieldsForParty('ooo'), ['name', 'inn', 'address']);
+      restored.setPartyFields('ooo', []);
+      expect(restored.fieldsForParty('ooo'), isEmpty);
+      expect(
+        documentPartyFieldsFor('client', 'person').map((f) => f.code),
+        contains('passport_number'),
+      );
+      expect(
+        documentPartyFieldsFor('client', 'person').map((f) => f.code),
+        isNot(contains('inn')),
+      );
+      expect(
+        documentPartyFieldsFor('executor', 'ip').map((f) => f.code),
+        isNot(contains('kpp')),
+      );
+      expect(documentPartyFieldLabel('client', 'person', 'name'), 'ФИО');
+      expect(documentPartyFieldLabel('executor', 'ip', 'ogrn'), 'ОГРНИП');
+    },
+  );
   test('party fields flow, wrap and preserve old templates', () {
     const lines = [
       'ИНН: 123',
@@ -331,7 +360,13 @@ void main() {
     );
     // Invalid input must not alter the grid or pass form validation.
     final input = tester.widget<TextFormField>(columnsInput);
-    for (final invalid in ['0', '23', '2.5', 'abc', '']) {
+    for (final invalid in [
+      '0',
+      '${documentPartyFields.length + 1}',
+      '2.5',
+      'abc',
+      '',
+    ]) {
       expect(input.validator!(invalid), isNotNull);
       input.onChanged!(invalid);
     }

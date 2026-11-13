@@ -34,6 +34,9 @@ class _DocumentCanvasEditorState extends State<DocumentCanvasEditor> {
   }
 
   String? selectedId;
+  final Map<String, String> _partyTypes = {};
+  String _partyType(DocumentBlock block) =>
+      _partyTypes[block.id] ?? (block.kind == 'client' ? 'person' : 'ooo');
   Offset? touchOrigin;
   Size? resizeOrigin;
   DocumentTemplate get template => widget.board.template!;
@@ -53,16 +56,19 @@ class _DocumentCanvasEditorState extends State<DocumentCanvasEditor> {
       template.margin,
       (value, block) => math.max(value, block.y + block.height + 16),
     );
-    template.blocks.add(
-      DocumentBlock(
-        id: id,
-        kind: kind,
-        x: template.margin,
-        y: y.clamp(template.margin, template.height - template.margin - 150),
-        width: wide ? template.width - template.margin * 2 : 320,
-        fontSize: template.fontSize,
-      ),
+    final block = DocumentBlock(
+      id: id,
+      kind: kind,
+      x: template.margin,
+      y: y.clamp(template.margin, template.height - template.margin - 150),
+      width: wide ? template.width - template.margin * 2 : 320,
+      fontSize: template.fontSize,
     );
+    if (kind == 'client' || kind == 'executor') {
+      final type = _partyType(block);
+      block.setPartyFields(type, block.editablePartyFields(type));
+    }
+    template.blocks.add(block);
     selectedId = id;
   });
 
@@ -564,8 +570,8 @@ class _DocumentCanvasEditorState extends State<DocumentCanvasEditor> {
           LayoutBuilder(
             builder: (context, constraints) {
               final rows = documentPartyRows([
-                for (final code in block.fields)
-                  '${documentPartyFields.firstWhere((f) => f.code == code).label}: …',
+                for (final code in block.editablePartyFields(_partyType(block)))
+                  '${documentPartyFieldLabel(block.kind, _partyType(block), code)}: …',
               ], block.effectiveFieldColumns);
               return Column(
                 children: [
@@ -717,6 +723,35 @@ class _DocumentCanvasEditorState extends State<DocumentCanvasEditor> {
         ),
         const SizedBox(height: 12),
         if (block.kind == 'executor' || block.kind == 'client') ...[
+          AppSelectField<String>(
+            key: ValueKey('party-type-${block.id}'),
+            label: block.kind == 'client' ? 'Тип заказчика' : 'Тип исполнителя',
+            value: _partyType(block),
+            options: [
+              for (final type in documentPartyTypes(block.kind))
+                AppSelectOption(
+                  value: type,
+                  label: documentPartyTypeNames[type]!,
+                ),
+            ],
+            onChanged: (type) {
+              if (type != null) setState(() => _partyTypes[block.id] = type);
+            },
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Настройте поля для каждого типа. В ссылке и PDF набор выбирается по типу участника документа.',
+            style: TextStyle(fontSize: 12),
+          ),
+          if (block.kind == 'client' && _partyType(block) == 'person')
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text(
+                'Паспортные данные попадут в ссылку и PDF только при явном выборе соответствующих полей.',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+          const SizedBox(height: 12),
           _NumberInput(
             key: ValueKey('party-columns-${block.id}'),
             value: block.effectiveFieldColumns.toDouble(),
@@ -729,9 +764,11 @@ class _DocumentCanvasEditorState extends State<DocumentCanvasEditor> {
             },
           ),
           DocumentFieldPicker(
-            fields: documentPartyFieldsFor(block.kind),
-            codes: block.fields,
-            onChanged: (codes) => change(() => block.fields = codes),
+            key: ValueKey('party-fields-${block.id}-${_partyType(block)}'),
+            fields: documentPartyFieldsFor(block.kind, _partyType(block)),
+            codes: block.editablePartyFields(_partyType(block)),
+            onChanged: (codes) =>
+                change(() => block.setPartyFields(_partyType(block), codes)),
           ),
         ],
         if (block.kind == 'table' && widget.board.categories.length > 1) ...[

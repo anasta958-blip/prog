@@ -23,27 +23,85 @@ const documentPartyFields = <DocumentLayoutField>[
   DocumentLayoutField('director_name', 'Руководитель'),
   DocumentLayoutField('signatory_name', 'Подписант'),
   DocumentLayoutField('signatory_title', 'Должность подписанта'),
+  DocumentLayoutField('passport_series', 'Серия паспорта'),
+  DocumentLayoutField('passport_number', 'Номер паспорта'),
+  DocumentLayoutField('passport_issued_by', 'Кем выдан'),
 ];
 
-List<DocumentLayoutField> documentPartyFieldsFor(String kind) =>
-    documentPartyFields
-        .where(
-          (field) => kind == 'client'
-              ? !{
-                  'website',
-                  'director_name',
-                  'signatory_name',
-                  'signatory_title',
-                }.contains(field.code)
-              : !{
-                  'company_name',
-                  'contact_name',
-                  'object_type',
-                  'object_address',
-                  'recipient_name',
-                }.contains(field.code),
-        )
-        .toList();
+List<DocumentLayoutField> documentPartyFieldsFor(String kind, String type) {
+  final codes = kind == 'client'
+      ? type == 'person'
+            ? [
+                'name',
+                'phone',
+                'email',
+                'passport_series',
+                'passport_number',
+                'passport_issued_by',
+                'address',
+              ]
+            : [
+                'name',
+                'inn',
+                if (type == 'ooo') 'kpp',
+                'ogrn',
+                'phone',
+                'email',
+                'bank_name',
+                'bank_bik',
+                'address',
+                'bank_account',
+                'corr_account',
+              ]
+      : [
+          'name',
+          'legal_name',
+          'inn',
+          if (type == 'ooo') 'kpp',
+          'ogrn',
+          'address',
+          'phone',
+          'email',
+          'website',
+          'director_name',
+          'signatory_name',
+          'signatory_title',
+          'bank_name',
+          'bank_bik',
+          'bank_account',
+          'corr_account',
+        ];
+  return [
+    for (final code in codes)
+      DocumentLayoutField(code, documentPartyFieldLabel(kind, type, code)),
+  ];
+}
+
+String documentPartyFieldLabel(String kind, String? type, String code) =>
+    switch ((kind, type, code)) {
+      ('client', 'person', 'name') => 'ФИО',
+      ('client', 'person', 'address') => 'Адрес регистрации',
+      ('client', 'ip', 'name') => 'Название ИП',
+      ('client', 'ooo', 'name') => 'Название компании',
+      ('client', 'ip' || 'ooo', 'address') => 'Юридический адрес',
+      ('executor', 'ip' || 'ooo', 'name') => 'Короткое название',
+      ('executor', 'ip', 'legal_name') => 'ФИО индивидуального предпринимателя',
+      (_, 'ip', 'ogrn') => 'ОГРНИП',
+      _ =>
+        documentPartyFields
+                .where((field) => field.code == code)
+                .firstOrNull
+                ?.label ??
+            code,
+    };
+
+List<String> documentPartyTypes(String kind) =>
+    kind == 'client' ? ['person', 'ip', 'ooo'] : ['ip', 'ooo'];
+const documentPartyTypeNames = {
+  'person': 'Физическое лицо',
+  'ip': 'ИП',
+  'ooo': 'ООО',
+};
 
 const documentBlockNames = {
   'executor': 'Исполнитель',
@@ -103,10 +161,12 @@ class DocumentBlock {
     this.align = 'left',
     this.flowFields = false,
     this.fieldColumns,
+    Map<String, List<String>>? partyFieldsByType,
     List<String>? categoryOrder,
     List<String>? fields,
     Map<String, double>? columnWidths,
-  }) : categoryOrder = categoryOrder ?? [],
+  }) : partyFieldsByType = partyFieldsByType ?? {},
+       categoryOrder = categoryOrder ?? [],
        fields = fields ?? ['name', 'inn', 'address'],
        columnWidths = columnWidths ?? {};
   final String id;
@@ -115,6 +175,26 @@ class DocumentBlock {
   String align;
   bool flowFields;
   int? fieldColumns;
+  final Map<String, List<String>> partyFieldsByType;
+  List<String> fieldsForParty(String? type) =>
+      partyFieldsByType[type] ?? fields;
+  List<String> editablePartyFields(String type) {
+    final allowed = documentPartyFieldsFor(
+      kind,
+      type,
+    ).map((field) => field.code).toSet();
+    return fieldsForParty(type).where(allowed.contains).toList();
+  }
+
+  void setPartyFields(String type, List<String> selected) {
+    if (partyFieldsByType.isEmpty) {
+      for (final other in documentPartyTypes(kind)) {
+        partyFieldsByType[other] = editablePartyFields(other);
+      }
+    }
+    partyFieldsByType[type] = [...selected];
+  }
+
   int get effectiveFieldColumns => fieldColumns ?? (flowFields ? 2 : 1);
   List<String> categoryOrder;
   int categoryRank(String? id) {
@@ -135,6 +215,11 @@ class DocumentBlock {
     padding: (json['padding'] as num?)?.toDouble() ?? 10,
     align: json['align'] as String? ?? 'left',
     flowFields: json['flowFields'] == true,
+    partyFieldsByType:
+        (json['partyFieldsByType'] as Map<String, dynamic>? ?? {}).map(
+          (key, value) =>
+              MapEntry(key, (value as List).cast<String>().toList()),
+        ),
     fieldColumns: (json['fieldColumns'] as num?)?.toInt().clamp(
       1,
       documentPartyFields.length,
@@ -161,6 +246,7 @@ class DocumentBlock {
     'fieldColumns': effectiveFieldColumns,
     'categoryOrder': categoryOrder,
     'fields': fields,
+    if (partyFieldsByType.isNotEmpty) 'partyFieldsByType': partyFieldsByType,
     'columnWidths': columnWidths,
   };
 }

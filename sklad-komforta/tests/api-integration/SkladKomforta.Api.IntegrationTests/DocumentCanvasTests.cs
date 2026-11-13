@@ -16,7 +16,7 @@ public sealed class DocumentCanvasTests
         Template().Validate();
         Assert.Throws<IdentityException>(() => Template(Block() with { X = -1 }).Validate());
         Assert.Throws<IdentityException>(() => Template(Block() with { Width = double.NaN }).Validate());
-        Assert.Throws<IdentityException>(() => Template(Block() with { Fields = ["passport_number"] }).Validate());
+        Assert.Throws<IdentityException>(() => Template(Block() with { Fields = ["unknown_field"] }).Validate());
         Assert.Throws<IdentityException>(() => (Template() with { Blocks = [Block(), Block()] }).Validate());
         Assert.Throws<IdentityException>(() => Template(Block() with { ColumnWidths = new Dictionary<string, double> { ["price"] = 0 } }).Validate());
     }
@@ -31,6 +31,53 @@ public sealed class DocumentCanvasTests
         Assert.Equal(["ИНН: 123", "Название: Заказчик"], content.Blocks[0].Lines);
         Assert.Empty(content.Blocks[0].Tables);
         Assert.DoesNotContain("secret", System.Text.Json.JsonSerializer.Serialize(content), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PartyProfilesSelectActualTypeAndPreserveFieldOrder()
+    {
+        var template = Template(Block("client") with
+        {
+            PartyFieldsByType = new Dictionary<string, IReadOnlyList<string>>
+            {
+                ["person"] = ["phone", "name"],
+                ["ip"] = ["ogrn", "name"],
+                ["ooo"] = ["name", "kpp"]
+            }
+        });
+        template.Validate();
+        var restored = System.Text.Json.JsonSerializer.Deserialize<DocumentTemplate>(
+            System.Text.Json.JsonSerializer.Serialize(template))!;
+        foreach (var type in new[] { "person", "ip", "ooo" })
+        {
+            var party = DocumentCanvasBuilder.Party(new
+            {
+                CompanyType = type, Name = "Тест", Phone = "123", Ogrn = "456", Kpp = "789",
+                PassportNumber = "private passport"
+            });
+            var content = DocumentCanvasBuilder.Parties(restored, party, new Dictionary<string, string?>());
+            string[] expected = type switch
+            {
+                "person" => ["Телефон: 123", "ФИО: Тест"],
+                "ip" => ["ОГРНИП: 456", "Название ИП: Тест"],
+                _ => ["Название компании: Тест", "КПП: 789"]
+            };
+            Assert.Equal(expected, content.Blocks.Single().Lines);
+            Assert.DoesNotContain("private passport", System.Text.Json.JsonSerializer.Serialize(content));
+        }
+    }
+
+    [Theory]
+    [InlineData("client", "person", "inn")]
+    [InlineData("client", "ip", "kpp")]
+    [InlineData("executor", "person", "name")]
+    [InlineData("executor", "ooo", "passport_number")]
+    public void PartyProfilesRejectFieldsOfOtherTypes(string kind, string type, string field)
+    {
+        Assert.Throws<IdentityException>(() => Template(Block(kind) with
+        {
+            PartyFieldsByType = new Dictionary<string, IReadOnlyList<string>> { [type] = [field] }
+        }).Validate());
     }
 
     [Fact]
